@@ -1,15 +1,29 @@
 #!/bin/bash
 
-# Launcher for script
-# Double-click this file on macOS to run the script in Terminal.
+# Launcher for a gift command.
+# Copy this into a folder under commands/ as `run.command` (git-ignored), edit
+# the two settings below, then double-click it on macOS to run it in Terminal.
 
-SCRIPT_WORKING_DIR=~/code/git-toolkit/list-weekly-prs
-SCRIPT_ABS_PATH=~/code/git-toolkit/list-weekly-prs/list_weekly_prs.sh
+# The gift command to run, plus any fixed arguments.
+GIFT_COMMAND=list
+GIFT_ARGS=(--repos="linktivity/ars-neo-miniapp,linktivity/wechat-mini-app")
 
-# Params (example)
-REPO="linktivity/ars-neo-miniapp,linktivity/wechat-mini-app"
+# Folder to run it in (matters for commands that act on the current directory,
+# such as `recursively-pull-repos`).
+WORKING_DIR=~/code
 
-cd "$SCRIPT_WORKING_DIR"
+cd "$WORKING_DIR" || exit 1
 
-# Execute the script (example)
-bash "$SCRIPT_ABS_PATH" --repos="$REPO" "$@"
+# Prefer the installed command; fall back to this checkout when PATH is not set
+# up (Finder does not read ~/.zshrc).
+GIFT_BIN="$HOME/.local/bin/gift"
+[ -x "$GIFT_BIN" ] || GIFT_BIN="$(dirname "$0")/../../bin/gift.js"
+
+if [ "${GIFT_BIN##*.}" = "js" ]; then
+    node "$GIFT_BIN" "$GIFT_COMMAND" "${GIFT_ARGS[@]}" "$@"
+else
+    "$GIFT_BIN" "$GIFT_COMMAND" "${GIFT_ARGS[@]}" "$@"
+fi
+
+# Keep the Terminal window open so the output stays readable.
+read -p "Press Enter to exit..."

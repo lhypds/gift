@@ -1,0 +1,23 @@
+{
+  "name": "gift",
+  "version": "0.0.1",
+  "description": "git toolkit — one command per folder, plus a GitHub webhook server",
+  "license": "MIT",
+  "bin": {
+    "gift": "bin/gift.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "commands",
+    "server",
+    "completions",
+    "VERSION"
+  ],
+  "scripts": {
+    "test": "node test/run-tests.js"
+  }
+}

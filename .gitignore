@@ -1,3 +1,13 @@
 .vscode
 .DS_Store
 *.command
+
+# Local configuration and secrets
+.env
+server/hooks.json
+
+# Build / release output
+node_modules/
+release/
+dist/
+*.log

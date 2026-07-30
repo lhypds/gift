@@ -1,0 +1,18 @@
+{
+  "host": "127.0.0.1",
+  "port": 3001,
+  "path": "/hooks/github",
+  "hooks": [
+    {
+      "name": "deploy-example",
+      "repo": "YOUR_NAME/YOUR_REPOSITORY",
+      "events": ["push"],
+      "branches": ["main"],
+      "run": "/opt/myapp/deploy.sh",
+      "args": [],
+      "cwd": "/opt/myapp",
+      "detach": false,
+      "secretEnv": "GITHUB_WEBHOOK_SECRET"
+    }
+  ]
+}
