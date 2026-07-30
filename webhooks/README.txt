@@ -33,12 +33,14 @@ Usage
 ```bash
 gift serve      # pull the latest code, then (re)start the server under PM2
 gift stop       # stop it
-gift hook       # list, create and delete hooks, and read the log
+gift hook       # list, create and delete hooks
+gift log        # the last 100 lines of the log
 ```
 
 `serve` and `stop` take no options — they run `restart.sh` and `stop.sh` from
 this folder. `gift hook` is described under "Editing hooks from the command
-line" below; it edits `hooks.json`, which the server reads at startup. The
+line" below; it edits `hooks.json`, which the server reads at startup. `gift log`
+is described under "The log". The
 server's own flags belong to `server.js`, which PM2 starts and which you can also
 run yourself:
 
@@ -166,14 +168,13 @@ hooks are not tracked, so they always start immediately.)
 Editing hooks from the command line
 -----------------------------------
 
-`hooks.json` can be edited by hand; `gift hook` does the same four things
+`hooks.json` can be edited by hand; `gift hook` does the same three things
 without opening it.
 
 ```bash
 gift hook list              # what is configured right now
 gift hook create            # add one, asking for each field
 gift hook delete [name]     # remove one, from a menu or by name
-gift hook log [lines]       # the last 100 lines of hooks.log
 ```
 
 `create` asks for the repository owner and name, the events and branches, the
@@ -220,16 +221,12 @@ commands leave everything else in the file untouched, formatting included.
 The server reads `hooks.json` once, at startup, so run `gift serve` after
 adding or deleting a hook.
 
-| Option          | Description                                                 |
-|-----------------|-------------------------------------------------------------|
-| `--config=FILE` | Work on another configuration file (`GIFT_SERVE_CONFIG`)    |
-| `--log=FILE`    | Read another log file (default: the one `hooks.json` names) |
-| `--lines=N`     | How many lines `log` prints (default: 100)                  |
-| `-y`, `--yes`   | Delete without asking for confirmation                      |
+| Option          | Description                                              |
+|-----------------|----------------------------------------------------------|
+| `--config=FILE` | Work on another configuration file (`GIFT_SERVE_CONFIG`) |
+| `-y`, `--yes`   | Delete without asking for confirmation                   |
 
-`gift hook log` prints the tail of the log and nothing else — its one-line
-header goes to stderr, so `gift hook log > deliveries.txt` holds the log alone.
-Straight after a rotation the window is filled from `hooks.log.1`.
+The log the server writes is read by `gift log`, described under "The log".
 
 
 What a hook script receives
@@ -290,6 +287,25 @@ Refused requests are recorded too, with the status that was sent back:
 `GET /health` is the one thing left out — uptime checks run every few seconds
 and would bury the deliveries. A log that cannot be written is reported once and
 then skipped; the server keeps running and keeps logging to the console.
+
+`gift log` prints the tail of it without needing to know where it is — it reads
+the file the server writes, wherever `--log`, `GIFT_SERVE_LOG` or `hooks.json`
+put it:
+
+```bash
+gift log        # the last 100 lines
+gift log 20     # fewer
+```
+
+| Option          | Description                                                 |
+|-----------------|-------------------------------------------------------------|
+| `--log=FILE`    | Read another log file (default: the one `hooks.json` names) |
+| `--lines=N`     | How many lines to print (default: 100)                      |
+| `--config=FILE` | Read the `log` setting from another configuration file      |
+
+Only the log goes to stdout — the one-line header goes to stderr, so
+`gift log > deliveries.txt` holds the log alone. Straight after a rotation the
+window is filled from `hooks.log.1`.
 
 ```bash
 tail -f webhooks/hooks.log                  # follow it
