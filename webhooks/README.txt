@@ -15,6 +15,8 @@ Files
 | `.env`               | Your local settings, the secret included (git-ignored)                  |
 | `hooks.example.json` | Example configuration; `./setup.sh` copies it to `hooks.json`           |
 | `hooks.json`         | Your local configuration (git-ignored — it points at machine paths)     |
+| `hooks.log`          | What arrived and what ran, one line each (git-ignored)                  |
+| `test-hook.sh`       | A hook script that does nothing — for checking the wiring               |
 | `ecosystem.config.cjs` | PM2 configuration; takes `PM2_NAME` and `PORT` from `.env`            |
 | `start.sh`           | Start the server under PM2                                              |
 | `stop.sh`            | Stop it                                                                 |
@@ -30,9 +32,12 @@ Usage
 ```bash
 gift serve      # pull the latest code, then (re)start the server under PM2
 gift stop       # stop it
+gift hook       # list, create and delete hooks, and read the log
 ```
 
-Neither takes options — they run `restart.sh` and `stop.sh` from this folder. The
+`serve` and `stop` take no options — they run `restart.sh` and `stop.sh` from
+this folder. `gift hook` is described under "Editing hooks from the command
+line" below; it edits `hooks.json`, which the server reads at startup. The
 server's own flags belong to `server.js`, which PM2 starts and which you can also
 run yourself:
 
@@ -46,13 +51,15 @@ node webhooks/server.js [options]
 | `--host=HOST`   | Interface to bind                            | `127.0.0.1`                  |
 | `--port=PORT`   | Port to listen on                            | `3001`                       |
 | `--path=PATH`   | Webhook endpoint path                        | `/hooks/github`              |
+| `--log=FILE`    | Log file to append to                        | `webhooks/hooks.log`         |
+| `--no-log`      | Log to the console only, writing no file     | off                          |
 | `--dry-run`     | Verify and match deliveries, but run no hook | off                          |
 | `-h`, `--help`  | Show the help message and exit               |                              |
 
 Defaults can also come from the environment (`GIFT_SERVE_HOST`, `PORT`,
-`GIFT_SERVE_PATH`, `GIFT_SERVE_CONFIG`) or from `hooks.json`. Flags win, then the
-environment, then the config file. `GIFT_SERVE_PORT` still works and takes
-precedence over `PORT` if both are set.
+`GIFT_SERVE_PATH`, `GIFT_SERVE_CONFIG`, `GIFT_SERVE_LOG`) or from `hooks.json`.
+Flags win, then the environment, then the config file. `GIFT_SERVE_PORT` still
+works and takes precedence over `PORT` if both are set.
 
 Those variables are read from this folder's `.env` — whether the server is
 started by PM2 or directly with `node webhooks/server.js` — and a value already
@@ -89,10 +96,19 @@ Configuration
 
 ```json
 {
-  "host": "127.0.0.1",
-  "port": 3001,
-  "path": "/hooks/github",
+  "log": "hooks.log",
   "hooks": [
+    {
+      "name": "test",
+      "repo": "*",
+      "events": ["*"],
+      "branches": ["*"],
+      "run": "/Users/you/code/gift/webhooks/test-hook.sh",
+      "args": [],
+      "cwd": "/Users/you/code/gift/webhooks",
+      "detach": false,
+      "secretEnv": "GITHUB_WEBHOOK_SECRET"
+    },
     {
       "name": "deploy-example",
       "repo": "YOUR_NAME/YOUR_REPOSITORY",
@@ -114,11 +130,26 @@ Configuration
 | `repo`      | `owner/repo` that may trigger this hook; `*` for any                              |
 | `events`    | GitHub event names, e.g. `push`, `pull_request`, `release`; `*` for any           |
 | `branches`  | Branch names for `push` events; empty or `*` for any                              |
-| `run`       | Absolute path (or path relative to this folder) of the script to run              |
+| `run`       | Absolute path of the `.sh` script to run — required                               |
 | `args`      | Fixed arguments for that script — never taken from the payload                    |
-| `cwd`       | Working directory for the script (default: the script's own folder)               |
+| `cwd`       | Absolute path of the directory the script runs in — required                       |
 | `detach`    | `true` keeps the script running if the server stops, at the cost of no exit log   |
 | `secretEnv` | Environment variable holding this hook's secret (default `GITHUB_WEBHOOK_SECRET`) |
+
+Outside `hooks`, only `log` is set here. `host`, `port` and `path` belong in
+`.env` — they are also accepted in this file, but the `.env` values win, so
+keeping them in both places only makes one of them a lie. They are worth setting
+here for a config used on its own (`--config=other.json` with no `.env` beside
+it) and nowhere else.
+
+`run` and `cwd` are both required, and both are absolute — `run` an absolute path
+ending in `.sh`, `cwd` an absolute directory. Nothing is resolved against the
+current directory or the checkout, so a hook runs the same script from the same
+place no matter where the server was started; a relative path is a startup error
+naming the hook, not a surprise at deploy time. That is why `hooks.example.json`
+ships placeholder paths (`/opt/myapp/deploy.sh`) rather than something inside the
+repository: an example cannot know where your checkout lives. `gift hook create`
+fills both in for you from what you type.
 
 A hook only fires when the delivery was signed with *its* secret, so several
 repositories can share one server with separate secrets.
@@ -129,6 +160,75 @@ but nothing is executed. `--dry-run` does the same with a config in place.
 While one hook is running, a new matching delivery does not start a second copy;
 it is coalesced into a single re-run after the current one finishes. (`detach`
 hooks are not tracked, so they always start immediately.)
+
+
+Editing hooks from the command line
+-----------------------------------
+
+`hooks.json` can be edited by hand; `gift hook` does the same four things
+without opening it.
+
+```bash
+gift hook list              # what is configured right now
+gift hook create            # add one, asking for each field
+gift hook delete [name]     # remove one, from a menu or by name
+gift hook log [lines]       # the last 100 lines of hooks.log
+```
+
+`create` asks for the repository owner and name, the events and branches, the
+script and its arguments, the working directory it runs in, whether to detach,
+and which environment variable holds its secret. Enter takes the `[default]`
+shown, Ctrl-C stops without writing anything, and nothing is saved until the
+summary at the end is confirmed:
+
+```
+$ gift hook create
+Adding a hook to webhooks/hooks.json.
+Enter takes the [default]; Ctrl-C stops without writing anything.
+
+Repository owner — GitHub user or organisation, * for any [*]: YOUR_NAME
+Repository name — the part after YOUR_NAME/: YOUR_REPOSITORY
+Hook name — the label it appears under in the log [deploy-your_repository]: deploy
+Events — e.g. push, pull_request, release; * for any [push]:
+Branches for push events — * for any [main]:
+Script to run — a path, relative to here is fine: /opt/myapp/deploy.sh
+Arguments for the script — blank for none:
+Working directory the script runs in [/opt/myapp]:
+Let the script keep running if the server stops (detach)? [y/N]:
+Environment variable holding this hook's webhook secret [GITHUB_WEBHOOK_SECRET]:
+
+  deploy
+    repo      YOUR_NAME/YOUR_REPOSITORY
+    events    push
+    branches  main
+    run       /opt/myapp/deploy.sh
+    cwd       /opt/myapp
+
+Add this hook to webhooks/hooks.json? [Y/n]:
+```
+
+The repository can be pasted whole — `YOUR_NAME/YOUR_REPOSITORY`, an HTTPS URL
+or an SSH remote all work, and answer `*` to the owner for any repository. Paths
+are resolved from where you are standing, and a script that is missing or not
+executable is pointed out rather than refused, since it may not be there yet.
+
+`delete` shows the hooks numbered when no name is given. A name can be
+shortened to any unique prefix, and `--yes` skips the confirmation. Both
+commands leave everything else in the file untouched, formatting included.
+
+The server reads `hooks.json` once, at startup, so run `gift serve` after
+adding or deleting a hook.
+
+| Option          | Description                                                    |
+|-----------------|----------------------------------------------------------------|
+| `--config=FILE` | Work on another configuration file (`GIFT_SERVE_CONFIG`)       |
+| `--log=FILE`    | Read another log file (default: the one `hooks.json` names)    |
+| `--lines=N`     | How many lines `log` prints (default: 100)                     |
+| `-y`, `--yes`   | Delete without asking for confirmation                         |
+
+`gift hook log` prints the tail of the log and nothing else — its one-line
+header goes to stderr, so `gift hook log > deliveries.txt` holds the log alone.
+Straight after a rotation the window is filled from `hooks.log.1`.
 
 
 What a hook script receives
@@ -152,6 +252,89 @@ environment variables instead:
 
 Treat all of them as untrusted input: never `eval` them or paste them into a
 shell command.
+
+
+The log
+-------
+
+Everything the server prints is also appended to `webhooks/hooks.log`, so a
+delivery can still be traced after a restart, when the console output has gone.
+Each request leaves a trail: what arrived, whether it verified, which hooks
+matched, exactly what was executed, whatever the script printed, and how it
+ended.
+
+```
+... info   delivery received  event=push delivery=8f3c… from=140.82.115.34 bytes=8214 signed=yes agent=GitHub-Hookshot/abc123
+... info   delivery accepted  event=push delivery=8f3c… repo=owner/repo ref=refs/heads/main branch=main commits=3 after=b2c1… sender=someone secret=GITHUB_WEBHOOK_SECRET bytes=8214
+... info   hooks matched      status=202 delivery=8f3c… hooks=test|deploy-example
+... info   running hook       hook=deploy-example delivery=8f3c… event=push repo=owner/repo branch=main run=/opt/myapp/deploy.sh cwd=/opt/myapp pid=48120 payload=/tmp/gift-webhook-8f3c….json
+... info   [deploy-example] Already up to date.
+... info   hook finished      hook=deploy-example delivery=8f3c… exit=0 ms=4210
+```
+
+Refused requests are recorded too, with the status that was sent back:
+
+```
+... warn   invalid signature           status=401 delivery=8f3c… event=push from=203.0.113.7
+... warn   request to an unknown path  status=404 method=GET path=/wp-login.php from=203.0.113.7 agent=curl/8.7.1
+```
+
+| Where           | Detail                                                                |
+|-----------------|-----------------------------------------------------------------------|
+| Default file    | `webhooks/hooks.log`, created `0600` (git-ignored)                    |
+| Somewhere else  | `--log=/var/log/gift-webhook.log`, `GIFT_SERVE_LOG`, or `log` in `hooks.json` |
+| Console only    | `--no-log`, or `GIFT_SERVE_LOG=off`                                   |
+| Rotation        | At 5 MB the file becomes `hooks.log.1`; one old file is kept          |
+
+`GET /health` is the one thing left out — uptime checks run every few seconds
+and would bury the deliveries. A log that cannot be written is reported once and
+then skipped; the server keeps running and keeps logging to the console.
+
+```bash
+tail -f webhooks/hooks.log                  # follow it
+grep 'hook finished' webhooks/hooks.log     # every run and its exit code
+grep -c 'status=401' webhooks/hooks.log     # deliveries that failed to verify
+```
+
+`pm2 logs gift-webhooks` shows the same lines live; the file is what remains
+afterwards.
+
+
+Checking the wiring
+-------------------
+
+`test-hook.sh` is a hook script that does nothing — it prints nothing, changes
+nothing, and exits `0`. Point a hook at it with `repo`, `events` and `branches`
+all set to `*`, and it fires on any delivery the secret verifies. Both paths are
+absolute, so they are yours to fill in — `pwd` in this folder prints them:
+
+```json
+{ "name": "test", "repo": "*", "events": ["*"], "branches": ["*"],
+  "run": "/Users/you/code/gift/webhooks/test-hook.sh",
+  "cwd": "/Users/you/code/gift/webhooks" }
+```
+
+```bash
+gift hook create     # asks for each field and writes the absolute paths for you
+```
+
+Use it to prove the path end to end — GitHub signed the delivery, the server
+verified it, a hook matched, a script ran — without deploying anything. The
+evidence is in the log:
+
+```bash
+gift serve
+grep 'hook=test' webhooks/hooks.log
+```
+
+```
+... info   running hook   hook=test delivery=8f3c… event=push repo=owner/repo branch=main run=…/webhooks/test-hook.sh cwd=…/webhooks pid=60885
+... info   hook finished  hook=test delivery=8f3c… exit=0 ms=12
+```
+
+GitHub's "Redeliver" button on any past delivery re-runs it. Once real hooks are
+in place the `test` hook can stay — it does nothing on every delivery, which is
+also a heartbeat — or come out of `hooks.json`.
 
 
 Configure the webhook on GitHub
@@ -185,6 +368,10 @@ gift serve --dry-run
 
 # Listen on all interfaces, custom port and path
 gift serve --host=0.0.0.0 --port=4000 --path=/hooks/gh
+
+# Log somewhere else, or nowhere
+node webhooks/server.js --log=/var/log/gift-webhook.log
+node webhooks/server.js --no-log
 ```
 
 Local testing without a public address — forward deliveries from GitHub with
@@ -305,6 +492,9 @@ server {
 
 Troubleshooting
 ---------------
+
+`webhooks/hooks.log` is the first place to look: every request is there with the
+status it was answered with, and every hook run with its exit code.
 
 Repository → Settings → Webhooks → Recent deliveries shows the headers, the
 payload, and the response for every delivery, and can redeliver any of them.

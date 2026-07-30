@@ -9,6 +9,7 @@
 //
 // Configuration: webhooks/hooks.json (see hooks.example.json).
 // Secret:        GITHUB_WEBHOOK_SECRET in webhooks/.env or the environment.
+// Log:           webhooks/hooks.log (--log=FILE, or --no-log for console only).
 'use strict';
 
 const crypto = require('node:crypto');
@@ -21,6 +22,7 @@ const { spawn } = require('node:child_process');
 const HERE = __dirname;
 const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
+const DEFAULT_LOG = path.join(HERE, 'hooks.log');
 
 // GitHub rejects payloads above 25 MB, so anything larger is not from GitHub.
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
@@ -32,19 +34,76 @@ const DEFAULTS = {
 };
 
 // ---------------------------------------------------------------- logging ---
+//
+// Every line goes to the console and, unless file logging is turned off, is
+// appended to hooks.log as well: the request that arrived, whether its
+// signature verified, which hooks matched, exactly what was executed, whatever
+// the script printed, and how it ended. That history survives a restart, which
+// is what `pm2 logs` alone does not give you.
+
+// Rotate past this size, keeping one previous file (hooks.log.1).
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+const logFile = { path: null, bytes: 0, disabled: false };
+
+/** Start appending to `file`; a falsy file leaves logging on the console only. */
+function openLog(file) {
+    logFile.path = file || null;
+    logFile.bytes = 0;
+    logFile.disabled = false;
+    if (!logFile.path) return;
+
+    try {
+        fs.mkdirSync(path.dirname(logFile.path), { recursive: true });
+        // Create it here, with a restrictive mode, so no later append can be the
+        // call that makes a world-readable log.
+        fs.appendFileSync(logFile.path, '', { mode: 0o600 });
+        logFile.bytes = fs.statSync(logFile.path).size;
+    } catch (err) {
+        logFile.disabled = true;
+        console.error(`${stamp()}  warn   cannot open ${logFile.path}: ${err.message}`);
+    }
+}
+
+function rotateLog() {
+    // rename() replaces an existing .1, so exactly one old file is kept.
+    fs.renameSync(logFile.path, `${logFile.path}.1`);
+    logFile.bytes = 0;
+}
+
+function appendLog(line) {
+    if (!logFile.path || logFile.disabled) return;
+    const bytes = Buffer.byteLength(line);
+    try {
+        if (logFile.bytes + bytes > LOG_MAX_BYTES) rotateLog();
+        fs.appendFileSync(logFile.path, line, { mode: 0o600 });
+        logFile.bytes += bytes;
+    } catch (err) {
+        // A log that cannot be written must not take the server down with it.
+        logFile.disabled = true;
+        console.error(`${stamp()}  warn   log write failed, continuing on the console only: ${err.message}`);
+    }
+}
 
 function stamp() {
     return new Date().toISOString();
 }
 
+/** Quote a field value when it would otherwise blur the key=value columns. */
+function field(value) {
+    const text = String(value);
+    return /[\s"]/.test(text) ? JSON.stringify(text) : text;
+}
+
 function log(level, message, fields = {}) {
     const extra = Object.entries(fields)
         .filter(([, value]) => value !== undefined && value !== null && value !== '')
-        .map(([key, value]) => `${key}=${value}`)
+        .map(([key, value]) => `${key}=${field(value)}`)
         .join(' ');
     const line = `${stamp()}  ${level.padEnd(5)}  ${message}${extra ? '  ' + extra : ''}`;
     if (level === 'error' || level === 'warn') console.error(line);
     else console.log(line);
+    appendLog(line + '\n');
 }
 
 // ------------------------------------------------------------------- args ---
@@ -59,6 +118,8 @@ options:
   --host=HOST      Interface to bind (default: ${DEFAULTS.host})
   --port=PORT      Port to listen on (default: ${DEFAULTS.port})
   --path=PATH      Webhook endpoint path (default: ${DEFAULTS.path})
+  --log=FILE       Log file to append to (default: webhooks/hooks.log)
+  --no-log         Log to the console only, writing no file
   --dry-run        Verify and match deliveries, but never run a hook script
   -h, --help       Show this help
 
@@ -67,6 +128,7 @@ environment (from webhooks/.env, or the real environment, which wins):
   GIFT_SERVE_HOST         Default for --host
   PORT                    Default for --port (GIFT_SERVE_PORT overrides it)
   GIFT_SERVE_PATH         Default for --path
+  GIFT_SERVE_LOG          Default for --log ('off' for no file)
 
 Health check: GET http://HOST:PORT/health`);
 }
@@ -80,6 +142,8 @@ function parseArgs(argv) {
         else if (arg.startsWith('--host=')) options.host = arg.slice(7);
         else if (arg.startsWith('--port=')) options.port = Number(arg.slice(7));
         else if (arg.startsWith('--path=')) options.path = arg.slice(7);
+        else if (arg.startsWith('--log=')) options.log = arg.slice(6);
+        else if (arg === '--no-log') options.log = 'off';
         else throw new Error(`unknown option '${arg}' (try: gift serve --help)`);
     }
     if (options.port !== undefined && !Number.isInteger(options.port)) {
@@ -101,17 +165,34 @@ function loadConfig(file) {
     }
     if (!parsed || typeof parsed !== 'object') throw new Error(`${file}: expected a JSON object`);
 
+    // Both paths a hook runs with are spelled out in full, and neither is
+    // guessed: `run` is an absolute path to a .sh script, `cwd` an absolute
+    // directory. A relative path would depend on where the server happens to
+    // have been started from, which is not something a deploy should turn on.
     const hooks = (parsed.hooks || []).map((hook, index) => {
         const name = hook.name || `hook-${index + 1}`;
-        if (!hook.run) throw new Error(`${file}: hook '${name}' has no "run" script`);
+        const bad = (message) => new Error(`${file}: hook '${name}' ${message}`);
+
+        if (!hook.run) throw bad('has no "run" script');
+        if (!path.isAbsolute(hook.run)) {
+            throw bad(`"run" must be an absolute path, not '${hook.run}'`);
+        }
+        if (!hook.run.endsWith('.sh')) {
+            throw bad(`"run" must be a .sh script, not '${hook.run}'`);
+        }
+        if (!hook.cwd) throw bad('has no "cwd" working directory');
+        if (!path.isAbsolute(hook.cwd)) {
+            throw bad(`"cwd" must be an absolute path, not '${hook.cwd}'`);
+        }
+
         return {
             name,
             repo: hook.repo || '*',
             events: hook.events && hook.events.length ? hook.events : ['push'],
             branches: hook.branches || [],
-            run: path.resolve(HERE, hook.run),
+            run: path.normalize(hook.run),
             args: hook.args || [],
-            cwd: hook.cwd ? path.resolve(HERE, hook.cwd) : undefined,
+            cwd: path.normalize(hook.cwd),
             detach: Boolean(hook.detach),
             secretEnv: hook.secretEnv || 'GITHUB_WEBHOOK_SECRET',
         };
@@ -249,7 +330,12 @@ function runHook(hook, delivery, options) {
     }
 
     if (options.dryRun) {
-        log('info', 'dry run, not executing', { hook: hook.name, run: hook.run });
+        log('info', 'dry run, not executing', {
+            hook: hook.name,
+            delivery: delivery.id,
+            run: hook.run,
+            args: hook.args.length ? hook.args.join(' ') : undefined,
+        });
         return;
     }
 
@@ -268,21 +354,45 @@ function runHook(hook, delivery, options) {
         GIFT_PAYLOAD_FILE: payloadFile,
     };
 
-    log('info', 'running hook', { hook: hook.name, run: hook.run, delivery: delivery.id });
+    // loadConfig guarantees hook.cwd for anything read from a file; the fallback
+    // is only reached by a config built in code, as the tests do.
+    const cwd = hook.cwd || path.dirname(hook.run);
+    const startedAt = Date.now();
 
     // Arguments come from hooks.json only — never from the payload — and the
     // child is spawned without a shell, so nothing can be injected.
     const child = spawn(hook.run, hook.args, {
-        cwd: hook.cwd || path.dirname(hook.run),
+        cwd,
         env: childEnv,
         detached: hook.detach,
         stdio: hook.detach ? 'ignore' : ['ignore', 'pipe', 'pipe'],
     });
 
+    // Logged after the spawn so the pid is part of the same line. A script that
+    // does not exist fails asynchronously; that shows up as 'hook failed to
+    // start' right below, with no pid here.
+    log('info', 'running hook', {
+        hook: hook.name,
+        delivery: delivery.id,
+        event: delivery.event,
+        repo: delivery.repo,
+        branch: branchOf(delivery.ref),
+        run: hook.run,
+        args: hook.args.length ? hook.args.join(' ') : undefined,
+        cwd,
+        pid: child.pid,
+        detach: hook.detach ? 'yes' : undefined,
+        payload: payloadFile,
+    });
+
     if (hook.detach) {
         child.unref();
         child.on('error', (err) => {
-            log('error', `hook failed to start: ${err.message}`, { hook: hook.name });
+            log('error', `hook failed to start: ${err.message}`, {
+                hook: hook.name,
+                delivery: delivery.id,
+                run: hook.run,
+            });
             removeQuietly(payloadFile);
         });
         // The script owns its lifetime now; give it a window to read the payload.
@@ -295,14 +405,24 @@ function runHook(hook, delivery, options) {
     pipeOutput(child.stderr, hook.name, 'warn');
 
     child.on('error', (err) => {
-        log('error', `hook failed to start: ${err.message}`, { hook: hook.name });
+        log('error', `hook failed to start: ${err.message}`, {
+            hook: hook.name,
+            delivery: delivery.id,
+            run: hook.run,
+        });
     });
 
     child.on('close', (code, signal) => {
         removeQuietly(payloadFile);
         status.running = false;
         const level = code === 0 ? 'info' : 'error';
-        log(level, 'hook finished', { hook: hook.name, code: signal || code });
+        log(level, 'hook finished', {
+            hook: hook.name,
+            delivery: delivery.id,
+            exit: signal ? undefined : code,
+            signal,
+            ms: Date.now() - startedAt,
+        });
 
         const queued = status.pending;
         if (queued) {
@@ -325,18 +445,29 @@ function send(res, status, body) {
 function createServer(config, secrets, options) {
     return http.createServer(async (req, res) => {
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const from = req.socket.remoteAddress;
 
+        // Not logged: uptime checks run every few seconds and would bury the
+        // deliveries the log exists for.
         if (req.method === 'GET' && url.pathname === '/health') {
             send(res, 200, 'ok');
             return;
         }
 
         if (url.pathname !== options.path) {
+            log('warn', 'request to an unknown path', {
+                status: 404,
+                method: req.method,
+                path: url.pathname,
+                from,
+                agent: req.headers['user-agent'],
+            });
             send(res, 404, 'Not found');
             return;
         }
 
         if (req.method !== 'POST') {
+            log('warn', 'request with the wrong method', { status: 405, method: req.method, from });
             res.setHeader('allow', 'POST');
             send(res, 405, 'Method not allowed');
             return;
@@ -346,15 +477,26 @@ function createServer(config, secrets, options) {
         const deliveryId = req.headers['x-github-delivery'];
         const signature = req.headers['x-hub-signature-256'];
 
+        // Logged before anything can reject it, so even a delivery that fails
+        // verification leaves a record of having arrived.
+        log('info', 'delivery received', {
+            event,
+            delivery: deliveryId,
+            from,
+            bytes: req.headers['content-length'],
+            signed: signature ? 'yes' : 'no',
+            agent: req.headers['user-agent'],
+        });
+
         let rawBody;
         try {
             rawBody = await readBody(req, MAX_BODY_BYTES);
         } catch (err) {
             if (err.code === 'TOO_LARGE') {
-                log('warn', 'rejected oversized payload', { delivery: deliveryId });
+                log('warn', 'rejected oversized payload', { status: 413, delivery: deliveryId, from });
                 send(res, 413, 'Payload too large');
             } else {
-                log('warn', `request read failed: ${err.message}`, { delivery: deliveryId });
+                log('warn', `request read failed: ${err.message}`, { status: 400, delivery: deliveryId });
                 if (!res.headersSent) send(res, 400, 'Bad request');
             }
             return;
@@ -363,9 +505,10 @@ function createServer(config, secrets, options) {
         const secretNames = verifySignature(rawBody, signature, secrets);
         if (secretNames.length === 0) {
             log('warn', signature ? 'invalid signature' : 'missing signature', {
+                status: 401,
                 delivery: deliveryId,
                 event,
-                from: req.socket.remoteAddress,
+                from,
             });
             send(res, 401, signature ? 'Invalid signature' : 'Missing signature');
             return;
@@ -375,7 +518,7 @@ function createServer(config, secrets, options) {
         try {
             payload = JSON.parse(rawBody.toString('utf8'));
         } catch {
-            log('warn', 'invalid JSON payload', { delivery: deliveryId, event });
+            log('warn', 'invalid JSON payload', { status: 400, delivery: deliveryId, event });
             send(res, 400, 'Invalid JSON');
             return;
         }
@@ -397,11 +540,18 @@ function createServer(config, secrets, options) {
             delivery: deliveryId,
             repo,
             ref: payload.ref,
+            branch: branchOf(payload.ref),
+            action: payload.action,
+            commits: Array.isArray(payload.commits) ? payload.commits.length : undefined,
+            after: payload.after,
             sender: delivery.sender,
+            secret: secretNames.join('|'),
+            bytes: rawBody.length,
         });
 
         // GitHub sends `ping` right after a webhook is created.
         if (event === 'ping') {
+            log('info', 'ping answered', { status: 200, delivery: deliveryId });
             send(res, 200, 'pong');
             return;
         }
@@ -411,10 +561,22 @@ function createServer(config, secrets, options) {
         );
 
         if (triggered.length === 0) {
-            log('info', 'no hook matched', { event, delivery: deliveryId, repo });
+            log('info', 'no hook matched', {
+                status: 200,
+                event,
+                delivery: deliveryId,
+                repo,
+                configured: config.hooks.length,
+            });
             send(res, 200, 'No hook matched');
             return;
         }
+
+        log('info', 'hooks matched', {
+            status: 202,
+            delivery: deliveryId,
+            hooks: triggered.map((h) => h.name).join('|'),
+        });
 
         // Answer GitHub before doing any work: deliveries time out after 10s.
         send(res, 202, `Accepted: ${triggered.map((h) => h.name).join(', ')}`);
@@ -468,9 +630,19 @@ function main(argv) {
             options.port || process.env.GIFT_SERVE_PORT || process.env.PORT || config.port || DEFAULTS.port,
         ),
         path: options.path || process.env.GIFT_SERVE_PATH || config.path || DEFAULTS.path,
+        // Blank falls through to the next source, as it does above: an empty
+        // GIFT_SERVE_LOG= in .env means "unset", not "no log".
+        log: options.log || process.env.GIFT_SERVE_LOG || config.log || DEFAULT_LOG,
         dryRun: options.dryRun,
     };
     if (!settings.path.startsWith('/')) settings.path = `/${settings.path}`;
+
+    // Turning the file off takes saying so — 'off' (--no-log passes it). Any
+    // other value is a file, resolved against this folder when it is relative.
+    const off = ['off', 'none', 'no', 'false'];
+    openLog(off.includes(String(settings.log).trim().toLowerCase())
+        ? null
+        : path.resolve(HERE, settings.log));
 
     const secrets = collectSecrets(config.hooks);
     if (secrets.size === 0) {
@@ -515,6 +687,7 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         log('info', `gift serve listening on http://${settings.host}:${settings.port}${settings.path}`);
         log('info', `health check on http://${settings.host}:${settings.port}/health`);
         log('info', `config ${configFile}`);
+        log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
         log('info', `secrets accepted from ${[...secrets.keys()].join(', ')}`);
         if (settings.dryRun) log('warn', 'dry run — hook scripts will not be executed');
         if (config.hooks.length === 0) {
@@ -547,4 +720,12 @@ if (require.main === module) {
     if (code !== 0) process.exitCode = code;
 }
 
-module.exports = { createServer, verifySignature, matches, loadConfig, collectSecrets, main };
+module.exports = {
+    createServer,
+    verifySignature,
+    matches,
+    loadConfig,
+    collectSecrets,
+    openLog,
+    main,
+};

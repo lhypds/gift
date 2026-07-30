@@ -57,7 +57,8 @@ cp "$ROOT_DIR/run.command.example" "$STAGING_DIR/"
 
 # Strip anything machine-specific that a function folder may contain.
 find "$STAGING_DIR" \
-    \( -name ".env" -o -name "hooks.json" -o -name "*.command" -o -name ".DS_Store" -o -name "*.log" \) \
+    \( -name ".env" -o -name "hooks.json" -o -name "*.command" -o -name ".DS_Store" \
+       -o -name "*.log" -o -name "*.log.[0-9]" \) \
     -delete 2>/dev/null || true
 
 chmod +x "$STAGING_DIR"/*.sh

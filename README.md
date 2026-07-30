@@ -29,6 +29,15 @@ Stop
 
 Use `hooks.json` to configure which functions run for which GitHub events.  
 
+Hooks  
+`gift hook list` shows the configured hooks.  
+`gift hook create` adds one, asking for the repository, the events, the script
+and the working directory it runs in.  
+`gift hook delete` removes one.  
+`gift hook log` prints the last 100 lines of the server log.  
+
+The server reads `hooks.json` at startup, so run `gift serve` after a change.  
+
 
 Setup
 -----

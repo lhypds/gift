@@ -5,9 +5,14 @@
 # Local configuration and secrets
 .env
 webhooks/hooks.json
+# Left behind only if `gift hook create` or `delete` dies mid-write
+webhooks/hooks.json.tmp
 
 # Build / release output
 node_modules/
 release/
 dist/
+
+# Logs, the webhook server's hooks.log and its rotated hooks.log.1 included
 *.log
+*.log.[0-9]
