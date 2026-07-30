@@ -29,7 +29,7 @@ const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
 const DEFAULTS = {
     host: '127.0.0.1',
-    port: 3001,
+    port: 3999,
     path: '/hooks/github',
 };
 

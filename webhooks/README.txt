@@ -50,7 +50,7 @@ node webhooks/server.js [options]
 |-----------------|----------------------------------------------|-----------------------|
 | `--config=FILE` | Hook configuration file                      | `webhooks/hooks.json` |
 | `--host=HOST`   | Interface to bind                            | `127.0.0.1`           |
-| `--port=PORT`   | Port to listen on                            | `3001`                |
+| `--port=PORT`   | Port to listen on                            | `3999`                |
 | `--path=PATH`   | Webhook endpoint path                        | `/hooks/github`       |
 | `--log=FILE`    | Log file to append to                        | `webhooks/hooks.log`  |
 | `--no-log`      | Log to the console only, writing no file     | off                   |
@@ -379,10 +379,10 @@ Local testing without a public address — forward deliveries from GitHub with
 the `gh` CLI:
 
 ```bash
-gh webhook forward --repo=owner/repo --events=push --url=http://127.0.0.1:3001/hooks/github
+gh webhook forward --repo=owner/repo --events=push --url=http://127.0.0.1:3999/hooks/github
 ```
 
-A tunnel (`cloudflared tunnel --url http://127.0.0.1:3001`, `ngrok http 3001`)
+A tunnel (`cloudflared tunnel --url http://127.0.0.1:3999`, `ngrok http 3999`)
 works too; use the tunnel's HTTPS address as the Payload URL.
 
 
@@ -416,7 +416,7 @@ node webhooks/server.js --dry-run
 
 ```
 PM2_NAME=gift-webhooks
-PORT=3001
+PORT=3999
 ```
 
 `PM2_NAME` is the name PM2 lists the process under, so `pm2 logs gift-webhooks`
@@ -457,7 +457,7 @@ WantedBy=multi-user.target
 
 ```
 GITHUB_WEBHOOK_SECRET=your-secret
-GIFT_SERVE_PORT=3001
+GIFT_SERVE_PORT=3999
 ```
 
 `EnvironmentFile` is the better place for a production secret — root-owned and
@@ -481,7 +481,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
 
     location /hooks/github {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:3999;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

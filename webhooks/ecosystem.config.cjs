@@ -23,7 +23,7 @@ function getEnvVar(key, defaultValue) {
 }
 
 const PM2_NAME = getEnvVar('PM2_NAME', 'gift-webhooks');
-const PORT = getEnvVar('PORT', getEnvVar('GIFT_SERVE_PORT', '3001'));
+const PORT = getEnvVar('PORT', getEnvVar('GIFT_SERVE_PORT', '3999'));
 
 module.exports = {
   apps: [

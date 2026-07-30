@@ -24,10 +24,10 @@ fi
 pm2 start ecosystem.config.cjs --update-env
 
 # Read the listener settings from .env for display
-PORT=$(grep '^PORT=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 3001)
+PORT=$(grep '^PORT=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 3999)
 HOST=$(grep '^GIFT_SERVE_HOST=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 127.0.0.1)
 HOOK_PATH=$(grep '^GIFT_SERVE_PATH=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo /hooks/github)
 
-BASE="http://${HOST:-127.0.0.1}:${PORT:-3001}"
+BASE="http://${HOST:-127.0.0.1}:${PORT:-3999}"
 echo "gift webhooks listening on ${BASE}${HOOK_PATH:-/hooks/github}"
 echo "health check: ${BASE}/health"

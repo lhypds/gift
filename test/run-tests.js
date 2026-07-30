@@ -686,7 +686,7 @@ test('a missing hooks.json reads as the defaults, and is not created by reading'
         const { config, missing } = hookCommand.readConfig(file);
         assert.strictEqual(missing, true);
         assert.deepStrictEqual(config.hooks, []);
-        assert.strictEqual(config.port, 3001);
+        assert.strictEqual(config.port, 3999);
         assert.ok(!fs.existsSync(file), 'reading created the file');
     });
 });
