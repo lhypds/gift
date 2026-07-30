@@ -50,5 +50,10 @@ Setup and install
 ./install.sh
 ```
 
+Update  
+`gift update` pulls the latest code into the folder gift is installed from.
+Fast-forward only, so local work is never merged over. Run `gift serve` afterwards
+to restart the webhooks server on it.  
+
 Uninstall  
 `./uninstall.sh`  
