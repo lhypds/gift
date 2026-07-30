@@ -34,7 +34,7 @@ Usage
 gift serve      # pull the latest code, then (re)start the server under PM2
 gift stop       # stop it
 gift hook       # list, create and delete hooks
-gift log        # the last 100 lines of the log
+gift log        # the last 100 lines of the log, then follow it live
 ```
 
 `serve` and `stop` take no options — they run `restart.sh` and `stop.sh` from
@@ -288,27 +288,32 @@ Refused requests are recorded too, with the status that was sent back:
 and would bury the deliveries. A log that cannot be written is reported once and
 then skipped; the server keeps running and keeps logging to the console.
 
-`gift log` prints the tail of it without needing to know where it is — it reads
-the file the server writes, wherever `--log`, `GIFT_SERVE_LOG` or `hooks.json`
-put it:
+`gift log` follows it without needing to know where it is — it reads the file the
+server writes, wherever `--log`, `GIFT_SERVE_LOG` or `hooks.json` put it, prints
+the last lines and then stays open, printing each new one as it arrives:
 
 ```bash
-gift log        # the last 100 lines
-gift log 20     # fewer
+gift log                # the last 100 lines, then follow until Ctrl-C
+gift log 20             # start with fewer
+gift log --no-follow    # print them and stop
 ```
 
 | Option          | Description                                                 |
 |-----------------|-------------------------------------------------------------|
+| `--no-follow`   | Print the lines and stop, for a pipe or a script            |
 | `--log=FILE`    | Read another log file (default: the one `hooks.json` names) |
-| `--lines=N`     | How many lines to print (default: 100)                      |
+| `--lines=N`     | How many lines to start with (default: 100)                 |
 | `--config=FILE` | Read the `log` setting from another configuration file      |
 
+Following is `tail -F`, so the rotation at 5 MB is followed into the new
+`hooks.log` rather than holding the old file open, and a log that does not exist
+yet is waited for — `gift log` before `gift serve` works. Straight after a
+rotation the opening window is filled from `hooks.log.1`.
+
 Only the log goes to stdout — the one-line header goes to stderr, so
-`gift log > deliveries.txt` holds the log alone. Straight after a rotation the
-window is filled from `hooks.log.1`.
+`gift log --no-follow > deliveries.txt` holds the log alone.
 
 ```bash
-tail -f webhooks/hooks.log                  # follow it
 grep 'hook finished' webhooks/hooks.log     # every run and its exit code
 grep -c 'status=401' webhooks/hooks.log     # deliveries that failed to verify
 ```

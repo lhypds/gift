@@ -38,7 +38,9 @@ and the working directory it runs in.
 The server reads `hooks.json` at startup, so run `gift serve` after a change.  
 
 Log  
-`gift log` prints the last 100 lines of the server log, `gift log 20` fewer.  
+`gift log` prints the last 100 lines of the server log — `gift log 20` fewer —
+and then keeps watching, printing each line as the server writes it. Ctrl-C
+stops. `gift log --no-follow` prints the lines and exits.  
 
 
 Setup
