@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a source-tree release zip and hand off to release_gh.sh to publish it on
 # GitHub. The archive contains everything ./setup.sh and ./install.sh need in a
-# fresh checkout: bin/, lib/, completions/, commands/, webhooks/, and the
-# top-level scripts. Local config (.env, webhooks/hooks.json) is never shipped.
+# fresh checkout: bin/, lib/, functions/, webhooks/, and the top-level scripts.
+# Local config (.env, webhooks/hooks.json) is never shipped.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,13 +30,12 @@ echo "Cleared previous release artifacts."
 
 echo "==> Staging release files in $STAGING_DIR"
 
-# The CLI itself, every command folder, the webhook server, and the tests
-cp -R "$ROOT_DIR/bin"         "$STAGING_DIR/bin"
-cp -R "$ROOT_DIR/lib"         "$STAGING_DIR/lib"
-cp -R "$ROOT_DIR/completions" "$STAGING_DIR/completions"
-cp -R "$ROOT_DIR/commands"    "$STAGING_DIR/commands"
-cp -R "$ROOT_DIR/webhooks"    "$STAGING_DIR/webhooks"
-cp -R "$ROOT_DIR/test"        "$STAGING_DIR/test"
+# The CLI itself, every function folder, the webhook server, and the tests
+cp -R "$ROOT_DIR/bin"       "$STAGING_DIR/bin"
+cp -R "$ROOT_DIR/lib"       "$STAGING_DIR/lib"
+cp -R "$ROOT_DIR/functions" "$STAGING_DIR/functions"
+cp -R "$ROOT_DIR/webhooks"  "$STAGING_DIR/webhooks"
+cp -R "$ROOT_DIR/test"      "$STAGING_DIR/test"
 
 # Top-level scripts and project files
 cp "$ROOT_DIR/setup.sh"     "$STAGING_DIR/"
@@ -56,7 +55,7 @@ cp "$ROOT_DIR/run.command.example" "$STAGING_DIR/"
 [ -f "$ROOT_DIR/.env.example" ] && cp "$ROOT_DIR/.env.example" "$STAGING_DIR/"
 [ -f "$ROOT_DIR/.gitignore"   ] && cp "$ROOT_DIR/.gitignore"   "$STAGING_DIR/"
 
-# Strip anything machine-specific that a command folder may contain.
+# Strip anything machine-specific that a function folder may contain.
 find "$STAGING_DIR" \
     \( -name ".env" -o -name "hooks.json" -o -name "*.command" -o -name ".DS_Store" -o -name "*.log" \) \
     -delete 2>/dev/null || true

@@ -11,7 +11,7 @@ Files
 | File                        | Description                                                                |
 |-----------------------------|-----------------------------------------------------------------------------|
 | `recursively-pull-repos.sh` | Core logic script — run through `gift recur`, or directly from the terminal |
-| `.env.example`              | Template for this command's own settings — copied to `.env` by `./setup.sh` |
+| `.env.example`              | Template for this function's own settings — copied to `.env` by `./setup.sh` |
 | `run.command`               | macOS double-clickable launcher                                            |
 
 `run.command` is git-ignored; copy `../../run.command.example` and edit it.
@@ -26,11 +26,11 @@ gift recur [--dir=PATH] [options]
 
 (`gift recur` is the short form of `gift recursively-pull-repos`.)
 
-The command searches one directory recursively for `.git` folders and runs
+The function searches one directory recursively for `.git` folders and runs
 `git pull --recurse-submodules --autostash` in each repository root. That
 directory is **your current directory**, unless `--dir` or `GIFT_PULL_DIR`
 names another one — so either `cd` to the folder holding your repos, or set it
-once in `.env` and run the command from anywhere.
+once in `.env` and run the function from anywhere.
 
 
 Parameters

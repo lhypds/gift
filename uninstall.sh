@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Remove the global gift launcher and the completion scripts installed by
-# ./install.sh. Nothing inside this checkout is touched.
+# Remove the global gift launcher installed by ./install.sh, plus the shell
+# completion files older versions used to install. Nothing inside this checkout
+# is touched.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +23,7 @@ else
     echo "(no launcher at $LAUNCHER)"
 fi
 
+# gift no longer ships completions; these are leftovers from an older install.
 for completion in "$ZSH_COMPLETION" "$BASH_COMPLETION"; do
     if [ -f "$completion" ] && grep -qF "gift-completion" "$completion"; then
         echo "==> Removing $completion"
@@ -31,7 +33,7 @@ for completion in "$ZSH_COMPLETION" "$BASH_COMPLETION"; do
     fi
 done
 
-# The block install.sh appended to ~/.zshrc, delimited by its own markers.
+# The block an older install.sh appended to ~/.zshrc, by its own markers.
 if [ -f "$ZSHRC" ] && grep -qF "$RC_BEGIN" "$ZSHRC"; then
     echo "==> Removing the gift completion block from $ZSHRC"
     TMP_RC="$(mktemp)"
@@ -51,7 +53,4 @@ Uninstall complete.
 Local files kept in the checkout (delete them by hand if you want them gone):
     $ROOT_DIR/.env
     $ROOT_DIR/webhooks/hooks.json
-
-Shells that are already open keep the old completion until they restart:
-    exec zsh
 EOF

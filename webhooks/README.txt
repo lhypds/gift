@@ -28,7 +28,16 @@ Usage
 -----
 
 ```bash
-gift serve [options]
+gift serve      # pull the latest code, then (re)start the server under PM2
+gift stop       # stop it
+```
+
+Neither takes options — they run `restart.sh` and `stop.sh` from this folder. The
+server's own flags belong to `server.js`, which PM2 starts and which you can also
+run yourself:
+
+```bash
+node webhooks/server.js [options]
 ```
 
 | Option          | Description                                  | Default                      |
@@ -46,8 +55,8 @@ environment, then the config file. `GIFT_SERVE_PORT` still works and takes
 precedence over `PORT` if both are set.
 
 Those variables are read from this folder's `.env` — whether the server is
-started by `gift serve` or directly with `node webhooks/server.js` — and a value
-already present in the real environment overrides the file.
+started by PM2 or directly with `node webhooks/server.js` — and a value already
+present in the real environment overrides the file.
 
 The server also answers `GET /health` with `ok`, which is handy for uptime checks
 and for confirming a reverse proxy is wired up correctly.
@@ -192,12 +201,27 @@ works too; use the tunnel's HTTPS address as the Payload URL.
 Running it as a service
 -----------------------
 
-PM2 — the scripts in this folder:
+PM2 — through the CLI:
+
+```bash
+gift serve      # pull the latest code, then (re)start under PM2
+gift stop       # stop it
+```
+
+or the scripts in this folder, which are what those two run:
 
 ```bash
 ./start.sh      # pm2 start ecosystem.config.cjs --update-env
 ./stop.sh       # pm2 stop $PM2_NAME
 ./restart.sh    # git pull --ff-only, then stop and start
+```
+
+`gift serve` runs `restart.sh`, so it always deploys the current remote before
+starting. To run the server attached to the terminal instead — which is what the
+`--dry-run`, `--port` and `--config` flags above are for — start it directly:
+
+```bash
+node webhooks/server.js --dry-run
 ```
 
 `ecosystem.config.cjs` takes two settings from this folder's `.env`:

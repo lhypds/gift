@@ -11,8 +11,8 @@ Files
 
 | File                 | Description                                                                     |
 |----------------------|---------------------------------------------------------------------------------|
-| `list_weekly_prs.sh` | Core logic script — run through `gift list`, or directly from the terminal      |
-| `.env.example`       | Template for this command's own settings — copied to `.env` by `./setup.sh`      |
+| `list_weekly_prs.sh` | Core logic script — run through `gift list-weekly-prs`, or from the terminal    |
+| `.env.example`       | Template for this function's own settings — copied to `.env` by `./setup.sh`     |
 | `run.command`        | macOS double-clickable launcher — calls the script with preconfigured repos     |
 
 `run.command` is git-ignored; copy `../../run.command.example` and edit it.

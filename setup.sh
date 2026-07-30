@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Preparation for ./install.sh: check Node.js >= 18, check the tools the
-# commands need, and create the local config files (.env, webhooks/hooks.json).
+# functions need, and create the local config files (.env, webhooks/hooks.json).
 # Does not install the global `gift` command — run ./install.sh after this.
 set -euo pipefail
 
@@ -30,7 +30,7 @@ fi
 echo "==> Using $($NODE --version) ($(command -v "$NODE"))"
 echo "==> No third-party packages to install (gift uses only the Node standard library)"
 
-echo "==> Checking the tools the commands use"
+echo "==> Checking the tools the functions use"
 for tool in git gh jq; do
     if command -v "$tool" >/dev/null 2>&1; then
         echo "    ok       $tool"
@@ -44,9 +44,9 @@ for tool in git gh jq; do
     fi
 done
 
-# The shared .env, plus one per command folder that ships an example — settings
-# only a single command reads live next to that command.
-for example in .env.example commands/*/.env.example webhooks/.env.example; do
+# The shared .env, plus one per function folder that ships an example — settings
+# only a single function reads live next to that function.
+for example in .env.example functions/*/.env.example webhooks/.env.example; do
     [ -f "$example" ] || continue
     target="${example%.example}"
     if [ ! -f "$target" ]; then
@@ -73,7 +73,7 @@ cat <<EOF
 
 Setup complete — ready for ./install.sh
 
-Next step (installs the global \`gift\` command and shell completion):
+Next step (installs the global \`gift\` command):
     ./install.sh
 
 Before using \`gift serve\`, set GITHUB_WEBHOOK_SECRET in webhooks/.env:

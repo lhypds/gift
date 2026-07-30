@@ -21,7 +21,7 @@ Options:
 This script searches a directory recursively for directories named .git (i.e.
 git repositories) and runs 'git pull --recurse-submodules --autostash' in each
 repository's root. Without --dir it searches the current directory, unless
-GIFT_PULL_DIR is set in this command's .env.
+GIFT_PULL_DIR is set in this function's .env.
 USAGE
 }
 

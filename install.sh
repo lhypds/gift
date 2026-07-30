@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Run ./setup.sh first. Adds ~/.local/bin/gift (a wrapper around bin/gift.js in
-# this checkout) and installs the zsh/bash completion scripts.
+# Run ./setup.sh first. Adds ~/.local/bin/gift, a wrapper around bin/gift.js in
+# this checkout.
 #
-#   ./install.sh                   install command + completions
-#   ./install.sh --no-completions  install the command only
-#   ./install.sh --no-rc           install completions, but do not touch ~/.zshrc
+#   ./install.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,20 +12,12 @@ MIN_NODE_MAJOR=18
 LAUNCHER_DIR="$HOME/.local/bin"
 LAUNCHER="$LAUNCHER_DIR/gift"
 MARKER="# gift-launcher:REPO=$ROOT_DIR"
-ZSH_COMPLETION_DIR="$HOME/.local/share/zsh/site-functions"
-BASH_COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
-RC_BEGIN="# >>> gift completion >>>"
-RC_END="# <<< gift completion <<<"
 
-WITH_COMPLETIONS=1
-WITH_RC=1
 for arg in "$@"; do
     case "$arg" in
-        --no-completions) WITH_COMPLETIONS=0 ;;
-        --no-rc) WITH_RC=0 ;;
         -h|--help)
-            sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -81,42 +71,6 @@ EOF
 chmod +x "$LAUNCHER"
 chmod +x "$ROOT_DIR/bin/gift.js"
 
-RC_ADDED=0
-if [ "$WITH_COMPLETIONS" -eq 1 ]; then
-    echo "==> Installing zsh completion to $ZSH_COMPLETION_DIR/_gift"
-    mkdir -p "$ZSH_COMPLETION_DIR"
-    cp "$ROOT_DIR/completions/_gift" "$ZSH_COMPLETION_DIR/_gift"
-
-    echo "==> Installing bash completion to $BASH_COMPLETION_DIR/gift"
-    mkdir -p "$BASH_COMPLETION_DIR"
-    cp "$ROOT_DIR/completions/gift.bash" "$BASH_COMPLETION_DIR/gift"
-
-    # Dropping the file into a directory is not enough on its own: it only gets
-    # picked up if that directory is on zsh's fpath *before* compinit runs, and
-    # `compinit -C` (a common speed-up) skips the scan for new files entirely.
-    # Sourcing the file after compinit avoids depending on either.
-    if [ "$WITH_RC" -eq 1 ]; then
-        if [ ! -e "$ZSHRC" ] || ! grep -qF "$RC_BEGIN" "$ZSHRC"; then
-            echo "==> Enabling zsh completion in $ZSHRC"
-            {
-                # Separate the block from what precedes it, without stacking
-                # blank lines when install/uninstall is run repeatedly.
-                [ -n "$(tail -n 1 "$ZSHRC" 2>/dev/null || true)" ] && echo ""
-                echo "$RC_BEGIN"
-                echo "# Added by gift's install.sh. Remove this block with ./uninstall.sh"
-                echo "if (( ! \$+functions[compdef] )); then"
-                echo "    autoload -Uz compinit && compinit -C"
-                echo "fi"
-                echo "[ -f \"$ZSH_COMPLETION_DIR/_gift\" ] && source \"$ZSH_COMPLETION_DIR/_gift\""
-                echo "$RC_END"
-            } >>"$ZSHRC"
-            RC_ADDED=1
-        else
-            echo "==> zsh completion already enabled in $ZSHRC"
-        fi
-    fi
-fi
-
 echo ""
 echo "Install complete. \`gift\` runs from:"
 echo "  $LAUNCHER"
@@ -132,20 +86,6 @@ case ":$PATH:" in
         ;;
 esac
 
-if [ "$WITH_COMPLETIONS" -eq 1 ]; then
-    if [ "$WITH_RC" -eq 0 ]; then
-        echo "Completion files are installed but not enabled (--no-rc). Add to $ZSHRC:"
-        echo "  source \"$ZSH_COMPLETION_DIR/_gift\""
-        echo ""
-    elif [ "$RC_ADDED" -eq 1 ]; then
-        echo "Tab completion is enabled for new shells. To use it in this one:"
-        echo "  exec zsh"
-        echo ""
-    else
-        echo "Tab completion: type \`gift \` and press Tab."
-        echo ""
-    fi
-fi
-
 echo "Try it:"
 echo "  gift help"
+echo "  gift run"

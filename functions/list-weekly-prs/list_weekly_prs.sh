@@ -13,8 +13,8 @@ AUTHOR="${GIFT_AUTHOR:-}"
 WEEKS_AGO=""
 VERBOSE=false
 
-# Pause only when launched by double-clicking run.command; `gift list` sets
-# GIFT_NO_PAUSE so the command returns to the prompt like any other.
+# Pause only when launched by double-clicking run.command; the CLI sets
+# GIFT_NO_PAUSE so the function returns to the prompt like any other.
 pause() {
     [ -n "${GIFT_NO_PAUSE:-}" ] && return 0
     read -p "Press Enter to exit..."
@@ -51,7 +51,7 @@ for arg in "$@"; do
     esac
 done
 
-# Fall back to the repositories configured in this command's .env
+# Fall back to the repositories configured in this function's .env
 if [ ${#REPOS[@]} -eq 0 ] && [ -n "${GIFT_REPOS:-}" ]; then
     IFS=',' read -ra REPOS <<< "$GIFT_REPOS"
 fi
@@ -59,7 +59,7 @@ fi
 # Validate repos
 if [ ${#REPOS[@]} -eq 0 ]; then
     echo "Error: No repositories specified."
-    echo "  Pass --repos=owner/repo1,owner/repo2, or set GIFT_REPOS in this command's .env"
+    echo "  Pass --repos=owner/repo1,owner/repo2, or set GIFT_REPOS in this function's .env"
     pause
     exit 1
 fi
@@ -67,7 +67,7 @@ fi
 # Validate author
 if [ -z "$AUTHOR" ]; then
     echo "Error: No author specified."
-    echo "  Pass --author=login, or set GIFT_AUTHOR in this command's .env"
+    echo "  Pass --author=login, or set GIFT_AUTHOR in this function's .env"
     pause
     exit 1
 fi

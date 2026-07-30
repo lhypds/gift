@@ -1,7 +1,7 @@
 {
   "name": "gift",
   "version": "0.0.1",
-  "description": "git toolkit — one command per folder, plus a GitHub webhook server",
+  "description": "git functions — one function per folder, plus a GitHub webhook server",
   "license": "MIT",
   "bin": {
     "gift": "bin/gift.js"
@@ -12,9 +12,8 @@
   "files": [
     "bin",
     "lib",
-    "commands",
+    "functions",
     "webhooks",
-    "completions",
     "VERSION"
   ],
   "scripts": {
