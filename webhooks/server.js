@@ -473,7 +473,15 @@ function createServer(config, secrets, options) {
             return;
         }
 
-        if (url.pathname !== options.path) {
+        // A delivery is recognised by its X-GitHub-Event header, not only by the
+        // path it arrives on. A Payload URL entered without one — just
+        // `http://host:3999` — reaches the server at `/`, and answering that 404
+        // wastes a delivery over a detail the signature check does not depend on.
+        // The configured path stays the endpoint the docs and proxies use; it is
+        // a label rather than a gate, and anything else off it is still 404.
+        const delivered = req.method === 'POST' && req.headers['x-github-event'] !== undefined;
+
+        if (url.pathname !== options.path && !delivered) {
             log('warn', 'request to an unknown path', {
                 status: 404,
                 method: req.method,
@@ -483,6 +491,17 @@ function createServer(config, secrets, options) {
             });
             send(res, 404, 'Not found');
             return;
+        }
+
+        if (url.pathname !== options.path) {
+            // A line each time: the delivery is handled, but the Payload URL is
+            // not the endpoint this server documents, and that is worth fixing.
+            log('warn', 'delivery on an unexpected path', {
+                path: url.pathname,
+                expected: options.path,
+                from,
+                hint: `set the webhook Payload URL to end in ${options.path}`,
+            });
         }
 
         if (req.method !== 'POST') {

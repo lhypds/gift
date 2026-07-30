@@ -372,12 +372,14 @@ Events:       Just the push event
 Active:       checked
 ```
 
-The Payload URL must carry the path — `/hooks/github`, or whatever `--path` says.
-A URL without one (`https://your-domain.com`) reaches the server at `/` and is
-answered `404`, logged as `request to an unknown path`. That is the first thing to
-check when Recent deliveries show a `404`.
+Neither of the first two lines has to be exact. A delivery is recognised by its
+`X-GitHub-Event` header, so a Payload URL without the path
+(`https://your-domain.com`) still arrives; the log says `delivery on an unexpected
+path` and names the one to put in the URL. The path is what the docs, the proxy
+configuration and `/health` use, and anything that is not a delivery is still
+answered `404` off it — the signature, not the path, is what protects the endpoint.
 
-Either content type works: `application/json` sends the payload as the body,
+Either content type works too: `application/json` sends the payload as the body,
 `application/x-www-form-urlencoded` sends the same JSON as a `payload` field, and
 the server reads both. JSON is the one to pick — it is what GitHub's own examples
 use, and the body is the payload rather than a wrapper around it.
@@ -536,7 +538,7 @@ payload, and the response for every delivery, and can redeliver any of them.
 | 200 / 202 | Accepted (`200` also means no hook matched, or a `ping`)         |
 | 400       | The body did not parse — the log line names the content type     |
 | 401       | Missing or invalid signature — the secrets do not match          |
-| 404       | Wrong path — check the Payload URL, `--path` and the proxy       |
+| 404       | Not a delivery and not on the endpoint path — check the proxy    |
 | 405       | Reached the endpoint with something other than POST              |
 | 413       | Payload above 25 MB                                              |
 | 502       | The server is not running behind the proxy                       |
