@@ -2,11 +2,11 @@
   "log": "hooks.log",
   "hooks": [
     {
-      "name": "deploy-example",
+      "name": "restart-example",
       "repo": "YOUR_NAME/YOUR_REPOSITORY",
       "events": ["push"],
       "branches": ["main"],
-      "run": "/opt/myapp/deploy.sh",
+      "run": "/opt/myapp/some.sh",
       "args": [],
       "cwd": "/opt/myapp",
       "detach": false,

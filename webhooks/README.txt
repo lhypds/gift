@@ -1,3 +1,4 @@
+
 webhooks
 ========
 
@@ -8,19 +9,19 @@ Receive GitHub webhooks and run local scripts when a delivery matches.
 Files
 -----
 
-| File                 | Description                                                             |
-|----------------------|-------------------------------------------------------------------------|
-| `server.js`          | The webhook server — started by `gift serve`                            |
-| `.env.example`       | Template for the secret and listener defaults; `./setup.sh` copies it   |
-| `.env`               | Your local settings, the secret included (git-ignored)                  |
-| `hooks.example.json` | Example configuration; `./setup.sh` copies it to `hooks.json`           |
-| `hooks.json`         | Your local configuration (git-ignored — it points at machine paths)     |
-| `hooks.log`          | What arrived and what ran, one line each (git-ignored)                  |
-| `test-hook.sh`       | A hook script that does nothing — for checking the wiring               |
+| File                   | Description                                                           |
+|------------------------|-----------------------------------------------------------------------|
+| `server.js`            | The webhook server — started by `gift serve`                          |
+| `.env.example`         | Template for the secret and listener defaults; `./setup.sh` copies it |
+| `.env`                 | Your local settings, the secret included (git-ignored)                |
+| `hooks.example.json`   | Example configuration; `./setup.sh` copies it to `hooks.json`         |
+| `hooks.json`           | Your local configuration (git-ignored — it points at machine paths)   |
+| `hooks.log`            | What arrived and what ran, one line each (git-ignored)                |
+| `test-hook.sh`         | A hook script that does nothing — for checking the wiring             |
 | `ecosystem.config.cjs` | PM2 configuration; takes `PM2_NAME` and `PORT` from `.env`            |
-| `start.sh`           | Start the server under PM2                                              |
-| `stop.sh`            | Stop it                                                                 |
-| `restart.sh`         | Pull the latest code, then stop and start                               |
+| `start.sh`             | Start the server under PM2                                            |
+| `stop.sh`              | Stop it                                                               |
+| `restart.sh`           | Pull the latest code, then stop and start                             |
 
 Everything `gift serve` needs lives in this folder; the rest of the repo holds
 no server configuration.
@@ -45,16 +46,16 @@ run yourself:
 node webhooks/server.js [options]
 ```
 
-| Option          | Description                                  | Default                      |
-|-----------------|----------------------------------------------|------------------------------|
-| `--config=FILE` | Hook configuration file                      | `webhooks/hooks.json`         |
-| `--host=HOST`   | Interface to bind                            | `127.0.0.1`                  |
-| `--port=PORT`   | Port to listen on                            | `3001`                       |
-| `--path=PATH`   | Webhook endpoint path                        | `/hooks/github`              |
-| `--log=FILE`    | Log file to append to                        | `webhooks/hooks.log`         |
-| `--no-log`      | Log to the console only, writing no file     | off                          |
-| `--dry-run`     | Verify and match deliveries, but run no hook | off                          |
-| `-h`, `--help`  | Show the help message and exit               |                              |
+| Option          | Description                                  | Default               |
+|-----------------|----------------------------------------------|-----------------------|
+| `--config=FILE` | Hook configuration file                      | `webhooks/hooks.json` |
+| `--host=HOST`   | Interface to bind                            | `127.0.0.1`           |
+| `--port=PORT`   | Port to listen on                            | `3001`                |
+| `--path=PATH`   | Webhook endpoint path                        | `/hooks/github`       |
+| `--log=FILE`    | Log file to append to                        | `webhooks/hooks.log`  |
+| `--no-log`      | Log to the console only, writing no file     | off                   |
+| `--dry-run`     | Verify and match deliveries, but run no hook | off                   |
+| `-h`, `--help`  | Show the help message and exit               |                       |
 
 Defaults can also come from the environment (`GIFT_SERVE_HOST`, `PORT`,
 `GIFT_SERVE_PATH`, `GIFT_SERVE_CONFIG`, `GIFT_SERVE_LOG`) or from `hooks.json`.
@@ -132,7 +133,7 @@ Configuration
 | `branches`  | Branch names for `push` events; empty or `*` for any                              |
 | `run`       | Absolute path of the `.sh` script to run — required                               |
 | `args`      | Fixed arguments for that script — never taken from the payload                    |
-| `cwd`       | Absolute path of the directory the script runs in — required                       |
+| `cwd`       | Absolute path of the directory the script runs in — required                      |
 | `detach`    | `true` keeps the script running if the server stops, at the cost of no exit log   |
 | `secretEnv` | Environment variable holding this hook's secret (default `GITHUB_WEBHOOK_SECRET`) |
 
@@ -191,7 +192,7 @@ Repository name — the part after YOUR_NAME/: YOUR_REPOSITORY
 Hook name — the label it appears under in the log [deploy-your_repository]: deploy
 Events — e.g. push, pull_request, release; * for any [push]:
 Branches for push events — * for any [main]:
-Script to run — a path, relative to here is fine: /opt/myapp/deploy.sh
+Script to run — an absolute path: /opt/myapp/deploy.sh
 Arguments for the script — blank for none:
 Working directory the script runs in [/opt/myapp]:
 Let the script keep running if the server stops (detach)? [y/N]:
@@ -219,12 +220,12 @@ commands leave everything else in the file untouched, formatting included.
 The server reads `hooks.json` once, at startup, so run `gift serve` after
 adding or deleting a hook.
 
-| Option          | Description                                                    |
-|-----------------|----------------------------------------------------------------|
-| `--config=FILE` | Work on another configuration file (`GIFT_SERVE_CONFIG`)       |
-| `--log=FILE`    | Read another log file (default: the one `hooks.json` names)    |
-| `--lines=N`     | How many lines `log` prints (default: 100)                     |
-| `-y`, `--yes`   | Delete without asking for confirmation                         |
+| Option          | Description                                                 |
+|-----------------|-------------------------------------------------------------|
+| `--config=FILE` | Work on another configuration file (`GIFT_SERVE_CONFIG`)    |
+| `--log=FILE`    | Read another log file (default: the one `hooks.json` names) |
+| `--lines=N`     | How many lines `log` prints (default: 100)                  |
+| `-y`, `--yes`   | Delete without asking for confirmation                      |
 
 `gift hook log` prints the tail of the log and nothing else — its one-line
 header goes to stderr, so `gift hook log > deliveries.txt` holds the log alone.
@@ -237,18 +238,18 @@ What a hook script receives
 Nothing from the payload is ever placed on a command line. Fields arrive as
 environment variables instead:
 
-| Variable            | Example                                    |
-|---------------------|--------------------------------------------|
-| `GIFT_HOOK`         | `deploy-example`                           |
-| `GIFT_EVENT`        | `push`                                     |
-| `GIFT_DELIVERY`     | `72d3162e-cc78-11e3-81ab-4c9367dc0958`     |
-| `GIFT_REPO`         | `YOUR_NAME/YOUR_REPOSITORY`                |
-| `GIFT_REF`          | `refs/heads/main`                          |
-| `GIFT_BRANCH`       | `main`                                     |
-| `GIFT_BEFORE`       | commit SHA before the push                 |
-| `GIFT_AFTER`        | commit SHA after the push                  |
-| `GIFT_SENDER`       | GitHub login that triggered the delivery   |
-| `GIFT_PAYLOAD_FILE` | Path to the full JSON payload (mode 0600)  |
+| Variable            | Example                                   |
+|---------------------|-------------------------------------------|
+| `GIFT_HOOK`         | `deploy-example`                          |
+| `GIFT_EVENT`        | `push`                                    |
+| `GIFT_DELIVERY`     | `72d3162e-cc78-11e3-81ab-4c9367dc0958`    |
+| `GIFT_REPO`         | `YOUR_NAME/YOUR_REPOSITORY`               |
+| `GIFT_REF`          | `refs/heads/main`                         |
+| `GIFT_BRANCH`       | `main`                                    |
+| `GIFT_BEFORE`       | commit SHA before the push                |
+| `GIFT_AFTER`        | commit SHA after the push                 |
+| `GIFT_SENDER`       | GitHub login that triggered the delivery  |
+| `GIFT_PAYLOAD_FILE` | Path to the full JSON payload (mode 0600) |
 
 Treat all of them as untrusted input: never `eval` them or paste them into a
 shell command.
@@ -279,12 +280,12 @@ Refused requests are recorded too, with the status that was sent back:
 ... warn   request to an unknown path  status=404 method=GET path=/wp-login.php from=203.0.113.7 agent=curl/8.7.1
 ```
 
-| Where           | Detail                                                                |
-|-----------------|-----------------------------------------------------------------------|
-| Default file    | `webhooks/hooks.log`, created `0600` (git-ignored)                    |
-| Somewhere else  | `--log=/var/log/gift-webhook.log`, `GIFT_SERVE_LOG`, or `log` in `hooks.json` |
-| Console only    | `--no-log`, or `GIFT_SERVE_LOG=off`                                   |
-| Rotation        | At 5 MB the file becomes `hooks.log.1`; one old file is kept          |
+| Where          | Detail                                                                        |
+|----------------|-------------------------------------------------------------------------------|
+| Default file   | `webhooks/hooks.log`, created `0600` (git-ignored)                            |
+| Somewhere else | `--log=/var/log/gift-webhook.log`, `GIFT_SERVE_LOG`, or `log` in `hooks.json` |
+| Console only   | `--no-log`, or `GIFT_SERVE_LOG=off`                                           |
+| Rotation       | At 5 MB the file becomes `hooks.log.1`; one old file is kept                  |
 
 `GET /health` is the one thing left out — uptime checks run every few seconds
 and would bury the deliveries. A log that cannot be written is reported once and
@@ -499,14 +500,14 @@ status it was answered with, and every hook run with its exit code.
 Repository → Settings → Webhooks → Recent deliveries shows the headers, the
 payload, and the response for every delivery, and can redeliver any of them.
 
-| Status    | Meaning                                                          |
-|-----------|------------------------------------------------------------------|
-| 200 / 202 | Accepted (`200` also means no hook matched, or a `ping`)         |
-| 401       | Missing or invalid signature — the secrets do not match          |
-| 404       | Wrong path — check `--path` and the proxy configuration          |
-| 405       | Reached the endpoint with something other than POST              |
-| 413       | Payload above 25 MB                                              |
-| 502       | The server is not running behind the proxy                       |
+| Status    | Meaning                                                  |
+|-----------|----------------------------------------------------------|
+| 200 / 202 | Accepted (`200` also means no hook matched, or a `ping`) |
+| 401       | Missing or invalid signature — the secrets do not match  |
+| 404       | Wrong path — check `--path` and the proxy configuration  |
+| 405       | Reached the endpoint with something other than POST      |
+| 413       | Payload above 25 MB                                      |
+| 502       | The server is not running behind the proxy               |
 
 
 Requirements
