@@ -372,6 +372,16 @@ Events:       Just the push event
 Active:       checked
 ```
 
+The Payload URL must carry the path — `/hooks/github`, or whatever `--path` says.
+A URL without one (`https://your-domain.com`) reaches the server at `/` and is
+answered `404`, logged as `request to an unknown path`. That is the first thing to
+check when Recent deliveries show a `404`.
+
+Either content type works: `application/json` sends the payload as the body,
+`application/x-www-form-urlencoded` sends the same JSON as a `payload` field, and
+the server reads both. JSON is the one to pick — it is what GitHub's own examples
+use, and the body is the payload rather than a wrapper around it.
+
 GitHub sends a `ping` delivery right away; the server answers `pong`.
 
 Deliveries must be answered within 10 seconds, so the server replies `202`
@@ -521,14 +531,19 @@ status it was answered with, and every hook run with its exit code.
 Repository → Settings → Webhooks → Recent deliveries shows the headers, the
 payload, and the response for every delivery, and can redeliver any of them.
 
-| Status    | Meaning                                                  |
-|-----------|----------------------------------------------------------|
-| 200 / 202 | Accepted (`200` also means no hook matched, or a `ping`) |
-| 401       | Missing or invalid signature — the secrets do not match  |
-| 404       | Wrong path — check `--path` and the proxy configuration  |
-| 405       | Reached the endpoint with something other than POST      |
-| 413       | Payload above 25 MB                                      |
-| 502       | The server is not running behind the proxy               |
+| Status    | Meaning                                                          |
+|-----------|------------------------------------------------------------------|
+| 200 / 202 | Accepted (`200` also means no hook matched, or a `ping`)         |
+| 400       | The body did not parse — the log line names the content type     |
+| 401       | Missing or invalid signature — the secrets do not match          |
+| 404       | Wrong path — check the Payload URL, `--path` and the proxy       |
+| 405       | Reached the endpoint with something other than POST              |
+| 413       | Payload above 25 MB                                              |
+| 502       | The server is not running behind the proxy                       |
+
+A delivery that never reaches the log at all did not arrive: the server is not
+running, the port is closed, or the address in the Payload URL is not this
+machine. `gift log` left running in a terminal shows each one as it lands.
 
 
 Requirements

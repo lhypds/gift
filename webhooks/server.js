@@ -262,6 +262,25 @@ function readBody(req, limit) {
     });
 }
 
+/**
+ * The delivery's JSON. A webhook's "Content type" on GitHub is either
+ * `application/json`, where the body is the JSON itself, or
+ * `application/x-www-form-urlencoded`, where the same JSON arrives as a single
+ * `payload` field. Both are accepted, so a webhook configured either way works.
+ *
+ * The signature covers the raw body whichever it is, and is checked before this
+ * runs, so unwrapping the form field here verifies nothing and weakens nothing.
+ */
+function parsePayload(rawBody, contentType) {
+    const text = rawBody.toString('utf8');
+    if (String(contentType || '').toLowerCase().includes('application/x-www-form-urlencoded')) {
+        const field = new URLSearchParams(text).get('payload');
+        if (field === null) throw new Error('form body has no "payload" field');
+        return JSON.parse(field);
+    }
+    return JSON.parse(text);
+}
+
 // ---------------------------------------------------------------- matching ---
 
 function branchOf(ref) {
@@ -516,9 +535,16 @@ function createServer(config, secrets, options) {
 
         let payload;
         try {
-            payload = JSON.parse(rawBody.toString('utf8'));
+            payload = parsePayload(rawBody, req.headers['content-type']);
         } catch {
-            log('warn', 'invalid JSON payload', { status: 400, delivery: deliveryId, event });
+            // The content type is logged: a body that will not parse is usually
+            // a webhook sending something other than what it says it is.
+            log('warn', 'invalid JSON payload', {
+                status: 400,
+                delivery: deliveryId,
+                event,
+                type: req.headers['content-type'],
+            });
             send(res, 400, 'Invalid JSON');
             return;
         }
