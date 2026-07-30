@@ -1,5 +1,5 @@
-server
-======
+webhooks
+========
 
 
 Receive GitHub webhooks and run local scripts when a delivery matches.
@@ -11,9 +11,17 @@ Files
 | File                 | Description                                                             |
 |----------------------|-------------------------------------------------------------------------|
 | `server.js`          | The webhook server — started by `gift serve`                            |
+| `.env.example`       | Template for the secret and listener defaults; `./setup.sh` copies it   |
+| `.env`               | Your local settings, the secret included (git-ignored)                  |
 | `hooks.example.json` | Example configuration; `./setup.sh` copies it to `hooks.json`           |
 | `hooks.json`         | Your local configuration (git-ignored — it points at machine paths)     |
-| `deploy.example.sh`  | Example deploy script a hook can run                                    |
+| `ecosystem.config.cjs` | PM2 configuration; takes `PM2_NAME` and `PORT` from `.env`            |
+| `start.sh`           | Start the server under PM2                                              |
+| `stop.sh`            | Stop it                                                                 |
+| `restart.sh`         | Pull the latest code, then stop and start                               |
+
+Everything `gift serve` needs lives in this folder; the rest of the repo holds
+no server configuration.
 
 
 Usage
@@ -25,16 +33,21 @@ gift serve [options]
 
 | Option          | Description                                  | Default                      |
 |-----------------|----------------------------------------------|------------------------------|
-| `--config=FILE` | Hook configuration file                      | `server/hooks.json` |
+| `--config=FILE` | Hook configuration file                      | `webhooks/hooks.json`         |
 | `--host=HOST`   | Interface to bind                            | `127.0.0.1`                  |
 | `--port=PORT`   | Port to listen on                            | `3001`                       |
 | `--path=PATH`   | Webhook endpoint path                        | `/hooks/github`              |
 | `--dry-run`     | Verify and match deliveries, but run no hook | off                          |
 | `-h`, `--help`  | Show the help message and exit               |                              |
 
-Defaults can also come from the environment (`GIFT_SERVE_HOST`, `GIFT_SERVE_PORT`,
+Defaults can also come from the environment (`GIFT_SERVE_HOST`, `PORT`,
 `GIFT_SERVE_PATH`, `GIFT_SERVE_CONFIG`) or from `hooks.json`. Flags win, then the
-environment, then the config file.
+environment, then the config file. `GIFT_SERVE_PORT` still works and takes
+precedence over `PORT` if both are set.
+
+Those variables are read from this folder's `.env` — whether the server is
+started by `gift serve` or directly with `node webhooks/server.js` — and a value
+already present in the real environment overrides the file.
 
 The server also answers `GET /health` with `ok`, which is handy for uptime checks
 and for confirming a reverse proxy is wired up correctly.
@@ -50,13 +63,14 @@ required — the server refuses to start without one. Generate one with:
 openssl rand -hex 32
 ```
 
-Put the same value in GitHub's webhook "Secret" field and in the repo's `.env`:
+Put the same value in GitHub's webhook "Secret" field and in this folder's
+`.env` (copy `.env.example` if it is not there yet):
 
 ```
 GITHUB_WEBHOOK_SECRET=8c29d74b...961a5da
 ```
 
-`.env` is git-ignored. Never commit a secret.
+`webhooks/.env` is git-ignored. Never commit a secret.
 
 
 Configuration
@@ -139,7 +153,7 @@ Repository → Settings → Webhooks → Add webhook
 ```
 Payload URL:  https://your-domain.com/hooks/github
 Content type: application/json
-Secret:       (the value from .env)
+Secret:       (the value from webhooks/.env)
 Events:       Just the push event
 Active:       checked
 ```
@@ -178,7 +192,33 @@ works too; use the tunnel's HTTPS address as the Payload URL.
 Running it as a service
 -----------------------
 
-`/etc/systemd/system/gift-webhook.service`:
+PM2 — the scripts in this folder:
+
+```bash
+./start.sh      # pm2 start ecosystem.config.cjs --update-env
+./stop.sh       # pm2 stop $PM2_NAME
+./restart.sh    # git pull --ff-only, then stop and start
+```
+
+`ecosystem.config.cjs` takes two settings from this folder's `.env`:
+
+```
+PM2_NAME=gift-webhooks
+PORT=3001
+```
+
+`PM2_NAME` is the name PM2 lists the process under, so `pm2 logs gift-webhooks`
+and `pm2 delete gift-webhooks` follow from it. The secret is not passed through
+PM2 — `server.js` reads `.env` itself at startup, which keeps it out of
+`pm2 show` and the PM2 dump file.
+
+`start.sh` refuses to start when `GITHUB_WEBHOOK_SECRET` is empty; without that
+check the server would exit immediately and PM2 would restart it in a loop.
+
+To bring it up on boot, run `pm2 save` once the process is running, then
+`pm2 startup` and follow the command it prints.
+
+systemd — `/etc/systemd/system/gift-webhook.service`:
 
 ```ini
 [Unit]
@@ -191,7 +231,7 @@ User=deploy
 Group=deploy
 WorkingDirectory=/opt/gift
 EnvironmentFile=/etc/gift-webhook.env
-ExecStart=/usr/bin/node /opt/gift/server/server.js
+ExecStart=/usr/bin/node /opt/gift/webhooks/server.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -207,6 +247,10 @@ WantedBy=multi-user.target
 GITHUB_WEBHOOK_SECRET=your-secret
 GIFT_SERVE_PORT=3001
 ```
+
+`EnvironmentFile` is the better place for a production secret — root-owned and
+outside the checkout — and systemd passes it as the real environment, so it wins
+over `webhooks/.env`. Drop the line to keep the secret in `webhooks/.env` instead.
 
 ```bash
 sudo systemctl daemon-reload

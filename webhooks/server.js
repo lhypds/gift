@@ -7,8 +7,8 @@
 // may only run scripts named in hooks.json, and payload fields reach them as
 // environment variables.
 //
-// Configuration: server/hooks.json (see hooks.example.json).
-// Secret:        GITHUB_WEBHOOK_SECRET in the repo's .env or the environment.
+// Configuration: webhooks/hooks.json (see hooks.example.json).
+// Secret:        GITHUB_WEBHOOK_SECRET in webhooks/.env or the environment.
 'use strict';
 
 const crypto = require('node:crypto');
@@ -55,17 +55,17 @@ function usage() {
 Receive GitHub webhook deliveries and run the scripts configured in hooks.json.
 
 options:
-  --config=FILE    Hook configuration file (default: server/hooks.json)
+  --config=FILE    Hook configuration file (default: webhooks/hooks.json)
   --host=HOST      Interface to bind (default: ${DEFAULTS.host})
   --port=PORT      Port to listen on (default: ${DEFAULTS.port})
   --path=PATH      Webhook endpoint path (default: ${DEFAULTS.path})
   --dry-run        Verify and match deliveries, but never run a hook script
   -h, --help       Show this help
 
-environment:
+environment (from webhooks/.env, or the real environment, which wins):
   GITHUB_WEBHOOK_SECRET   Secret configured on the GitHub webhook (required)
   GIFT_SERVE_HOST         Default for --host
-  GIFT_SERVE_PORT         Default for --port
+  PORT                    Default for --port (GIFT_SERVE_PORT overrides it)
   GIFT_SERVE_PATH         Default for --path
 
 Health check: GET http://HOST:PORT/health`);
@@ -445,10 +445,10 @@ function main(argv) {
         return 0;
     }
 
-    // `gift serve` already loaded the repo's .env; do it here too so that
-    // `node server/server.js` behaves the same way.
+    // `gift serve` already loaded webhooks/.env; do it here too so that
+    // `node webhooks/server.js` and a systemd unit behave the same way.
     try {
-        require('../lib/env.js').load();
+        require('../lib/env.js').loadFor(HERE);
     } catch {
         /* running outside the repo — rely on the real environment */
     }
@@ -464,7 +464,9 @@ function main(argv) {
 
     const settings = {
         host: options.host || process.env.GIFT_SERVE_HOST || config.host || DEFAULTS.host,
-        port: Number(options.port || process.env.GIFT_SERVE_PORT || config.port || DEFAULTS.port),
+        port: Number(
+            options.port || process.env.GIFT_SERVE_PORT || process.env.PORT || config.port || DEFAULTS.port,
+        ),
         path: options.path || process.env.GIFT_SERVE_PATH || config.path || DEFAULTS.path,
         dryRun: options.dryRun,
     };
@@ -474,7 +476,7 @@ function main(argv) {
     if (secrets.size === 0) {
         console.error(`gift serve: no webhook secret configured.
 
-Set GITHUB_WEBHOOK_SECRET in the repo's .env (or the environment) to the same
+Set GITHUB_WEBHOOK_SECRET in webhooks/.env (or the environment) to the same
 value as the webhook's "Secret" field on GitHub. Generate one with:
 
     openssl rand -hex 32`);

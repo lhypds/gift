@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Preparation for ./install.sh: check Node.js >= 18, check the tools the
-# commands need, and create the local config files (.env, server/hooks.json).
+# commands need, and create the local config files (.env, webhooks/hooks.json).
 # Does not install the global `gift` command — run ./install.sh after this.
 set -euo pipefail
 
@@ -44,21 +44,25 @@ for tool in git gh jq; do
     fi
 done
 
-if [ -f ".env.example" ]; then
-    if [ ! -f ".env" ]; then
-        cp ".env.example" ".env"
-        echo "==> Created .env from .env.example"
+# The shared .env, plus one per command folder that ships an example — settings
+# only a single command reads live next to that command.
+for example in .env.example commands/*/.env.example webhooks/.env.example; do
+    [ -f "$example" ] || continue
+    target="${example%.example}"
+    if [ ! -f "$target" ]; then
+        cp "$example" "$target"
+        echo "==> Created $target from $example"
     else
-        echo "==> Keeping existing .env"
+        echo "==> Keeping existing $target"
     fi
-fi
+done
 
-if [ -f "server/hooks.example.json" ]; then
-    if [ ! -f "server/hooks.json" ]; then
-        cp "server/hooks.example.json" "server/hooks.json"
-        echo "==> Created server/hooks.json from server/hooks.example.json"
+if [ -f "webhooks/hooks.example.json" ]; then
+    if [ ! -f "webhooks/hooks.json" ]; then
+        cp "webhooks/hooks.example.json" "webhooks/hooks.json"
+        echo "==> Created webhooks/hooks.json from webhooks/hooks.example.json"
     else
-        echo "==> Keeping existing server/hooks.json"
+        echo "==> Keeping existing webhooks/hooks.json"
     fi
 fi
 
@@ -72,6 +76,6 @@ Setup complete — ready for ./install.sh
 Next step (installs the global \`gift\` command and shell completion):
     ./install.sh
 
-Before using \`gift serve\`, set GITHUB_WEBHOOK_SECRET in .env:
+Before using \`gift serve\`, set GITHUB_WEBHOOK_SECRET in webhooks/.env:
     openssl rand -hex 32
 EOF

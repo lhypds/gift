@@ -8,7 +8,7 @@
       "repo": "YOUR_NAME/YOUR_REPOSITORY",
       "events": ["push"],
       "branches": ["main"],
-      "run": "/opt/myapp/deploy.sh",
+      "run": "some.sh",
       "args": [],
       "cwd": "/opt/myapp",
       "detach": false,

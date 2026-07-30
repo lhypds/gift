@@ -50,7 +50,7 @@ Uninstall complete.
 
 Local files kept in the checkout (delete them by hand if you want them gone):
     $ROOT_DIR/.env
-    $ROOT_DIR/server/hooks.json
+    $ROOT_DIR/webhooks/hooks.json
 
 Shells that are already open keep the old completion until they restart:
     exec zsh

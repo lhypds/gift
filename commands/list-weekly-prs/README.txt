@@ -12,6 +12,7 @@ Files
 | File                 | Description                                                                     |
 |----------------------|---------------------------------------------------------------------------------|
 | `list_weekly_prs.sh` | Core logic script — run through `gift list`, or directly from the terminal      |
+| `.env.example`       | Template for this command's own settings — copied to `.env` by `./setup.sh`      |
 | `run.command`        | macOS double-clickable launcher — calls the script with preconfigured repos     |
 
 `run.command` is git-ignored; copy `../../run.command.example` and edit it.
@@ -47,8 +48,9 @@ Parameters
 | `-v`                            | Verbose mode — shows PR number, state, and URL for each PR | off            |
 | `-h`, `--help`                  | Show the help message and exit                             |                |
 
-`GIFT_REPOS` and `GIFT_AUTHOR` come from the repo's `.env`, so the common case
-needs no flags at all.
+`GIFT_REPOS` and `GIFT_AUTHOR` come from this folder's `.env` (git-ignored; copy
+`.env.example`), so the common case needs no flags at all. A value already in the
+environment wins over that file, and the file wins over the repo's `../../.env`.
 
 
 Examples

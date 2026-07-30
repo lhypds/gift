@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a source-tree release zip and hand off to release_gh.sh to publish it on
 # GitHub. The archive contains everything ./setup.sh and ./install.sh need in a
-# fresh checkout: bin/, lib/, completions/, commands/, server/, and the
-# top-level scripts. Local config (.env, server/hooks.json) is never shipped.
+# fresh checkout: bin/, lib/, completions/, commands/, webhooks/, and the
+# top-level scripts. Local config (.env, webhooks/hooks.json) is never shipped.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +35,7 @@ cp -R "$ROOT_DIR/bin"         "$STAGING_DIR/bin"
 cp -R "$ROOT_DIR/lib"         "$STAGING_DIR/lib"
 cp -R "$ROOT_DIR/completions" "$STAGING_DIR/completions"
 cp -R "$ROOT_DIR/commands"    "$STAGING_DIR/commands"
-cp -R "$ROOT_DIR/server"      "$STAGING_DIR/server"
+cp -R "$ROOT_DIR/webhooks"    "$STAGING_DIR/webhooks"
 cp -R "$ROOT_DIR/test"        "$STAGING_DIR/test"
 
 # Top-level scripts and project files
@@ -43,6 +43,7 @@ cp "$ROOT_DIR/setup.sh"     "$STAGING_DIR/"
 cp "$ROOT_DIR/install.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/uninstall.sh" "$STAGING_DIR/"
 cp "$ROOT_DIR/clear.sh"     "$STAGING_DIR/"
+cp "$ROOT_DIR/restart.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release_gh.sh" "$STAGING_DIR/"
 cp "$ROOT_DIR/package.json" "$STAGING_DIR/"

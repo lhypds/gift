@@ -6,12 +6,13 @@
 const assert = require('node:assert');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const cli = require('../lib/cli.js');
 const commands = require('../lib/commands.js');
 const env = require('../lib/env.js');
-const server = require('../server/server.js');
+const server = require('../webhooks/server.js');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -33,9 +34,9 @@ test('only folders inside commands/ are commands', () => {
             `${command.name} was found outside commands/`
         );
     }
-    // Folders beside commands/ — the server included — are not commands.
+    // Folders beside commands/ — the webhook server included — are not commands.
     const names = commands.list().map((c) => c.name);
-    for (const outside of ['bin', 'lib', 'completions', 'test', 'commands', 'server']) {
+    for (const outside of ['bin', 'lib', 'completions', 'test', 'commands', 'webhooks']) {
         assert.ok(!names.includes(outside), `${outside} should not be a command`);
     }
 });
@@ -70,8 +71,10 @@ test('serve runs the webhook server, which is not a commands/ folder', () => {
     assert.strictEqual(result.status, 'ok');
     assert.strictEqual(result.command.name, 'serve');
     assert.strictEqual(path.basename(result.command.entry), 'server.js');
-    assert.strictEqual(path.basename(path.dirname(result.command.entry)), 'server');
+    assert.strictEqual(path.basename(path.dirname(result.command.entry)), 'webhooks');
     assert.ok(fs.existsSync(result.command.entry), 'server entry script is missing');
+    // serve's folder is webhooks/, so it picks up webhooks/.env like any command.
+    assert.strictEqual(result.command.dir, path.join(commands.ROOT, 'webhooks'));
 });
 
 test('serve answers to a unique prefix like any other command', () => {
@@ -129,6 +132,57 @@ test('.env parsing handles quotes, export and comments', () => {
         TRAILING: 'value',
         EMPTY: '',
     });
+});
+
+test('a command folder can bring its own .env, and the environment still wins', () => {
+    const dir = path.join(commands.COMMANDS_DIR, 'zz-test-env');
+    const keys = ['ZZ_OWN', 'ZZ_FROM_ENV'];
+    const before = keys.map((k) => [k, process.env[k]]);
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+            path.join(dir, '.env'),
+            'ZZ_OWN=from-command\nZZ_FROM_ENV=from-command\n'
+        );
+
+        for (const k of keys) delete process.env[k];
+        process.env.ZZ_FROM_ENV = 'from-environment';
+
+        env.loadFor(dir);
+        assert.strictEqual(process.env.ZZ_OWN, 'from-command');
+        assert.strictEqual(process.env.ZZ_FROM_ENV, 'from-environment');
+
+        // Without a command folder, nothing from that folder is read.
+        delete process.env.ZZ_OWN;
+        env.loadFor();
+        assert.strictEqual(process.env.ZZ_OWN, undefined);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        for (const [k, v] of before) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+        }
+    }
+});
+
+test('the file loaded first wins — how the command .env beats the shared one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gift-env-'));
+    const before = process.env.ZZ_LAYERED;
+    try {
+        const own = path.join(dir, 'own.env');
+        const shared = path.join(dir, 'shared.env');
+        fs.writeFileSync(own, 'ZZ_LAYERED=own\n');
+        fs.writeFileSync(shared, 'ZZ_LAYERED=shared\n');
+
+        delete process.env.ZZ_LAYERED;
+        env.load(own); // the command's, loaded first
+        env.load(shared); // the shared one, second — must not overwrite
+        assert.strictEqual(process.env.ZZ_LAYERED, 'own');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        if (before === undefined) delete process.env.ZZ_LAYERED;
+        else process.env.ZZ_LAYERED = before;
+    }
 });
 
 // ------------------------------------------------------------- signatures ---

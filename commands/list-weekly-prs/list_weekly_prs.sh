@@ -9,7 +9,7 @@
 #   -v                              : verbose mode (show PR number, state, and URL)
 
 REPOS=()
-AUTHOR="${GIFT_AUTHOR:-lhypds}"
+AUTHOR="${GIFT_AUTHOR:-}"
 WEEKS_AGO=""
 VERBOSE=false
 
@@ -51,7 +51,7 @@ for arg in "$@"; do
     esac
 done
 
-# Fall back to the repositories configured in the repo's .env
+# Fall back to the repositories configured in this command's .env
 if [ ${#REPOS[@]} -eq 0 ] && [ -n "${GIFT_REPOS:-}" ]; then
     IFS=',' read -ra REPOS <<< "$GIFT_REPOS"
 fi
@@ -59,7 +59,7 @@ fi
 # Validate repos
 if [ ${#REPOS[@]} -eq 0 ]; then
     echo "Error: No repositories specified."
-    echo "  Pass --repos=owner/repo1,owner/repo2, or set GIFT_REPOS in the repo's .env"
+    echo "  Pass --repos=owner/repo1,owner/repo2, or set GIFT_REPOS in this command's .env"
     pause
     exit 1
 fi
@@ -67,7 +67,7 @@ fi
 # Validate author
 if [ -z "$AUTHOR" ]; then
     echo "Error: No author specified."
-    echo "  Pass --author=login, or set GIFT_AUTHOR in the repo's .env"
+    echo "  Pass --author=login, or set GIFT_AUTHOR in this command's .env"
     pause
     exit 1
 fi
