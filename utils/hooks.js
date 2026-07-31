@@ -402,7 +402,9 @@ async function createHook(file) {
     }
 
     const { config, missing } = readConfig(file);
-    const taken = new Set(config.hooks.map((h) => String(h.name)));
+    const taken = new Set(config.hooks.map((hook, index) =>
+        String(hook.name || `hook-${index + 1}`)
+    ));
 
     console.log(`Adding a hook to ${show(file)}${missing ? ', which will be created' : ''}.`);
     console.log('Four local questions; Enter takes the [default], Ctrl-C stops without writing anything.');
@@ -439,6 +441,7 @@ async function createHook(file) {
         fallback: defaultName(repo === '*' ? '' : repo.split('/')[1], taken),
         validate: (value) => {
             if (!VALID_HOOK_NAME.test(value)) return 'Letters, digits, dot, dash and underscore only.';
+            if (taken.has(value)) return `A hook named '${value}' already exists — choose a unique name.`;
             return null;
         },
     });
