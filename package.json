@@ -19,6 +19,7 @@
     "functions.js",
     "utils",
     "server.js",
+    "dashboard.js",
     "ecosystem.config.cjs",
     "start.sh",
     "stop.sh",

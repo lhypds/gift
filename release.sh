@@ -39,6 +39,7 @@ cp -R "$ROOT_DIR/utils"     "$STAGING_DIR/utils"
 
 # Root webhook server, scripts, and project files.
 cp "$ROOT_DIR/server.js"    "$STAGING_DIR/"
+cp "$ROOT_DIR/dashboard.js" "$STAGING_DIR/"
 cp "$ROOT_DIR/ecosystem.config.cjs" "$STAGING_DIR/"
 cp "$ROOT_DIR/hooks.example.json" "$STAGING_DIR/"
 cp "$ROOT_DIR/start.sh"     "$STAGING_DIR/"
