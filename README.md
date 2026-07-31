@@ -21,9 +21,9 @@ Hooks
 `gift list` shows the configured hooks.  
 `gift create` adds one.  
 
-When `gh` has an authenticated GitHub user, `gift create` also creates the
-repository webhook. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public
-delivery URL, including `/hooks/github`; otherwise `gift create` asks for it.
+For a specific repository, `gift create` asks whether to create the GitHub
+webhook with `gh`. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public
+delivery URL, including `/hooks/github`; otherwise it asks for the URL too.
 
 The server restarts automatically after `gift create` or `gift delete`.
 

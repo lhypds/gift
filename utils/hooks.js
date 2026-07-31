@@ -488,21 +488,23 @@ async function createHook(file) {
 
     let githubUrl = null;
     const secret = process.env[DEFAULT_SECRET_ENV];
-    if (repo !== '*' && secret && hasGitHubUser()) {
-        const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
-        if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
-            githubUrl = configuredUrl;
-            console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
-        } else {
-            if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
-            const createRemote = await askYesNo(`Create the GitHub webhook for ${repo} with gh?`, true);
-            if (createRemote === null) return cancelled();
-            if (createRemote) {
-                githubUrl = await askText('Public webhook URL — GitHub sends deliveries here', {
+    if (repo !== '*' && secret) {
+        const createRemote = await askYesNo(`Create a GitHub webhook for ${repo} with gh?`, true);
+        if (createRemote === null) return cancelled();
+        if (createRemote && hasGitHubUser()) {
+            const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
+            if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
+                githubUrl = configuredUrl;
+                console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
+            } else {
+                if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
+                githubUrl = await askText(`Public webhook URL for ${repo} — gh will create the remote webhook`, {
                     validate: webhookUrlProblem,
                 });
                 if (githubUrl === null) return cancelled();
             }
+        } else if (createRemote) {
+            console.log('  note: gh has no active GitHub account, so only the local hook will be created.');
         }
     }
 
@@ -511,6 +513,7 @@ async function createHook(file) {
 
     let githubResult = null;
     if (githubUrl) {
+        console.log(`Creating the GitHub webhook for ${repo} with gh...`);
         githubResult = createGitHubWebhook(repo, githubUrl, hook, secret);
     }
 
@@ -661,7 +664,7 @@ function createUsage() {
     console.log('');
     console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
     console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
-    console.log(`When gh has an active GitHub user, a repository hook is created too; set`);
+    console.log(`When gh has an active GitHub user, gift asks whether to create a repository hook remotely; set`);
     console.log(`${WEBHOOK_URL_ENV} to its complete public delivery URL, or gift will ask for it.`);
     console.log('');
     console.log('options:');
