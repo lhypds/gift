@@ -15,21 +15,11 @@ Stop
 `gift stop`  
 
 Status  
-`gift status` says whether the server is running: what PM2 reports about the
-process, what the server answers on `GET /health`, and what it is set up to serve
-— the endpoint, the hooks and the log. The exit code is 0 when it answers and 1
-when it does not, and `gift status --json` prints the same for a script.  
-
-Open the server root (by default `http://127.0.0.1:3999/`) for a live status
-page showing the endpoint and available webhooks.
-
-Use `hooks.json` to configure which functions run for which GitHub events.  
+`gift status` says whether the server is running.  
 
 Hooks  
-`gift list` shows the configured hooks.
-`gift create` adds one, asking for the repository, the events, the script and
-the working directory it runs in.
-`gift delete [name]` removes one. `gift status` shows the configured hooks.
+`gift list` shows the configured hooks.  
+`gift create` adds one.  
 
 The server reads `hooks.json` at startup, so run `gift serve` after a change.  
 

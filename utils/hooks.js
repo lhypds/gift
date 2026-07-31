@@ -1,7 +1,7 @@
 // The implementation shared by the top-level hook-management commands.
 //
 //   gift list            show what is configured
-//   gift create          add one, asking for each field
+//   gift create          add one, asking for the repository, name, script and cwd
 //   gift delete [name]   remove one
 //
 // All three work on hooks.json — the file `gift serve` reads at startup
@@ -31,9 +31,12 @@ const DEFAULT_SETTINGS = {
 
 const DEFAULT_SECRET_ENV = 'GITHUB_WEBHOOK_SECRET';
 
+// The branches a created hook watches: the server matches any name in the list,
+// so covering both spellings of the default branch saves asking which one it is.
+const DEFAULT_BRANCHES = ['main', 'master'];
+
 const VALID_REPO_PART = /^[A-Za-z0-9._-]+$/;
 const VALID_HOOK_NAME = /^[A-Za-z0-9._-]+$/;
-const VALID_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // -------------------------------------------------------------------- paths ---
 
@@ -149,24 +152,6 @@ function configFile(options) {
 }
 
 // ------------------------------------------------------------------- fields ---
-
-/** Split a typed list — `push, pull_request` or `push pull_request`. */
-function splitList(text) {
-    return String(text)
-        .split(/[\s,]+/)
-        .filter(Boolean);
-}
-
-/** Split a typed argument line into arguments, honouring simple quoting. */
-function splitArgs(text) {
-    const args = [];
-    const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
-    let match;
-    while ((match = pattern.exec(String(text))) !== null) {
-        args.push(match[1] ?? match[2] ?? match[3]);
-    }
-    return args;
-}
 
 /**
  * Pull the owner and repository out of whatever the user pasted: `owner`,
@@ -348,7 +333,7 @@ async function createHook(file) {
     const taken = new Set(config.hooks.map((h) => String(h.name)));
 
     console.log(`Adding a hook to ${show(file)}${missing ? ', which will be created' : ''}.`);
-    console.log('Enter takes the [default]; Ctrl-C stops without writing anything.');
+    console.log('Four questions; Enter takes the [default], Ctrl-C stops without writing anything.');
     console.log('');
 
     const cancelled = () => {
@@ -358,38 +343,24 @@ async function createHook(file) {
 
     // Which repository may trigger it. The server compares `owner/repo` whole,
     // so it is either one repository or `*` — an owner on its own cannot match.
-    const owner = await askText('Repository owner — GitHub user or organisation, * for any', {
+    const repoAnswer = await askText('Repository — owner/repo, * for any', {
         fallback: '*',
         validate: (value) => {
             if (value === '*') return null;
             const parsed = parseRepo(value);
-            if (!parsed.owner) return 'Type the owner as it appears in the repository URL.';
+            if (!parsed.owner) return 'Type the repository as owner/repo, or * for any.';
             if (!VALID_REPO_PART.test(parsed.owner)) return `'${parsed.owner}' is not a GitHub owner name.`;
-            if (parsed.name && !VALID_REPO_PART.test(parsed.name)) {
-                return `'${parsed.name}' is not a repository name.`;
-            }
+            if (!parsed.name) return `Name the repository too — ${parsed.owner}/something, or * for any.`;
+            if (!VALID_REPO_PART.test(parsed.name)) return `'${parsed.name}' is not a repository name.`;
             return null;
         },
     });
-    if (owner === null) return cancelled();
+    if (repoAnswer === null) return cancelled();
 
     let repo = '*';
-    if (owner !== '*') {
-        const parsed = parseRepo(owner);
-        let name = parsed.name;
-        if (!name) {
-            // `owner/repo` pasted in one go already answered this.
-            const answer = await askText(`Repository name — the part after ${parsed.owner}/`, {
-                validate: (value) => {
-                    if (!value) return 'A repository name is needed. Answer * to the owner for any repository.';
-                    if (!VALID_REPO_PART.test(value)) return `'${value}' is not a repository name.`;
-                    return null;
-                },
-            });
-            if (answer === null) return cancelled();
-            name = answer;
-        }
-        repo = `${parsed.owner}/${name}`;
+    if (repoAnswer !== '*') {
+        const parsed = parseRepo(repoAnswer);
+        repo = `${parsed.owner}/${parsed.name}`;
     }
 
     const name = await askText('Hook name — the label it appears under in the log', {
@@ -401,22 +372,6 @@ async function createHook(file) {
         },
     });
     if (name === null) return cancelled();
-
-    const eventsAnswer = await askText('Events — e.g. push, pull_request, release; * for any', {
-        fallback: 'push',
-        validate: (value) => (splitList(value).length ? null : 'Name at least one event, or * for any.'),
-    });
-    if (eventsAnswer === null) return cancelled();
-    const events = splitList(eventsAnswer);
-
-    // Branches only narrow pushes; for other events the field is ignored.
-    const pushes = events.includes('*') || events.includes('push');
-    const branchesAnswer = await askText('Branches for push events — * for any', {
-        fallback: pushes ? 'main' : '*',
-        validate: (value) => (splitList(value).length ? null : 'Name at least one branch, or * for any.'),
-    });
-    if (branchesAnswer === null) return cancelled();
-    const branches = splitList(branchesAnswer);
 
     // Absolute only. A relative path would be resolved against wherever the user
     // happens to be standing, which is not what the hook would run months later.
@@ -433,10 +388,6 @@ async function createHook(file) {
     const run = resolveTyped(runAnswer);
     for (const note of scriptNotes(run)) console.log(`  note: ${note}`);
 
-    const argsAnswer = await askText('Arguments for the script — blank for none');
-    if (argsAnswer === null) return cancelled();
-    const args = splitArgs(argsAnswer);
-
     const cwdAnswer = await askText('Working directory the script runs in', {
         fallback: path.dirname(run),
     });
@@ -444,40 +395,36 @@ async function createHook(file) {
     const cwd = resolveTyped(cwdAnswer);
     if (!isDirectory(cwd)) console.log(`  note: no directory at ${cwd} yet`);
 
-    const detach = await askYesNo('Let the script keep running if the server stops (detach)?', false);
-    if (detach === null) return cancelled();
-
-    const secretEnv = await askText('Environment variable holding this hook\'s webhook secret', {
-        fallback: DEFAULT_SECRET_ENV,
-        validate: (value) => (VALID_ENV_NAME.test(value) ? null : 'That is not an environment variable name.'),
-    });
-    if (secretEnv === null) return cancelled();
-
-    // Field order matches hooks.example.json, so hand-written and generated
-    // hooks read the same way.
-    const hook = { name, repo, events, branches, run, args, cwd, detach, secretEnv };
-
-    console.log('');
-    console.log(`  ${name}`);
-    printRows(describe(hook), '    ');
-    console.log('');
-
-    const confirmed = await askYesNo(`Add this hook to ${show(file)}?`, true);
-    if (confirmed === null) return cancelled();
-    if (!confirmed) {
-        console.log('Nothing was written.');
-        return 0;
-    }
+    // Everything else takes the common answer — a push to whichever of main and
+    // master the repository uses, no arguments, not detached, the shared secret.
+    // Field order matches hooks.example.json, so hand-written and generated hooks
+    // read the same way.
+    const hook = {
+        name,
+        repo,
+        events: ['push'],
+        branches: [...DEFAULT_BRANCHES],
+        run,
+        args: [],
+        cwd,
+        detach: false,
+        secretEnv: DEFAULT_SECRET_ENV,
+    };
 
     config.hooks.push(hook);
     writeConfig(file, config);
 
     console.log('');
     console.log(`Added '${name}' to ${show(file)}.`);
-    if (!process.env[secretEnv]) {
-        console.log(`warning: ${secretEnv} is not set — the server refuses to start without a secret.`);
+    console.log('');
+    console.log(`  ${name}`);
+    printRows(describe(hook), '    ');
+    console.log('');
+    if (!process.env[DEFAULT_SECRET_ENV]) {
+        console.log(`warning: ${DEFAULT_SECRET_ENV} is not set — the server refuses to start without a secret.`);
         console.log(`         Put it in .env, the same value as the webhook's Secret on GitHub.`);
     }
+    console.log(`Edit ${show(file)} for anything else — other events or branches, arguments, detach.`);
     console.log('Run `gift serve` to restart the server with it.');
     return 0;
 }
@@ -594,7 +541,11 @@ async function deleteHook(file, options, positionals) {
 function createUsage() {
     console.log('usage: gift create [--config=FILE]');
     console.log('');
-    console.log('Create a server hook, asking for each field and confirmation before writing.');
+    console.log('Create a server hook, asking four things: the repository, the hook name,');
+    console.log('the script to run and the working directory it runs in.');
+    console.log('');
+    console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
+    console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
     console.log('');
     console.log('options:');
     console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
