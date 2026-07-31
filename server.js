@@ -28,6 +28,7 @@ const DEFAULT_REQUEST_LOG = path.join(HERE, 'server.log');
 
 // GitHub rejects payloads above 25 MB, so anything larger is not from GitHub.
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
+const RECENT_DELIVERY_LIMIT = 10;
 
 const DEFAULTS = {
     host: '127.0.0.1',
@@ -666,7 +667,7 @@ function hookReadiness(hook, secrets, options) {
 }
 
 /** The read-only dashboard served at GET /. */
-function dashboardPage(config, secrets, options, requestHost) {
+function dashboardPage(config, secrets, options, requestHost, recentDeliveries = []) {
     const hooks = Array.isArray(config.hooks) ? config.hooks : [];
     const endpoint = options.path || config.path || DEFAULTS.path;
     const address = `${requestHost || 'localhost'}${endpoint}`;
@@ -699,6 +700,32 @@ function dashboardPage(config, secrets, options, requestHost) {
           <span>Run <code>gift create</code>, then restart the server.</span>
         </div>`;
 
+    const deliveryRows = recentDeliveries.map((delivery) => {
+        const receivedAt = new Date(delivery.receivedAt);
+        const validTime = !Number.isNaN(receivedAt.getTime());
+        const timestamp = validTime ? `${receivedAt.toISOString().slice(11, 19)} UTC` : '—';
+        const datetime = validTime ? receivedAt.toISOString() : '';
+
+        return `
+            <tr>
+              <td><time datetime="${escapeHtml(datetime)}">${escapeHtml(timestamp)}</time></td>
+              <td><strong>${escapeHtml(delivery.event || 'Unknown event')}</strong><span class="delivery-id">${escapeHtml(delivery.id || 'No delivery ID')}</span></td>
+              <td>${escapeHtml(delivery.repo || 'Unknown repository')}</td>
+              <td><span class="delivery-state ${escapeHtml(delivery.tone || 'neutral')}">${escapeHtml(delivery.outcome || 'Receiving')}</span>${delivery.detail ? `<span class="delivery-detail">${escapeHtml(delivery.detail)}</span>` : ''}</td>
+            </tr>`;
+    }).join('');
+
+    const deliveryContent = deliveryRows
+        ? `<div class="delivery-table"><table>
+            <thead><tr><th>Received</th><th>Event</th><th>Repository</th><th>Result</th></tr></thead>
+            <tbody>${deliveryRows}
+            </tbody>
+          </table></div>`
+        : `<div class="empty-state deliveries-empty">
+            <p>No deliveries received yet.</p>
+            <span>New GitHub deliveries will appear here while this server is running.</span>
+          </div>`;
+
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -706,7 +733,7 @@ function dashboardPage(config, secrets, options, requestHost) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="refresh" content="30">
-  <title>gift server status</title>
+  <title>gift</title>
   <style>
     :root {
       color-scheme: light;
@@ -750,6 +777,7 @@ function dashboardPage(config, secrets, options, requestHost) {
     .metric span, dt { color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .075em; text-transform: uppercase; }
     .metric strong { display: block; margin-top: 8px; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     code { padding: .15em .42em; border-radius: 6px; background: #e9eee9; color: #34463a; font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+    section { margin-top: 54px; }
     section > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
     h2 { margin: 0; font-size: 1.45rem; letter-spacing: -.025em; }
     .count { color: var(--muted); font-size: .9rem; }
@@ -761,12 +789,26 @@ function dashboardPage(config, secrets, options, requestHost) {
     .hook-state.ready { background: var(--green-soft); color: var(--green); }
     .hook-state.warning { background: var(--amber-soft); color: var(--amber); }
     .hook-state.neutral { background: #e9ecea; color: #526057; }
+    .delivery-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-strong); box-shadow: var(--shadow); }
+    table { width: 100%; min-width: 700px; border-collapse: collapse; text-align: left; }
+    th { padding: 13px 18px; background: rgba(235, 240, 235, .65); color: var(--muted); font-size: .7rem; letter-spacing: .075em; text-transform: uppercase; }
+    td { padding: 17px 18px; border-top: 1px solid var(--line); vertical-align: middle; }
+    td:first-child { width: 126px; color: var(--muted); font: .78rem ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+    td:nth-child(2) { width: 190px; }
+    td:nth-child(3) { overflow-wrap: anywhere; }
+    td:last-child { width: 210px; }
+    .delivery-id, .delivery-detail { display: block; margin-top: 3px; color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
+    .delivery-state { display: inline-block; padding: 5px 9px; border-radius: 999px; font-size: .7rem; font-weight: 800; }
+    .delivery-state.ready { background: var(--green-soft); color: var(--green); }
+    .delivery-state.warning { background: var(--amber-soft); color: var(--amber); }
+    .delivery-state.neutral { background: #e9ecea; color: #526057; }
     dl { margin: 22px 0 0; }
     dl div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #edf0ed; }
     dt { padding-top: 2px; }
     dd { margin: 0; overflow-wrap: anywhere; }
     .empty-state { grid-column: 1 / -1; padding: 44px 24px; border: 1px dashed #bdc9bf; border-radius: 20px; text-align: center; color: var(--muted); }
     .empty-state p { margin: 0 0 6px; color: var(--ink); font-weight: 750; }
+    .deliveries-empty { background: var(--surface); }
     footer { display: flex; justify-content: space-between; gap: 24px; margin-top: 52px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
     footer a { color: var(--green); text-decoration-thickness: 1px; text-underline-offset: 3px; }
     @media (max-width: 720px) {
@@ -776,11 +818,13 @@ function dashboardPage(config, secrets, options, requestHost) {
       .status-grid { grid-template-columns: 1fr 1fr; margin: 32px 0 44px; }
       .metric:last-child { grid-column: 1 / -1; }
       .hooks { grid-template-columns: 1fr; }
+      .delivery-table { margin-right: -16px; border-radius: 18px 0 0 18px; }
       footer { display: block; }
     }
     @media (prefers-color-scheme: dark) {
       :root { color-scheme: dark; --canvas: #111713; --surface: rgba(25, 34, 28, .82); --surface-strong: #19221c; --ink: #eff6f0; --muted: #a7b4aa; --line: #344139; --green: #73d59c; --green-soft: #183b29; --amber: #f0bd68; --amber-soft: #423119; --shadow: 0 18px 50px rgba(0, 0, 0, .18); }
       code { background: #29342d; color: #dce8de; }
+      th { background: rgba(40, 52, 44, .8); }
       dl div { border-color: #2d3831; }
     }
   </style>
@@ -790,7 +834,7 @@ function dashboardPage(config, secrets, options, requestHost) {
     <header>
       <div>
         <p class="eyebrow">gift webhooks</p>
-        <h1>Server status</h1>
+        <h1>gift</h1>
         <p class="lede">This server is ready to receive signed GitHub deliveries and route them to the configured local hooks.</p>
       </div>
       <span class="online">Online</span>
@@ -801,6 +845,14 @@ function dashboardPage(config, secrets, options, requestHost) {
       <div class="metric"><span>Uptime</span><strong>${escapeHtml(duration(process.uptime()))}</strong></div>
       <div class="metric"><span>Webhook endpoint</span><strong><code>POST ${escapeHtml(address)}</code></strong></div>
     </div>
+
+    <section aria-labelledby="deliveries-heading">
+      <div>
+        <h2 id="deliveries-heading">Latest deliveries</h2>
+        <span class="count">${recentDeliveries.length} shown</span>
+      </div>
+      ${deliveryContent}
+    </section>
 
     <section aria-labelledby="hooks-heading">
       <div>
@@ -844,6 +896,30 @@ function sendHtml(res, status, body) {
 }
 
 function createServer(config, secrets, options) {
+    const recentDeliveries = [];
+    const beginDelivery = (event, id) => {
+        const delivery = {
+            id,
+            event,
+            receivedAt: new Date(),
+            outcome: 'Receiving',
+            tone: 'neutral',
+        };
+        recentDeliveries.unshift(delivery);
+        if (recentDeliveries.length > RECENT_DELIVERY_LIMIT) recentDeliveries.length = RECENT_DELIVERY_LIMIT;
+        return delivery;
+    };
+    const finishDelivery = (delivery, outcome, detail, repo) => {
+        delivery.outcome = outcome;
+        delivery.detail = detail;
+        delivery.repo = repo || delivery.repo;
+        delivery.tone = outcome === 'Accepted' || outcome === 'Ping'
+            ? 'ready'
+            : outcome === 'Rejected'
+                ? 'warning'
+                : 'neutral';
+    };
+
     return http.createServer(async (req, res) => {
         const startedAt = Date.now();
         const from = req.socket.remoteAddress;
@@ -867,7 +943,7 @@ function createServer(config, secrets, options) {
         }
 
         if (req.method === 'GET' && url.pathname === '/') {
-            sendHtml(res, 200, dashboardPage(config, secrets, options, req.headers.host));
+            sendHtml(res, 200, dashboardPage(config, secrets, options, req.headers.host, recentDeliveries));
             return;
         }
 
@@ -912,6 +988,7 @@ function createServer(config, secrets, options) {
         const event = req.headers['x-github-event'];
         const deliveryId = req.headers['x-github-delivery'];
         const signature = req.headers['x-hub-signature-256'];
+        const recent = beginDelivery(event, deliveryId);
 
         // Logged before anything can reject it, so even a delivery that fails
         // verification leaves a record of having arrived.
@@ -929,9 +1006,11 @@ function createServer(config, secrets, options) {
             rawBody = await readBody(req, MAX_BODY_BYTES);
         } catch (err) {
             if (err.code === 'TOO_LARGE') {
+                finishDelivery(recent, 'Rejected', 'Payload too large');
                 log('warn', 'rejected oversized payload', { status: 413, delivery: deliveryId, from });
                 send(res, 413, 'Payload too large');
             } else {
+                finishDelivery(recent, 'Rejected', 'Request read failed');
                 log('warn', `request read failed: ${err.message}`, { status: 400, delivery: deliveryId });
                 if (!res.headersSent) send(res, 400, 'Bad request');
             }
@@ -940,6 +1019,7 @@ function createServer(config, secrets, options) {
 
         const secretNames = verifySignature(rawBody, signature, secrets);
         if (secretNames.length === 0) {
+            finishDelivery(recent, 'Rejected', signature ? 'Invalid signature' : 'Missing signature');
             const why = explainSignatureFailure(rawBody, signature, secrets, req.headers);
             log('warn', signature ? 'invalid signature' : 'missing signature', {
                 status: 401,
@@ -959,6 +1039,7 @@ function createServer(config, secrets, options) {
         try {
             payload = parsePayload(rawBody, req.headers['content-type']);
         } catch {
+            finishDelivery(recent, 'Rejected', 'Invalid JSON');
             // The content type is logged: a body that will not parse is usually
             // a webhook sending something other than what it says it is.
             log('warn', 'invalid JSON payload', {
@@ -972,6 +1053,7 @@ function createServer(config, secrets, options) {
         }
 
         const repo = payload.repository && payload.repository.full_name;
+        recent.repo = repo;
         const delivery = {
             id: deliveryId,
             event,
@@ -999,6 +1081,7 @@ function createServer(config, secrets, options) {
 
         // GitHub sends `ping` right after a webhook is created.
         if (event === 'ping') {
+            finishDelivery(recent, 'Ping', 'Webhook verified', repo);
             log('info', 'ping answered', { status: 200, delivery: deliveryId });
             send(res, 200, 'pong');
             return;
@@ -1009,6 +1092,7 @@ function createServer(config, secrets, options) {
         );
 
         if (triggered.length === 0) {
+            finishDelivery(recent, 'No match', 'No configured hook matched', repo);
             log('info', 'no hook matched', {
                 status: 200,
                 event,
@@ -1026,8 +1110,11 @@ function createServer(config, secrets, options) {
             hooks: triggered.map((h) => h.name).join('|'),
         });
 
+        const triggeredNames = triggered.map((hook) => hook.name);
+        finishDelivery(recent, 'Accepted', triggeredNames.join(', '), repo);
+
         // Answer GitHub before doing any work: deliveries time out after 10s.
-        send(res, 202, `Accepted: ${triggered.map((h) => h.name).join(', ')}`);
+        send(res, 202, `Accepted: ${triggeredNames.join(', ')}`);
 
         for (const hook of triggered) {
             try {
