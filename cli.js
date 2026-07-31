@@ -34,7 +34,7 @@ const BUILTINS = {
     stop: STOP.description,
     status: 'Report whether the webhooks server is running and answering.',
     list: 'List the configured server hooks.',
-    create: 'Create a server hook, asking for the repository, name, script and cwd.',
+    create: 'Create a local hook and, when gh is authenticated, its GitHub webhook.',
     delete: 'Delete a server hook.',
     log: `Print the last ${log.DEFAULT_LINES} lines of the server log.`,
     run: 'Choose a helper function from a menu and run it.',

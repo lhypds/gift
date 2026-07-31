@@ -394,7 +394,7 @@ async function createHook(file) {
     const taken = new Set(config.hooks.map((h) => String(h.name)));
 
     console.log(`Adding a hook to ${show(file)}${missing ? ', which will be created' : ''}.`);
-    console.log('Four questions; Enter takes the [default], Ctrl-C stops without writing anything.');
+    console.log('Four local questions; Enter takes the [default], Ctrl-C stops without writing anything.');
     console.log('');
 
     const cancelled = () => {
@@ -472,11 +472,42 @@ async function createHook(file) {
         secretEnv: DEFAULT_SECRET_ENV,
     };
 
+    let githubUrl = null;
+    const secret = process.env[DEFAULT_SECRET_ENV];
+    if (repo !== '*' && secret && hasGitHubUser()) {
+        const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
+        if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
+            githubUrl = configuredUrl;
+            console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
+        } else {
+            if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
+            const createRemote = await askYesNo(`Create the GitHub webhook for ${repo} with gh?`, true);
+            if (createRemote === null) return cancelled();
+            if (createRemote) {
+                githubUrl = await askText('Public webhook URL — GitHub sends deliveries here', {
+                    validate: webhookUrlProblem,
+                });
+                if (githubUrl === null) return cancelled();
+            }
+        }
+    }
+
     config.hooks.push(hook);
     writeConfig(file, config);
 
+    let githubResult = null;
+    if (githubUrl) {
+        githubResult = createGitHubWebhook(repo, githubUrl, hook, secret);
+    }
+
     console.log('');
     console.log(`Added '${name}' to ${show(file)}.`);
+    if (githubResult && githubResult.ok) {
+        console.log(`Created the GitHub webhook for ${repo} at ${githubUrl}.`);
+    } else if (githubResult) {
+        console.error(`warning: the local hook was added, but GitHub was not updated: ${githubResult.message}`);
+        console.error('         Check the gh account has Webhooks write access, then add it in the repository settings.');
+    }
     console.log('');
     console.log(`  ${name}`);
     printRows(describe(hook), '    ');
@@ -487,7 +518,7 @@ async function createHook(file) {
     }
     console.log(`Edit ${show(file)} for anything else — other events or branches, arguments, detach.`);
     console.log('Run `gift serve` to restart the server with it.');
-    return 0;
+    return githubResult && !githubResult.ok ? 1 : 0;
 }
 
 // ------------------------------------------------------------------ delete ---
@@ -607,6 +638,8 @@ function createUsage() {
     console.log('');
     console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
     console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
+    console.log(`When gh has an active GitHub user, a repository hook is created too; set`);
+    console.log(`${WEBHOOK_URL_ENV} to its complete public delivery URL, or gift will ask for it.`);
     console.log('');
     console.log('options:');
     console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
@@ -743,6 +776,10 @@ module.exports = {
     deleteUsage,
     listMain,
     listUsage,
+    // Kept injectable so the gh integration can be verified without network access.
+    createGitHubWebhook,
+    hasGitHubUser,
+    webhookUrlProblem,
     // Configuration and path helpers shared with `gift log` and `gift status`.
     readConfig,
     configFile,
