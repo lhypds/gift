@@ -628,7 +628,12 @@ function runHook(hook, delivery, options) {
 
 // ------------------------------------------------------------------ server ---
 
+const REQUEST_RECORDER = Symbol('requestRecorder');
+
 function send(res, status, body) {
+    // Record before sending the response. If a client received a gift response,
+    // its access entry is already on disk.
+    if (res[REQUEST_RECORDER]) res[REQUEST_RECORDER](status);
     res.writeHead(status, {
         'content-type': 'text/plain; charset=utf-8',
         'content-length': Buffer.byteLength(body),
@@ -647,8 +652,10 @@ function createServer(config, secrets, options) {
             requestLogged = true;
             logRequest(req, status, pathName, from, startedAt);
         };
-        res.once('finish', () => recordRequest(res.statusCode));
-        res.once('close', () => recordRequest(res.writableFinished ? res.statusCode : 'aborted'));
+        res[REQUEST_RECORDER] = recordRequest;
+        res.once('close', () => {
+            if (!res.writableFinished) recordRequest('aborted');
+        });
 
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
