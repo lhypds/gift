@@ -402,7 +402,7 @@ async function createHook(file) {
         fallback: defaultName(repo === '*' ? '' : repo.split('/')[1], taken),
         validate: (value) => {
             if (!VALID_HOOK_NAME.test(value)) return 'Letters, digits, dot, dash and underscore only.';
-            if (taken.has(value)) return `${show(file)} already has a hook called '${value}'.`;
+            if (taken.has(value)) return `warning: hook name '${value}' already exists; use another name.`;
             return null;
         },
     });

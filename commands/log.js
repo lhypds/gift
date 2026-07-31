@@ -2,7 +2,7 @@
 //
 //   gift log [lines]
 //
-// The last 100 lines, and then whatever the server appends next: `tail -F` keeps
+// The last 10 lines, and then whatever the server appends next: `tail -F` keeps
 // the window open until Ctrl-C, and reopens the file when a rotation replaces it,
 // so a `gift log` left running in a terminal does not go quiet at 5 MB.
 // `--no-follow` prints the window and stops, for a pipe or a script.
@@ -22,7 +22,7 @@ const { readConfig, configFile, show, expandHome } = require('./hook.js');
 const { WEBHOOK_DIR } = require('../utils/service.js');
 
 const DEFAULT_LOG = 'hooks.log';
-const DEFAULT_LINES = 100;
+const DEFAULT_LINES = 10;
 
 // Values of the `log` setting that mean "console only, write no file".
 const LOG_OFF = ['off', 'none', 'no', 'false', ''];

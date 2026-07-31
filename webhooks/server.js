@@ -9,7 +9,8 @@
 //
 // Configuration: webhooks/hooks.json (see hooks.example.json).
 // Secret:        GITHUB_WEBHOOK_SECRET in webhooks/.env or the environment.
-// Log:           webhooks/hooks.log (--log=FILE, or --no-log for console only).
+// Activity log:  webhooks/hooks.log (--log=FILE, or --no-log for console only).
+// Request log:   webhooks/server.log (one line for every HTTP request).
 'use strict';
 
 const crypto = require('node:crypto');
@@ -23,6 +24,7 @@ const HERE = __dirname;
 const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
 const DEFAULT_LOG = path.join(HERE, 'hooks.log');
+const DEFAULT_REQUEST_LOG = path.join(HERE, 'server.log');
 
 // GitHub rejects payloads above 25 MB, so anything larger is not from GitHub.
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
@@ -36,7 +38,7 @@ const DEFAULTS = {
 // ---------------------------------------------------------------- logging ---
 //
 // Every line goes to the console and, unless file logging is turned off, is
-// appended to hooks.log as well: the request that arrived, whether its
+// appended to hooks.log as well: the delivery that arrived, whether its
 // signature verified, which hooks matched, exactly what was executed, whatever
 // the script printed, and how it ended. That history survives a restart, which
 // is what `pm2 logs` alone does not give you.
@@ -45,44 +47,62 @@ const DEFAULTS = {
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 const logFile = { path: null, bytes: 0, disabled: false };
+const requestLogFile = { path: null, bytes: 0, disabled: false };
 
-/** Start appending to `file`; a falsy file leaves logging on the console only. */
-function openLog(file) {
-    logFile.path = file || null;
-    logFile.bytes = 0;
-    logFile.disabled = false;
-    if (!logFile.path) return;
+function openLogFile(target, file) {
+    target.path = file || null;
+    target.bytes = 0;
+    target.disabled = false;
+    if (!target.path) return;
 
     try {
-        fs.mkdirSync(path.dirname(logFile.path), { recursive: true });
+        fs.mkdirSync(path.dirname(target.path), { recursive: true });
         // Create it here, with a restrictive mode, so no later append can be the
         // call that makes a world-readable log.
-        fs.appendFileSync(logFile.path, '', { mode: 0o600 });
-        logFile.bytes = fs.statSync(logFile.path).size;
+        fs.appendFileSync(target.path, '', { mode: 0o600 });
+        target.bytes = fs.statSync(target.path).size;
     } catch (err) {
-        logFile.disabled = true;
-        console.error(`${stamp()}  warn   cannot open ${logFile.path}: ${err.message}`);
+        target.disabled = true;
+        console.error(`${stamp()}  warn   cannot open ${target.path}: ${err.message}`);
     }
 }
 
-function rotateLog() {
+/** Start appending detailed server activity to `file`. */
+function openLog(file) {
+    openLogFile(logFile, file);
+}
+
+/** Start the access log that receives exactly one line per HTTP request. */
+function openRequestLog(file = DEFAULT_REQUEST_LOG) {
+    openLogFile(requestLogFile, file);
+}
+
+function rotateLog(target) {
     // rename() replaces an existing .1, so exactly one old file is kept.
-    fs.renameSync(logFile.path, `${logFile.path}.1`);
-    logFile.bytes = 0;
+    fs.renameSync(target.path, `${target.path}.1`);
+    target.bytes = 0;
+}
+
+function appendLogFile(target, line) {
+    if (!target.path || target.disabled) return;
+    const bytes = Buffer.byteLength(line);
+    try {
+        if (target.bytes + bytes > LOG_MAX_BYTES) rotateLog(target);
+        fs.appendFileSync(target.path, line, { mode: 0o600 });
+        target.bytes += bytes;
+    } catch (err) {
+        // A log that cannot be written must not take the server down with it.
+        target.disabled = true;
+        console.error(`${stamp()}  warn   log write failed, disabling ${target.path}: ${err.message}`);
+    }
 }
 
 function appendLog(line) {
-    if (!logFile.path || logFile.disabled) return;
-    const bytes = Buffer.byteLength(line);
-    try {
-        if (logFile.bytes + bytes > LOG_MAX_BYTES) rotateLog();
-        fs.appendFileSync(logFile.path, line, { mode: 0o600 });
-        logFile.bytes += bytes;
-    } catch (err) {
-        // A log that cannot be written must not take the server down with it.
-        logFile.disabled = true;
-        console.error(`${stamp()}  warn   log write failed, continuing on the console only: ${err.message}`);
-    }
+    appendLogFile(logFile, line);
+}
+
+function appendRequestLog(line) {
+    appendLogFile(requestLogFile, line);
 }
 
 function stamp() {
@@ -95,15 +115,34 @@ function field(value) {
     return /[\s"]/.test(text) ? JSON.stringify(text) : text;
 }
 
-function log(level, message, fields = {}) {
-    const extra = Object.entries(fields)
+function formatFields(fields) {
+    return Object.entries(fields)
         .filter(([, value]) => value !== undefined && value !== null && value !== '')
         .map(([key, value]) => `${key}=${field(value)}`)
         .join(' ');
+}
+
+function log(level, message, fields = {}) {
+    const extra = formatFields(fields);
     const line = `${stamp()}  ${level.padEnd(5)}  ${message}${extra ? '  ' + extra : ''}`;
     if (level === 'error' || level === 'warn') console.error(line);
     else console.log(line);
     appendLog(line + '\n');
+}
+
+function logRequest(req, status, pathName, from, startedAt) {
+    const level = status === 'aborted' || status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+    const fields = {
+        method: req.method,
+        path: pathName,
+        status,
+        from,
+        bytes: req.headers['content-length'],
+        agent: req.headers['user-agent'],
+        ms: Date.now() - startedAt,
+    };
+    const extra = formatFields(fields);
+    appendRequestLog(`${stamp()}  ${level.padEnd(5)}  request  ${extra}\n`);
 }
 
 // ------------------------------------------------------------------- args ---
@@ -597,11 +636,20 @@ function send(res, status, body) {
 
 function createServer(config, secrets, options) {
     return http.createServer(async (req, res) => {
-        const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const startedAt = Date.now();
         const from = req.socket.remoteAddress;
+        const pathName = String(req.url || '/').split('?', 1)[0];
+        let requestLogged = false;
+        const recordRequest = (status) => {
+            if (requestLogged) return;
+            requestLogged = true;
+            logRequest(req, status, pathName, from, startedAt);
+        };
+        res.once('finish', () => recordRequest(res.statusCode));
+        res.once('close', () => recordRequest(res.writableFinished ? res.statusCode : 'aborted'));
 
-        // Not logged: uptime checks run every few seconds and would bury the
-        // deliveries the log exists for.
+        const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
         if (req.method === 'GET' && url.pathname === '/health') {
             send(res, 200, 'ok');
             return;
@@ -827,6 +875,7 @@ function main(argv) {
     openLog(off.includes(String(settings.log).trim().toLowerCase())
         ? null
         : path.resolve(HERE, settings.log));
+    openRequestLog();
 
     const secrets = collectSecrets(config.hooks);
     if (secrets.size === 0) {
@@ -872,6 +921,7 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         log('info', `health check on http://${settings.host}:${settings.port}/health`);
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
+        log('info', `request log ${requestLogFile.path}`);
         // With the fingerprint of each: after a rotation, this line is what says
         // whether the process is running on the value that is now in .env.
         log('info', `secrets accepted from ${fingerprints(secrets)}`);
@@ -916,5 +966,6 @@ module.exports = {
     loadConfig,
     collectSecrets,
     openLog,
+    openRequestLog,
     main,
 };

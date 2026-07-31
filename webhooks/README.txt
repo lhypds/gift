@@ -17,6 +17,7 @@ Files
 | `hooks.example.json`   | Example configuration; `./setup.sh` copies it to `hooks.json`         |
 | `hooks.json`           | Your local configuration (git-ignored — it points at machine paths)   |
 | `hooks.log`            | What arrived and what ran, one line each (git-ignored)                |
+| `server.log`           | Every HTTP request, exactly one access-log line each (git-ignored)    |
 | `ecosystem.config.cjs` | PM2 configuration; takes `PM2_NAME` and `PORT` from `.env`            |
 | `start.sh`             | Start the server under PM2                                            |
 | `stop.sh`              | Stop it                                                               |
@@ -34,7 +35,7 @@ gift serve      # pull the latest code, then (re)start the server under PM2
 gift stop       # stop it
 gift status     # is it running, and answering?
 gift hook       # list, create and delete hooks
-gift log        # the last 100 lines of the log, then follow it live
+gift log        # the last 10 lines of the log, then follow it live
 ```
 
 `serve` and `stop` take no options — they run `restart.sh` and `stop.sh` from
@@ -171,7 +172,8 @@ gift hook delete [name]     # remove one, from a menu or by name
 script and its arguments, the working directory it runs in, whether to detach,
 and which environment variable holds its secret. Enter takes the `[default]`
 shown, Ctrl-C stops without writing anything, and nothing is saved until the
-summary at the end is confirmed:
+summary at the end is confirmed. Hook names must be unique; an existing name is
+rejected with a warning and the prompt asks for another one:
 
 ```
 $ gift hook create
@@ -294,20 +296,28 @@ gift status --json | jq -r '.health.ms'
 | `--timeout=SEC` | How long to wait for the health check (default: 2)          |
 | `--config=FILE` | Read the hooks and the log setting from another file        |
 
-`GET /health` is the one request the server does not log, so asking as often as
-you like leaves the log alone. What `gift status` does not do is prove a delivery
-would fire — the secret is not checked against GitHub's, and no hook is run. For
-that, see "Checking the wiring" below.
+`GET /health` is recorded in `server.log` like every other request. What `gift
+status` does not do is prove a delivery would fire — the secret is not checked
+against GitHub's, and no hook is run.
 
 
 The log
 -------
 
+Every HTTP request produces one access entry in `webhooks/server.log`, including
+health checks, unknown paths, rejected deliveries, and aborted connections. The
+entry records the method, path, response status, source address, request size,
+user agent, and duration without recording headers or request bodies:
+
+```
+... info   request  method=GET path=/health status=200 from=127.0.0.1 agent=curl/8.7.1 ms=1
+```
+
 Everything the server prints is also appended to `webhooks/hooks.log`, so a
 delivery can still be traced after a restart, when the console output has gone.
-Each request leaves a trail: what arrived, whether it verified, which hooks
-matched, exactly what was executed, whatever the script printed, and how it
-ended.
+Each delivery leaves a detailed trail: what arrived, whether it verified, which
+hooks matched, exactly what was executed, whatever the script printed, and how
+it ended.
 
 ```
 ... info   delivery received  event=push delivery=8f3c… from=140.82.115.34 bytes=8214 signed=yes agent=GitHub-Hookshot/abc123
@@ -347,16 +357,16 @@ which is what `pm2 env <id> | grep GITHUB_WEBHOOK_SECRET` shows.
 | Console only   | `--no-log`, or `GIFT_SERVE_LOG=off`                                           |
 | Rotation       | At 5 MB the file becomes `hooks.log.1`; one old file is kept                  |
 
-`GET /health` is the one thing left out — uptime checks run every few seconds
-and would bury the deliveries. A log that cannot be written is reported once and
-then skipped; the server keeps running and keeps logging to the console.
+`server.log` rotates the same way to `server.log.1`. `--no-log` disables the
+detailed file log only; the per-request access log is always written. A log that
+cannot be written is reported once and then skipped so the server keeps running.
 
 `gift log` follows it without needing to know where it is — it reads the file the
 server writes, wherever `--log`, `GIFT_SERVE_LOG` or `hooks.json` put it, prints
 the last lines and then stays open, printing each new one as it arrives:
 
 ```bash
-gift log                # the last 100 lines, then follow until Ctrl-C
+gift log                # the last 10 lines, then follow until Ctrl-C
 gift log 20             # start with fewer
 gift log --no-follow    # print them and stop
 ```
@@ -560,8 +570,9 @@ server {
 Troubleshooting
 ---------------
 
-`webhooks/hooks.log` is the first place to look: every request is there with the
-status it was answered with, and every hook run with its exit code.
+`webhooks/server.log` is the first place to check whether a request reached the
+server and what status answered it. `webhooks/hooks.log` has the delivery details
+and every hook run with its exit code.
 
 Repository → Settings → Webhooks → Recent deliveries shows the headers, the
 payload, and the response for every delivery, and can redeliver any of them.
