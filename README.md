@@ -27,6 +27,12 @@ Start
 Stop  
 `gift stop`  
 
+Status  
+`gift status` says whether the server is running: what PM2 reports about the
+process, what the server answers on `GET /health`, and what it is set up to serve
+— the endpoint, the hooks and the log. The exit code is 0 when it answers and 1
+when it does not, and `gift status --json` prints the same for a script.  
+
 Use `hooks.json` to configure which functions run for which GitHub events.  
 
 Hooks  

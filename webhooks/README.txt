@@ -33,13 +33,15 @@ Usage
 ```bash
 gift serve      # pull the latest code, then (re)start the server under PM2
 gift stop       # stop it
+gift status     # is it running, and answering?
 gift hook       # list, create and delete hooks
 gift log        # the last 100 lines of the log, then follow it live
 ```
 
 `serve` and `stop` take no options — they run `restart.sh` and `stop.sh` from
-this folder. `gift hook` is described under "Editing hooks from the command
-line" below; it edits `hooks.json`, which the server reads at startup. `gift log`
+this folder. `gift status` is described under "Is it running" below. `gift hook`
+is described under "Editing hooks from the command line" below; it edits
+`hooks.json`, which the server reads at startup. `gift log`
 is described under "The log". The
 server's own flags belong to `server.js`, which PM2 starts and which you can also
 run yourself:
@@ -250,6 +252,64 @@ environment variables instead:
 
 Treat all of them as untrusted input: never `eval` them or paste them into a
 shell command.
+
+
+Is it running
+-------------
+
+`gift status` answers that without starting or stopping anything:
+
+```
+$ gift status
+gift webhooks server: running
+
+  process   'gift-webhooks' online, pid 51234, up 3d 4h, 1 restart, 40 MB
+  endpoint  http://127.0.0.1:3999/hooks/github
+  health    ok in 4 ms — GET http://127.0.0.1:3999/health
+  hooks     2 — test, deploy-example
+  log       webhooks/hooks.log — 1.3 MB, written 9m ago
+
+`gift log` follows what it writes; `gift stop` stops it.
+```
+
+Three things are asked at once: what PM2 has under `PM2_NAME`, what the server
+says for itself on `GET /health`, and what it is set up to serve — the address,
+the hooks in `hooks.json`, and the log file with its size and how long since a
+line was added. The address, the config file and the log are resolved exactly as
+`server.js` resolves them, so both ends are talking about the same server.
+
+The verdict is the health check rather than PM2. A server that answers is up
+however it was started — under systemd, or attached in a terminal — and a PM2
+entry that says `online` while nothing answers is reported as `not answering`,
+which is the case worth knowing about:
+
+```
+gift webhooks server: not answering, though PM2 says the process is online
+gift webhooks server: answering 404 on /health rather than ok
+gift webhooks server: stopped
+```
+
+When the server is down, an empty `GITHUB_WEBHOOK_SECRET` is pointed out as a
+`note` — it is the usual reason one will not start.
+
+The exit code follows the same rule: 0 when the server answers, 1 when it does
+not, so `gift status` works in a script or a cron check.
+
+```bash
+gift status >/dev/null && echo up || echo down
+gift status --json | jq -r '.health.ms'
+```
+
+| Option          | Description                                                 |
+|-----------------|-------------------------------------------------------------|
+| `--json`        | Print the whole report as JSON, for a script                |
+| `--timeout=SEC` | How long to wait for the health check (default: 2)          |
+| `--config=FILE` | Read the hooks and the log setting from another file        |
+
+`GET /health` is the one request the server does not log, so asking as often as
+you like leaves the log alone. What `gift status` does not do is prove a delivery
+would fire — the secret is not checked against GitHub's, and no hook is run. For
+that, see "Checking the wiring" below.
 
 
 The log
