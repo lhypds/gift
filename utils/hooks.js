@@ -172,10 +172,21 @@ function restartServer(run = spawnSync) {
 function hasGitHubUser(run = spawnSync) {
     const result = run(
         'gh',
-        ['auth', 'status', '--active', '--hostname', 'github.com'],
-        { stdio: 'ignore', timeout: 5000 },
+        ['auth', 'status', '--active', '--hostname', 'github.com', '--json', 'hosts'],
+        { encoding: 'utf8', timeout: 5000 },
     );
-    return !result.error && result.status === 0;
+    if (result.error) return false;
+
+    // In JSON mode gh reports configured accounts even when its live token
+    // validation fails (for example, while api.github.com is unreachable).
+    // Remote creation should still be attempted so `gh api` can report the
+    // actual authentication or network error instead of claiming no user exists.
+    try {
+        const accounts = JSON.parse(String(result.stdout || '')).hosts?.['github.com'];
+        return Array.isArray(accounts) && accounts.some((account) => account.active === true);
+    } catch {
+        return false;
+    }
 }
 
 function webhookUrlProblem(value) {
