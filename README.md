@@ -20,6 +20,7 @@ Status
 Hooks  
 `gift list` shows the configured hooks.  
 `gift create` adds one.  
+Hook names are labels and may be reused; delete same-named hooks by their list position.
 
 For a specific repository, `gift create` asks whether to create the GitHub
 webhook with `gh`. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public

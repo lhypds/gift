@@ -295,8 +295,14 @@ function resolveHook(hooks, token) {
         return { status: 'ok', index };
     }
 
-    const exact = hooks.findIndex((h) => String(h.name) === text);
-    if (exact >= 0) return { status: 'ok', index: exact };
+    const exact = [];
+    hooks.forEach((hook, index) => {
+        if (String(hook.name) === text) exact.push(index);
+    });
+    if (exact.length === 1) return { status: 'ok', index: exact[0] };
+    if (exact.length > 1) {
+        return { status: 'ambiguous', matches: exact.map((i) => String(hooks[i].name)) };
+    }
 
     const matches = [];
     hooks.forEach((hook, index) => {
@@ -379,7 +385,7 @@ function listHooks(file) {
 
 // ------------------------------------------------------------------ create ---
 
-/** A name for the new hook that says what it is and is not taken yet. */
+/** A descriptive unused default name for the new hook. */
 function defaultName(repoName, taken) {
     const base = repoName ? `hook-${repoName.toLowerCase()}` : 'hook';
     if (!taken.has(base)) return base;
@@ -433,7 +439,6 @@ async function createHook(file) {
         fallback: defaultName(repo === '*' ? '' : repo.split('/')[1], taken),
         validate: (value) => {
             if (!VALID_HOOK_NAME.test(value)) return 'Letters, digits, dot, dash and underscore only.';
-            if (taken.has(value)) return `warning: hook name '${value}' already exists; use another name.`;
             return null;
         },
     });
@@ -561,7 +566,7 @@ async function pickHook(hooks) {
         if (result.status === 'out-of-range') {
             console.log(`There is no ${token} in the list — pick 1 to ${hooks.length}.`);
         } else if (result.status === 'ambiguous') {
-            console.log(`'${token}' matches ${result.matches.join(', ')} — type more of the name.`);
+            console.log(`'${token}' matches more than one hook — use its list position.`);
         } else {
             console.log(`No hook called '${token}'.`);
         }
@@ -586,7 +591,7 @@ async function deleteHook(file, options, positionals) {
         if (result.status === 'ambiguous') {
             console.error(`gift delete: '${token}' matches more than one hook:`);
             for (const match of result.matches) console.error(`  ${match}`);
-            console.error('Type more of the name to pick one.');
+            console.error("Use the hook's list position to pick one.");
             return 2;
         }
         if (result.status === 'out-of-range') {
@@ -677,6 +682,7 @@ function deleteUsage() {
     console.log('usage: gift delete [name] [options]');
     console.log('');
     console.log('Delete a server hook by name, unique name prefix, or list position.');
+    console.log('For hooks with the same name, use the list position.');
     console.log('With no name, choose from a menu.');
     console.log('');
     console.log('options:');
