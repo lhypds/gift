@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = __dirname;
 const FUNCTIONS_DIR = path.join(ROOT, 'functions');
 
 /**
@@ -99,24 +99,4 @@ function list() {
     return found.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/**
- * Resolve a token typed by the user to a function. An exact folder name wins;
- * otherwise any unique prefix does, so `recur` finds `recursively-pull-repos`.
- *
- * @returns {{status: 'ok', fn: object}
- *          | {status: 'unknown'}
- *          | {status: 'ambiguous', matches: object[]}}
- */
-function resolve(token) {
-    const available = list();
-
-    const exact = available.find((f) => f.name === token);
-    if (exact) return { status: 'ok', fn: exact };
-
-    const matches = available.filter((f) => f.name.startsWith(token));
-    if (matches.length === 1) return { status: 'ok', fn: matches[0] };
-    if (matches.length > 1) return { status: 'ambiguous', matches };
-    return { status: 'unknown' };
-}
-
-module.exports = { ROOT, FUNCTIONS_DIR, list, resolve, readDescription };
+module.exports = { ROOT, list };

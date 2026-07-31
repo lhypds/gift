@@ -794,7 +794,7 @@ function main(argv) {
     // `gift serve` already loaded webhooks/.env; do it here too so that
     // `node webhooks/server.js` and a systemd unit behave the same way.
     try {
-        require('../lib/env.js').loadFor(HERE);
+        require('../utils/env.js').loadFor(HERE);
     } catch {
         /* running outside the repo — rely on the real environment */
     }

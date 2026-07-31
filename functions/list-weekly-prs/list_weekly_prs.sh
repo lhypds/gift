@@ -13,13 +13,6 @@ AUTHOR="${GIFT_AUTHOR:-}"
 WEEKS_AGO=""
 VERBOSE=false
 
-# Pause only when launched by double-clicking run.command; the CLI sets
-# GIFT_NO_PAUSE so the function returns to the prompt like any other.
-pause() {
-    [ -n "${GIFT_NO_PAUSE:-}" ] && return 0
-    read -p "Press Enter to exit..."
-}
-
 usage() {
     sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'
 }
@@ -60,7 +53,6 @@ fi
 if [ ${#REPOS[@]} -eq 0 ]; then
     echo "Error: No repositories specified."
     echo "  Pass --repos=owner/repo1,owner/repo2, or set GIFT_REPOS in this function's .env"
-    pause
     exit 1
 fi
 
@@ -68,7 +60,6 @@ fi
 if [ -z "$AUTHOR" ]; then
     echo "Error: No author specified."
     echo "  Pass --author=login, or set GIFT_AUTHOR in this function's .env"
-    pause
     exit 1
 fi
 
@@ -88,7 +79,6 @@ fi
 # Validate input
 if ! [[ "$WEEKS_AGO" =~ ^[0-9]+$ ]]; then
     echo "Error: Please enter a non-negative integer."
-    pause
     exit 1
 fi
 
@@ -129,7 +119,6 @@ echo ""
 if ! command -v gh &> /dev/null; then
     echo "Error: GitHub CLI (gh) is not installed."
     echo "Please install it from: https://cli.github.com/"
-    pause
     exit 1
 fi
 
@@ -180,6 +169,3 @@ for REPO in "${REPOS[@]}"; do
     fi
     echo ""
 done
-
-echo ""
-pause

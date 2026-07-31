@@ -23,11 +23,9 @@ const http = require('node:http');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const functions = require('./functions.js');
 const { readConfig, configFile, show, expandHome } = require('./hook.js');
 const { version } = require('./version.js');
-
-const WEBHOOK_DIR = path.join(functions.ROOT, 'webhooks');
+const { WEBHOOK_DIR } = require('../utils/service.js');
 
 const DEFAULTS = { host: '127.0.0.1', port: 3999, path: '/hooks/github' };
 const DEFAULT_LOG = 'hooks.log';
@@ -575,4 +573,4 @@ async function main(argv) {
     }
 }
 
-module.exports = { main, usage, probe, since, bytes, headline };
+module.exports = { main, usage, probe };

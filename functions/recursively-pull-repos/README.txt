@@ -12,9 +12,6 @@ Files
 |-----------------------------|-----------------------------------------------------------------------------|
 | `recursively-pull-repos.sh` | Core logic script — run through `gift recur`, or directly from the terminal |
 | `.env.example`              | Template for this function's own settings — copied to `.env` by `./setup.sh` |
-| `run.command`               | macOS double-clickable launcher                                            |
-
-`run.command` is git-ignored; copy `../../run.command.example` and edit it.
 
 
 Usage

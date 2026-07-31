@@ -11,12 +11,19 @@
   },
   "files": [
     "bin",
-    "lib",
-    "functions",
-    "webhooks",
+    "cli.js",
+    "commands",
+    "functions/**/*.sh",
+    "functions/**/.env.example",
+    "functions/**/README.*",
+    "functions.js",
+    "utils",
+    "webhooks/*.js",
+    "webhooks/*.cjs",
+    "webhooks/*.sh",
+    "webhooks/*.txt",
+    "webhooks/*.example.json",
+    "webhooks/.env.example",
     "VERSION"
-  ],
-  "scripts": {
-    "test": "node test/run-tests.js"
-  }
+  ]
 }

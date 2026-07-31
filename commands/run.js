@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const { ROOT } = require('./functions.js');
+const { ROOT } = require('../functions.js');
 const { version } = require('./version.js');
 
 /** Pick the interpreter for an entry script. */
@@ -44,8 +44,6 @@ function runFunction(fn, args = []) {
             GIFT_VERSION: version(),
             GIFT_FUNCTION: fn.name,
             GIFT_FUNCTION_DIR: fn.dir,
-            // Launched from the CLI, so scripts skip their double-click pause.
-            GIFT_NO_PAUSE: '1',
         },
     });
 

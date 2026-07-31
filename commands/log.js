@@ -16,12 +16,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const functions = require('./functions.js');
 // hooks.json is the hook command's file; `log` is one setting in it, so the
 // reading and the path helpers are shared rather than written twice.
 const { readConfig, configFile, show, expandHome } = require('./hook.js');
-
-const WEBHOOK_DIR = path.join(functions.ROOT, 'webhooks');
+const { WEBHOOK_DIR } = require('../utils/service.js');
 
 const DEFAULT_LOG = 'hooks.log';
 const DEFAULT_LINES = 100;
@@ -237,4 +235,4 @@ function main(argv) {
     }
 }
 
-module.exports = { main, usage, tail, DEFAULT_LINES };
+module.exports = { main, usage, DEFAULT_LINES };

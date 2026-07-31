@@ -6,7 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { ROOT } = require('./functions.js');
+const { ROOT } = require('../functions.js');
 
 function parse(text) {
     const values = {};
@@ -69,4 +69,4 @@ function loadFor(functionDir) {
     return { ...shared, ...own };
 }
 
-module.exports = { load, loadFor, parse };
+module.exports = { loadFor };

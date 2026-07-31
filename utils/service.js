@@ -16,9 +16,9 @@
 
 const path = require('node:path');
 
-const functions = require('./functions.js');
+const { ROOT } = require('../functions.js');
 
-const WEBHOOK_DIR = path.join(functions.ROOT, 'webhooks');
+const WEBHOOK_DIR = path.join(ROOT, 'webhooks');
 
 const SERVE = {
     name: 'serve',

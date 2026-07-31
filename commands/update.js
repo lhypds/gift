@@ -25,8 +25,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const status = require('./status.js');
-const { ROOT } = require('./functions.js');
-const { SERVE } = require('./service.js');
+const { ROOT } = require('../functions.js');
+const { SERVE } = require('../utils/service.js');
 const { runFunction } = require('./run.js');
 const { version } = require('./version.js');
 

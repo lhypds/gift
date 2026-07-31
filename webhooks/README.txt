@@ -17,7 +17,6 @@ Files
 | `hooks.example.json`   | Example configuration; `./setup.sh` copies it to `hooks.json`         |
 | `hooks.json`           | Your local configuration (git-ignored — it points at machine paths)   |
 | `hooks.log`            | What arrived and what ran, one line each (git-ignored)                |
-| `test-hook.sh`         | A hook script that does nothing — for checking the wiring             |
 | `ecosystem.config.cjs` | PM2 configuration; takes `PM2_NAME` and `PORT` from `.env`            |
 | `start.sh`             | Start the server under PM2                                            |
 | `stop.sh`              | Stop it                                                               |
@@ -103,17 +102,6 @@ Configuration
 {
   "log": "hooks.log",
   "hooks": [
-    {
-      "name": "test",
-      "repo": "*",
-      "events": ["*"],
-      "branches": ["*"],
-      "run": "/Users/you/code/gift/webhooks/test-hook.sh",
-      "args": [],
-      "cwd": "/Users/you/code/gift/webhooks",
-      "detach": false,
-      "secretEnv": "GITHUB_WEBHOOK_SECRET"
-    },
     {
       "name": "deploy-example",
       "repo": "YOUR_NAME/YOUR_REPOSITORY",
@@ -395,43 +383,6 @@ grep -c 'status=401' webhooks/hooks.log     # deliveries that failed to verify
 
 `pm2 logs gift-webhooks` shows the same lines live; the file is what remains
 afterwards.
-
-
-Checking the wiring
--------------------
-
-`test-hook.sh` is a hook script that does nothing — it prints nothing, changes
-nothing, and exits `0`. Point a hook at it with `repo`, `events` and `branches`
-all set to `*`, and it fires on any delivery the secret verifies. Both paths are
-absolute, so they are yours to fill in — `pwd` in this folder prints them:
-
-```json
-{ "name": "test", "repo": "*", "events": ["*"], "branches": ["*"],
-  "run": "/Users/you/code/gift/webhooks/test-hook.sh",
-  "cwd": "/Users/you/code/gift/webhooks" }
-```
-
-```bash
-gift hook create     # asks for each field and writes the absolute paths for you
-```
-
-Use it to prove the path end to end — GitHub signed the delivery, the server
-verified it, a hook matched, a script ran — without deploying anything. The
-evidence is in the log:
-
-```bash
-gift serve
-grep 'hook=test' webhooks/hooks.log
-```
-
-```
-... info   running hook   hook=test delivery=8f3c… event=push repo=owner/repo branch=main run=…/webhooks/test-hook.sh cwd=…/webhooks pid=60885
-... info   hook finished  hook=test delivery=8f3c… exit=0 ms=12
-```
-
-GitHub's "Redeliver" button on any past delivery re-runs it. Once real hooks are
-in place the `test` hook can stay — it does nothing on every delivery, which is
-also a heartbeat — or come out of `hooks.json`.
 
 
 Configure the webhook on GitHub

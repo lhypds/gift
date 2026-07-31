@@ -13,18 +13,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const functions = require('./functions.js');
-const env = require('./env.js');
-const hook = require('./hook.js');
-const log = require('./log.js');
-const status = require('./status.js');
-const update = require('./update.js');
-const { pick } = require('./pick.js');
-const { runFunction } = require('./run.js');
+const env = require('./utils/env.js');
+const hook = require('./commands/hook.js');
+const log = require('./commands/log.js');
+const status = require('./commands/status.js');
+const update = require('./commands/update.js');
+const { pick } = require('./utils/pick.js');
+const { runFunction } = require('./commands/run.js');
 // `serve` and `stop` are scripts in webhooks/ rather than function folders, so
 // service.js names them; `gift update` restarts a running server through the same
 // definitions.
-const { SERVE, STOP, SERVICE, WEBHOOK_DIR } = require('./service.js');
-const { version } = require('./version.js');
+const { SERVE, STOP, SERVICE, WEBHOOK_DIR } = require('./utils/service.js');
+const { version } = require('./commands/version.js');
 
 // Everything the CLI answers itself, rather than by running a function folder.
 const BUILTINS = {
@@ -261,4 +261,4 @@ async function main(argv) {
     return runFunction(result.fn, rest);
 }
 
-module.exports = { main, BUILTINS, SERVE, STOP, SERVICE, WEBHOOK_NAMES, resolveToken };
+module.exports = { main };

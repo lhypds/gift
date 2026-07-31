@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Entry point for the `gift` command. Keep this thin — logic lives in lib/.
+// Entry point for the `gift` command. Keep this thin — logic lives in cli.js.
 'use strict';
 
-const { main } = require('../lib/cli.js');
+const { main } = require('../cli.js');
 
 main(process.argv.slice(2))
     .then((code) => {

@@ -13,20 +13,16 @@ Files
 |----------------------|---------------------------------------------------------------------------------|
 | `list_weekly_prs.sh` | Core logic script — run through `gift list-weekly-prs`, or from the terminal    |
 | `.env.example`       | Template for this function's own settings — copied to `.env` by `./setup.sh`     |
-| `run.command`        | macOS double-clickable launcher — calls the script with preconfigured repos     |
-
-`run.command` is git-ignored; copy `../../run.command.example` and edit it.
 
 
 Usage
 -----
 
 ```bash
-gift list [--repos=owner/repo1,owner/repo2] [--author=login] [--weeks=N] [-v]
+gift list-weekly-prs [--repos=owner/repo1,owner/repo2] [--author=login] [--weeks=N] [-v]
 ```
 
-(`gift list` is the short form of `gift list-weekly-prs`. The script also runs
-on its own: `./list_weekly_prs.sh`.)
+(The script also runs on its own: `./list_weekly_prs.sh`.)
 
 Unless `--weeks` is given, the script asks:
 
@@ -58,13 +54,13 @@ Examples
 
 ```bash
 # Last week, repositories from .env
-gift list
+gift list-weekly-prs
 
 # Current week, custom repositories
-gift list --repos=myorg/myrepo --weeks=0
+gift list-weekly-prs --repos=myorg/myrepo --weeks=0
 
 # Two weeks ago, someone else's PRs, verbose output
-gift list --repos=myorg/myrepo --author=octocat --weeks=2 -v
+gift list-weekly-prs --repos=myorg/myrepo --author=octocat --weeks=2 -v
 ```
 
 

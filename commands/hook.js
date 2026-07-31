@@ -14,10 +14,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const functions = require('./functions.js');
-const { ask } = require('./pick.js');
+const { ROOT } = require('../functions.js');
+const { ask } = require('../utils/pick.js');
+const { WEBHOOK_DIR } = require('../utils/service.js');
 
-const WEBHOOK_DIR = path.join(functions.ROOT, 'webhooks');
 const DEFAULT_CONFIG = path.join(WEBHOOK_DIR, 'hooks.json');
 
 // What a freshly created hooks.json is seeded with — the same defaults the
@@ -45,7 +45,7 @@ const SUBCOMMANDS = {
 
 /** Shorten a path for printing: relative to the repo when it is inside it. */
 function show(target) {
-    const inside = path.relative(functions.ROOT, target);
+    const inside = path.relative(ROOT, target);
     return inside && !inside.startsWith('..') ? inside : target;
 }
 
@@ -699,18 +699,9 @@ async function main(argv) {
 module.exports = {
     main,
     usage,
-    SUBCOMMANDS,
-    resolveSubcommand,
-    resolveHook,
+    // Configuration and path helpers shared with `gift log` and `gift status`.
     readConfig,
-    writeConfig,
     configFile,
-    stringify,
-    parseRepo,
-    splitList,
-    splitArgs,
-    defaultName,
-    // Shared with `gift log`, which reads the `log` setting out of the same file.
     show,
     expandHome,
 };

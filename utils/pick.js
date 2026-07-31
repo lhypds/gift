@@ -3,7 +3,7 @@
 
 const readline = require('node:readline');
 
-const functions = require('./functions.js');
+const functions = require('../functions.js');
 
 /** How wide the menu is allowed to get, whatever the terminal reports. */
 function menuWidth() {
@@ -128,4 +128,4 @@ async function pick() {
 }
 
 // `ask` is shared with `gift hook`, which asks for a hook's fields one at a time.
-module.exports = { pick, choose, menuLines, ask };
+module.exports = { pick, ask };
