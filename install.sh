@@ -12,7 +12,14 @@ MIN_NODE_MAJOR=18
 LAUNCHER_DIR="$HOME/.local/bin"
 LAUNCHER="$LAUNCHER_DIR/gift"
 MARKER="# gift-launcher:REPO=$ROOT_DIR"
-ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
+
+# Point PATH advice at the rc file the user's login shell actually reads.
+case "$(basename "${SHELL:-}")" in
+    zsh)  SHELL_RC="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) SHELL_RC="$HOME/.bashrc" ;;
+    fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
+    *)    SHELL_RC="$HOME/.profile" ;;
+esac
 
 for arg in "$@"; do
     case "$arg" in
@@ -79,9 +86,14 @@ echo ""
 case ":$PATH:" in
     *":$LAUNCHER_DIR:"*) ;;
     *)
-        echo "Add this to $ZSHRC, then open a new terminal:"
+        echo "$LAUNCHER_DIR is not on your PATH. Add it:"
         echo ""
-        echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        if [ "$SHELL_RC" = "$HOME/.config/fish/config.fish" ]; then
+            echo "  fish_add_path \"\$HOME/.local/bin\""
+        else
+            echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $SHELL_RC"
+            echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"   # for this shell"
+        fi
         echo ""
         ;;
 esac
