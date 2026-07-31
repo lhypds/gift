@@ -505,6 +505,13 @@ starting. To run the server attached to the terminal instead — which is what t
 node webhooks/server.js --dry-run
 ```
 
+`gift update` restarts it as well: a running server keeps the files it started
+from, so once the pull brings something new, `gift update` runs `gift serve`
+itself rather than leaving the server on the code it replaced. Nothing is started
+that was not already running — a server that was stopped stays stopped, and a
+pull that brought nothing new restarts nothing. `gift update --no-restart` pulls
+and leaves the running server alone.
+
 `ecosystem.config.cjs` takes two settings from this folder's `.env`:
 
 ```
