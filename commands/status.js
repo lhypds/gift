@@ -264,8 +264,8 @@ function connectionProblem(err, host, port) {
 }
 
 /**
- * Ask the server how it is: `GET /health`, which answers `ok` and is the one
- * request the server does not log, so asking leaves the log alone.
+ * Ask the server how it is: `GET /health`, which answers `ok` and leaves an
+ * access entry in server.log like every other request.
  *
  * A wildcard bind is not an address to connect to — the loopback interface it
  * covers is.

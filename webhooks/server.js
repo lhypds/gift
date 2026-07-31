@@ -138,6 +138,8 @@ function logRequest(req, status, pathName, from, startedAt) {
         status,
         from,
         bytes: req.headers['content-length'],
+        event: req.headers['x-github-event'],
+        delivery: req.headers['x-github-delivery'],
         agent: req.headers['user-agent'],
         ms: Date.now() - startedAt,
     };

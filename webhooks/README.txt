@@ -307,7 +307,8 @@ The log
 Every HTTP request produces one access entry in `webhooks/server.log`, including
 health checks, unknown paths, rejected deliveries, and aborted connections. The
 entry records the method, path, response status, source address, request size,
-user agent, and duration without recording headers or request bodies:
+GitHub event and delivery ID when present, user agent, and duration without
+recording sensitive headers or request bodies:
 
 ```
 ... info   request  method=GET path=/health status=200 from=127.0.0.1 agent=curl/8.7.1 ms=1

@@ -86,6 +86,14 @@ async function waitForServer(attempts = 5) {
     return state;
 }
 
+async function waitForFileChange(file, before, attempts = 20) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        if (fileChanged(before, fileState(file))) return true;
+        if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return false;
+}
+
 async function main(argv) {
     let options;
     try {
@@ -172,7 +180,9 @@ async function main(argv) {
         return 1;
     }
 
-    if (!fileChanged(requestLogBefore, fileState(requestLog))) {
+    // The health response can reach this process just before the server's
+    // response-finished callback appends its access line in the PM2 process.
+    if (!(await waitForFileChange(requestLog, requestLogBefore))) {
         console.error(`gift update: /health answered, but no request was written to ${requestLog}.`);
         console.error('Check the PM2 logs and write permissions for the webhooks folder.');
         return 1;
