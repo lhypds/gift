@@ -171,6 +171,7 @@ environment (from .env, or the real environment, which wins):
   GIFT_SERVE_PATH         Default for --path
   GIFT_SERVE_LOG          Default for --log ('off' for no file)
 
+Status page:  GET http://HOST:PORT/
 Health check: GET http://HOST:PORT/health`);
 }
 
@@ -630,6 +631,195 @@ function runHook(hook, delivery, options) {
 
 const REQUEST_RECORDER = Symbol('requestRecorder');
 
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function duration(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    if (total < 60) return `${total}s`;
+    const minutes = Math.floor(total / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ${minutes % 60}m`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+}
+
+function hookReadiness(hook, secrets, options) {
+    const secretEnv = hook.secretEnv || 'GITHUB_WEBHOOK_SECRET';
+    if (!secrets.has(secretEnv)) return { label: 'Secret missing', tone: 'warning' };
+
+    try {
+        fs.accessSync(hook.run, fs.constants.X_OK);
+    } catch {
+        return { label: 'Script unavailable', tone: 'warning' };
+    }
+
+    if (options.dryRun) return { label: 'Dry run', tone: 'neutral' };
+    return { label: 'Ready', tone: 'ready' };
+}
+
+/** The read-only dashboard served at GET /. */
+function dashboardPage(config, secrets, options, requestHost) {
+    const hooks = Array.isArray(config.hooks) ? config.hooks : [];
+    const endpoint = options.path || config.path || DEFAULTS.path;
+    const address = `${requestHost || 'localhost'}${endpoint}`;
+    const cards = hooks.map((hook, index) => {
+        const name = hook.name || `hook-${index + 1}`;
+        const repo = hook.repo === '*' || !hook.repo ? 'Any repository' : hook.repo;
+        const events = Array.isArray(hook.events) && hook.events.length ? hook.events : ['push'];
+        const branches = Array.isArray(hook.branches) && hook.branches.length && !hook.branches.includes('*')
+            ? hook.branches.join(', ')
+            : 'Any branch';
+        const readiness = hookReadiness(hook, secrets, options);
+
+        return `
+          <article class="hook-card">
+            <div class="hook-heading">
+              <h3>${escapeHtml(name)}</h3>
+              <span class="hook-state ${readiness.tone}">${escapeHtml(readiness.label)}</span>
+            </div>
+            <dl>
+              <div><dt>Repository</dt><dd>${escapeHtml(repo)}</dd></div>
+              <div><dt>Events</dt><dd>${escapeHtml(events.join(', '))}</dd></div>
+              <div><dt>Branches</dt><dd>${escapeHtml(branches)}</dd></div>
+            </dl>
+          </article>`;
+    }).join('');
+
+    const hookContent = cards || `
+        <div class="empty-state">
+          <p>No webhooks are configured.</p>
+          <span>Run <code>gift create</code>, then restart the server.</span>
+        </div>`;
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="refresh" content="30">
+  <title>gift server status</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f5f7f2;
+      --surface: rgba(255, 255, 255, .82);
+      --surface-strong: #ffffff;
+      --ink: #17221b;
+      --muted: #667269;
+      --line: #dce3dc;
+      --green: #18794e;
+      --green-soft: #e5f5ec;
+      --amber: #9a5b13;
+      --amber-soft: #fff3d6;
+      --shadow: 0 18px 50px rgba(32, 53, 40, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 0%, rgba(120, 194, 148, .18), transparent 34rem),
+        radial-gradient(circle at 100% 100%, rgba(235, 190, 94, .13), transparent 30rem),
+        var(--canvas);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0 48px; }
+    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+    .eyebrow { margin: 0 0 8px; color: var(--green); font-size: .76rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 4.5rem); line-height: .98; letter-spacing: -.055em; }
+    .lede { max-width: 620px; margin: 20px 0 0; color: var(--muted); font-size: 1.02rem; }
+    .online {
+      display: inline-flex; align-items: center; gap: 9px; flex: none;
+      padding: 9px 14px; border: 1px solid #b9dfc8; border-radius: 999px;
+      background: var(--green-soft); color: var(--green); font-size: .84rem; font-weight: 800;
+    }
+    .online::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #21a366; box-shadow: 0 0 0 4px rgba(33, 163, 102, .13); }
+    .status-grid { display: grid; grid-template-columns: .8fr .8fr 1.8fr; gap: 14px; margin: 42px 0 54px; }
+    .metric { min-width: 0; padding: 20px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
+    .metric span, dt { color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .075em; text-transform: uppercase; }
+    .metric strong { display: block; margin-top: 8px; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    code { padding: .15em .42em; border-radius: 6px; background: #e9eee9; color: #34463a; font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+    section > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    h2 { margin: 0; font-size: 1.45rem; letter-spacing: -.025em; }
+    .count { color: var(--muted); font-size: .9rem; }
+    .hooks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .hook-card { padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-strong); box-shadow: var(--shadow); }
+    .hook-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    h3 { min-width: 0; margin: 0; font-size: 1.08rem; overflow-wrap: anywhere; }
+    .hook-state { flex: none; padding: 5px 9px; border-radius: 999px; font-size: .7rem; font-weight: 800; }
+    .hook-state.ready { background: var(--green-soft); color: var(--green); }
+    .hook-state.warning { background: var(--amber-soft); color: var(--amber); }
+    .hook-state.neutral { background: #e9ecea; color: #526057; }
+    dl { margin: 22px 0 0; }
+    dl div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #edf0ed; }
+    dt { padding-top: 2px; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .empty-state { grid-column: 1 / -1; padding: 44px 24px; border: 1px dashed #bdc9bf; border-radius: 20px; text-align: center; color: var(--muted); }
+    .empty-state p { margin: 0 0 6px; color: var(--ink); font-weight: 750; }
+    footer { display: flex; justify-content: space-between; gap: 24px; margin-top: 52px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
+    footer a { color: var(--green); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    @media (max-width: 720px) {
+      main { padding-top: 36px; }
+      header { display: block; }
+      .online { margin-top: 24px; }
+      .status-grid { grid-template-columns: 1fr 1fr; margin: 32px 0 44px; }
+      .metric:last-child { grid-column: 1 / -1; }
+      .hooks { grid-template-columns: 1fr; }
+      footer { display: block; }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { color-scheme: dark; --canvas: #111713; --surface: rgba(25, 34, 28, .82); --surface-strong: #19221c; --ink: #eff6f0; --muted: #a7b4aa; --line: #344139; --green: #73d59c; --green-soft: #183b29; --amber: #f0bd68; --amber-soft: #423119; --shadow: 0 18px 50px rgba(0, 0, 0, .18); }
+      code { background: #29342d; color: #dce8de; }
+      dl div { border-color: #2d3831; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">gift webhooks</p>
+        <h1>Server status</h1>
+        <p class="lede">This server is ready to receive signed GitHub deliveries and route them to the configured local hooks.</p>
+      </div>
+      <span class="online">Online</span>
+    </header>
+
+    <div class="status-grid" aria-label="Server details">
+      <div class="metric"><span>Status</span><strong>${options.dryRun ? 'Online · dry run' : 'Operational'}</strong></div>
+      <div class="metric"><span>Uptime</span><strong>${escapeHtml(duration(process.uptime()))}</strong></div>
+      <div class="metric"><span>Webhook endpoint</span><strong><code>POST ${escapeHtml(address)}</code></strong></div>
+    </div>
+
+    <section aria-labelledby="hooks-heading">
+      <div>
+        <h2 id="hooks-heading">Available webhooks</h2>
+        <span class="count">${hooks.length} configured</span>
+      </div>
+      <div class="hooks">${hookContent}
+      </div>
+    </section>
+
+    <footer>
+      <span>Refreshes every 30 seconds</span>
+      <a href="/health">Health endpoint</a>
+    </footer>
+  </main>
+</body>
+</html>`;
+}
+
 function send(res, status, body) {
     // Record before sending the response. If a client received a gift response,
     // its access entry is already on disk.
@@ -637,6 +827,18 @@ function send(res, status, body) {
     res.writeHead(status, {
         'content-type': 'text/plain; charset=utf-8',
         'content-length': Buffer.byteLength(body),
+    });
+    res.end(body);
+}
+
+function sendHtml(res, status, body) {
+    if (res[REQUEST_RECORDER]) res[REQUEST_RECORDER](status);
+    res.writeHead(status, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+        'cache-control': 'no-store',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        'x-content-type-options': 'nosniff',
     });
     res.end(body);
 }
@@ -661,6 +863,11 @@ function createServer(config, secrets, options) {
 
         if (req.method === 'GET' && url.pathname === '/health') {
             send(res, 200, 'ok');
+            return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/') {
+            sendHtml(res, 200, dashboardPage(config, secrets, options, req.headers.host));
             return;
         }
 
@@ -927,6 +1134,7 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
 
     server.listen(settings.port, settings.host, () => {
         log('info', `gift serve listening on http://${settings.host}:${settings.port}${settings.path}`);
+        log('info', `status page on http://${settings.host}:${settings.port}/`);
         log('info', `health check on http://${settings.host}:${settings.port}/health`);
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
@@ -974,6 +1182,7 @@ module.exports = {
     matches,
     loadConfig,
     collectSecrets,
+    dashboardPage,
     openLog,
     openRequestLog,
     main,

@@ -20,6 +20,9 @@ process, what the server answers on `GET /health`, and what it is set up to serv
 — the endpoint, the hooks and the log. The exit code is 0 when it answers and 1
 when it does not, and `gift status --json` prints the same for a script.  
 
+Open the server root (by default `http://127.0.0.1:3999/`) for a live status
+page showing the endpoint and available webhooks.
+
 Use `hooks.json` to configure which functions run for which GitHub events.  
 
 Hooks  
