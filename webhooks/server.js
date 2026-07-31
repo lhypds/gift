@@ -215,23 +215,157 @@ function collectSecrets(hooks) {
 // ------------------------------------------------------------ verification ---
 
 /**
+ * The signatures in one header. GitHub sends exactly one; Node joins a header
+ * that arrived twice into a single comma-separated value, which is what a proxy
+ * that sets X-Hub-Signature-256 itself while also passing GitHub's through
+ * produces. Matching any one of them still takes the secret, so reading them all
+ * rescues an otherwise correct deployment without loosening anything.
+ *
+ * Lower-cased because hex is compared as text: GitHub sends it lower-case, and a
+ * signature that only differs in case is the same signature.
+ */
+function signatureCandidates(header) {
+    return String(header)
+        .split(',')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean);
+}
+
+/**
  * Check the delivery signature against every configured secret.
  * @returns {string[]} names of the env vars whose secret matched.
  */
 function verifySignature(rawBody, signatureHeader, secrets) {
     if (!signatureHeader) return [];
-    const received = Buffer.from(String(signatureHeader));
+    const candidates = signatureCandidates(signatureHeader);
 
     const matched = [];
     for (const [name, secret] of secrets) {
         const expected = Buffer.from(
             'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
         );
-        if (received.length === expected.length && crypto.timingSafeEqual(received, expected)) {
-            matched.push(name);
+        for (const candidate of candidates) {
+            const received = Buffer.from(candidate);
+            if (received.length === expected.length && crypto.timingSafeEqual(received, expected)) {
+                matched.push(name);
+                break;
+            }
         }
     }
     return matched;
+}
+
+// ---------------------------------------------------------- why it failed ---
+//
+// 'invalid signature' on its own leaves three very different problems looking
+// identical: a secret that does not match, a body that did not arrive as GitHub
+// sent it, and a signature header something in front rewrote. Each has a
+// different fix, so the log says which one it was.
+//
+// All of it goes to the log only. The 401 body stays 'Invalid signature' —
+// whoever sent a request that would not verify is the last party to describe it
+// to.
+
+/**
+ * A short, one-way fingerprint of a secret: the first bytes of its SHA-256.
+ * Enough to tell two secrets apart, and to see at a glance whether the running
+ * process holds the value that is in .env — which is the question when a secret
+ * has been rotated and something stale is still being used.
+ *
+ * It is not the secret and cannot be turned back into it. The log is written
+ * 0600 in the same folder as .env, so this exposes nothing to anyone who could
+ * not already read the secret itself.
+ */
+function fingerprint(secret) {
+    return crypto.createHash('sha256').update(String(secret)).digest('hex').slice(0, 8);
+}
+
+function fingerprints(secrets) {
+    return [...secrets].map(([name, secret]) => `${name}:${fingerprint(secret)}`).join(' ');
+}
+
+/**
+ * The ways a secret comes to differ from the one it was pasted from: a newline
+ * an editor added, a space that came along with the copy, quotes that were meant
+ * to wrap the value in .env rather than be part of it.
+ *
+ * A delivery signed with one of these names the mistake exactly. None of them is
+ * ever accepted — they are compared against only to describe what happened.
+ */
+function secretVariants(secret) {
+    return [
+        ['with a trailing newline', `${secret}\n`],
+        ['with a trailing space', `${secret} `],
+        ['with its whitespace trimmed off', secret.trim()],
+        ['wrapped in double quotes', `"${secret}"`],
+        ['wrapped in single quotes', `'${secret}'`],
+        ['with its surrounding quotes stripped', secret.replace(/^(["'])([\s\S]*)\1$/, '$2')],
+    ].filter(([, value]) => value !== secret && value !== '');
+}
+
+const WELL_FORMED = /^sha256=[0-9a-f]{64}$/;
+
+/**
+ * Why this delivery did not verify, as something to go and change.
+ *
+ * @returns {{fields: object, notes: string[]}} extra columns for the 401 line,
+ *          and the sentences to log under it.
+ */
+function explainSignatureFailure(rawBody, signatureHeader, secrets, headers = {}) {
+    const fields = { bytes: rawBody.length, secrets: fingerprints(secrets) };
+    const notes = [];
+
+    // Nothing to check the body against. GitHub signs every delivery once a
+    // Secret is set on the webhook, so no header at all means none is set.
+    if (!signatureHeader) {
+        if (headers['x-hub-signature']) {
+            notes.push('the sha1 X-Hub-Signature arrived but the sha256 one did not, so something in front dropped it.');
+        } else {
+            notes.push('the delivery carried no signature header, so the webhook on GitHub has no Secret set.');
+            notes.push('Set it under Settings -> Webhooks -> Edit -> Secret, to the same value as the secret in webhooks/.env.');
+        }
+        return { fields, notes };
+    }
+
+    const candidates = signatureCandidates(signatureHeader);
+
+    // A body that did not arrive whole cannot verify however right the secret
+    // is, and the signature is the only thing that notices.
+    const declared = Number(headers['content-length']);
+    if (Number.isFinite(declared) && declared !== rawBody.length) {
+        fields.declared = declared;
+        notes.push(`the body is ${rawBody.length} bytes against the ${declared} declared, so it did not arrive as GitHub sent it — check whatever proxies to this server.`);
+        return { fields, notes };
+    }
+
+    const malformed = candidates.filter((candidate) => !WELL_FORMED.test(candidate));
+    if (malformed.length) {
+        fields.signature = candidates.join(' ');
+        notes.push('the signature is not the sha256=<64 hex> that GitHub sends, so it was rewritten on the way here rather than being a secret that does not match.');
+        return { fields, notes };
+    }
+    if (candidates.length > 1) {
+        fields.signatures = candidates.length;
+        notes.push('the signature header arrived more than once and none of them matched — something in front is adding its own.');
+    }
+
+    // Plain equality: verification has already failed, so there is no secret
+    // left for a timing difference here to leak.
+    const signedWith = (secret) =>
+        candidates.includes('sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex'));
+
+    for (const [name, secret] of secrets) {
+        for (const [label, variant] of secretVariants(secret)) {
+            if (!signedWith(variant)) continue;
+            notes.push(`the delivery was signed with the value of ${name} ${label} — the same secret, pasted differently.`);
+            notes.push(`Fix the one that has it wrong: the Secret field on GitHub, or ${name} in webhooks/.env.`);
+            return { fields, notes };
+        }
+    }
+
+    notes.push(`the delivery was signed with a secret this server does not have — the Secret on GitHub is a different value from ${fingerprints(secrets)}.`);
+    notes.push('If .env holds the right value, this process is not running on it: `gift status` prints the fingerprint of the file, and a variable already in the environment wins over it. `gift serve` restarts on the file.');
+    return { fields, notes };
 }
 
 function readBody(req, limit) {
@@ -542,12 +676,17 @@ function createServer(config, secrets, options) {
 
         const secretNames = verifySignature(rawBody, signature, secrets);
         if (secretNames.length === 0) {
+            const why = explainSignatureFailure(rawBody, signature, secrets, req.headers);
             log('warn', signature ? 'invalid signature' : 'missing signature', {
                 status: 401,
                 delivery: deliveryId,
                 event,
                 from,
+                ...why.fields,
             });
+            // Indented under the line above: sentences, which do not belong in
+            // its key=value columns.
+            for (const note of why.notes) log('warn', `  ${note}`);
             send(res, 401, signature ? 'Invalid signature' : 'Missing signature');
             return;
         }
@@ -733,7 +872,9 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         log('info', `health check on http://${settings.host}:${settings.port}/health`);
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
-        log('info', `secrets accepted from ${[...secrets.keys()].join(', ')}`);
+        // With the fingerprint of each: after a rotation, this line is what says
+        // whether the process is running on the value that is now in .env.
+        log('info', `secrets accepted from ${fingerprints(secrets)}`);
         if (settings.dryRun) log('warn', 'dry run — hook scripts will not be executed');
         if (config.hooks.length === 0) {
             log('info', 'no hooks configured');
@@ -768,6 +909,9 @@ if (require.main === module) {
 module.exports = {
     createServer,
     verifySignature,
+    signatureCandidates,
+    explainSignatureFailure,
+    fingerprint,
     matches,
     loadConfig,
     collectSecrets,

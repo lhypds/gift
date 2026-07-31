@@ -333,9 +333,24 @@ ended.
 Refused requests are recorded too, with the status that was sent back:
 
 ```
-... warn   invalid signature           status=401 delivery=8f3c… event=push from=203.0.113.7
+... warn   invalid signature           status=401 delivery=8f3c… event=push from=203.0.113.7 bytes=8214 secrets=GITHUB_WEBHOOK_SECRET:ffe054fe
+... warn     the delivery was signed with a secret this server does not have — the Secret on GitHub is a different value from GITHUB_WEBHOOK_SECRET:ffe054fe.
 ... warn   request to an unknown path  status=404 method=GET path=/wp-login.php from=203.0.113.7 agent=curl/8.7.1
 ```
+
+A 401 is followed by the reason it failed, indented under it, because three
+different problems otherwise look the same. The secret not matching is one; the
+others are a body that did not arrive as GitHub sent it and a signature header
+something in front rewrote, and neither is fixed by touching the secret. When the
+delivery turns out to have been signed with the same secret pasted differently —
+a newline the editor added, quotes that were meant to wrap the value in `.env` —
+the line says so, and which of the two ends to correct.
+
+`secrets=NAME:ffe054fe` is a fingerprint of each secret the server accepts, not
+the secret: the first bytes of its SHA-256. It is on the startup line too, so
+after rotating a secret the two can be compared to confirm the running process
+picked the new value up — a variable already in the environment wins over `.env`,
+which is what `pm2 env <id> | grep GITHUB_WEBHOOK_SECRET` shows.
 
 | Where          | Detail                                                                        |
 |----------------|-------------------------------------------------------------------------------|
@@ -604,7 +619,7 @@ payload, and the response for every delivery, and can redeliver any of them.
 |-----------|------------------------------------------------------------------|
 | 200 / 202 | Accepted (`200` also means no hook matched, or a `ping`)         |
 | 400       | The body did not parse — the log line names the content type     |
-| 401       | Missing or invalid signature — the secrets do not match          |
+| 401       | Missing or invalid signature — the log says which and why        |
 | 404       | Not a delivery and not on the endpoint path — check the proxy    |
 | 405       | Reached the endpoint with something other than POST              |
 | 413       | Payload above 25 MB                                              |
@@ -613,6 +628,19 @@ payload, and the response for every delivery, and can redeliver any of them.
 A delivery that never reaches the log at all did not arrive: the server is not
 running, the port is closed, or the address in the Payload URL is not this
 machine. `gift log` left running in a terminal shows each one as it lands.
+
+For a 401 the log line is followed by the reason, so start there rather than with
+the secret — a body a proxy rewrote and a signature header it duplicated both
+read as "invalid signature" from GitHub's end, and neither is a secret to change.
+When it is the secret, compare the fingerprint on that line with the one
+`gift status` prints for `.env`. The same fingerprint means the server is running
+on the value in the file, so the Secret field on GitHub is the end to correct. A
+different one means the process is not running on the file at all: a variable
+already in its environment wins over `.env`, and PM2 hands an app the environment
+it was first started with — `--update-env` does not drop a variable that has since
+left the shell. `gift serve` recreates the PM2 entry for exactly that reason, so a
+restart reads `.env` again; `pm2 env <id> | grep GITHUB_WEBHOOK_SECRET` shows what
+a process is holding meanwhile.
 
 
 Requirements
