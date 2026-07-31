@@ -6,8 +6,8 @@
 //
 // All three work on hooks.json — the file `gift serve` reads at startup
 // (--config=FILE, or GIFT_SERVE_CONFIG, points them somewhere else). The server
-// only reads it when it starts, so a change here takes effect on the next
-// `gift serve`. What the server then writes is read by `gift log`.
+// only reads it when it starts, so create and delete restart the server after
+// writing a change. What the server then writes is read by `gift log`.
 'use strict';
 
 const fs = require('node:fs');
@@ -151,6 +151,20 @@ function writeConfig(file, config) {
 
 function configFile(options) {
     return path.resolve(options.config || process.env.GIFT_SERVE_CONFIG || DEFAULT_CONFIG);
+}
+
+/** Restart the PM2 process after hooks.json changes, using the normal start path. */
+function restartServer(run = spawnSync) {
+    const script = path.join(SERVER_DIR, 'start.sh');
+    const result = run('bash', [script], { cwd: SERVER_DIR, stdio: 'inherit' });
+
+    if (result.error) {
+        return { ok: false, message: result.error.code === 'ENOENT' ? 'bash is not installed' : result.error.message };
+    }
+    if (result.status !== 0) {
+        return { ok: false, message: `start.sh exited ${result.status === null ? 'without a status' : result.status}` };
+    }
+    return { ok: true };
 }
 
 // --------------------------------------------------------------- GitHub CLI ---
@@ -517,8 +531,12 @@ async function createHook(file) {
         console.log(`         Put it in .env, the same value as the webhook's Secret on GitHub.`);
     }
     console.log(`Edit ${show(file)} for anything else — other events or branches, arguments, detach.`);
-    console.log('Run `gift serve` to restart the server with it.');
-    return githubResult && !githubResult.ok ? 1 : 0;
+    console.log('');
+    const restartResult = restartServer();
+    if (!restartResult.ok) {
+        console.error(`gift create: the hook was saved, but the server could not be restarted: ${restartResult.message}`);
+    }
+    return (githubResult && !githubResult.ok) || !restartResult.ok ? 1 : 0;
 }
 
 // ------------------------------------------------------------------ delete ---
@@ -624,7 +642,12 @@ async function deleteHook(file, options, positionals) {
     writeConfig(file, config);
 
     console.log(`Deleted '${name}' from ${show(file)}.`);
-    console.log('Run `gift serve` to restart the server without it.');
+    console.log('');
+    const restartResult = restartServer();
+    if (!restartResult.ok) {
+        console.error(`gift delete: the hook was deleted, but the server could not be restarted: ${restartResult.message}`);
+        return 1;
+    }
     return 0;
 }
 
@@ -645,7 +668,7 @@ function createUsage() {
     console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
     console.log('  -h, --help      Show this help');
     console.log('');
-    console.log('The server reads hooks.json at startup, so run `gift serve` afterward.');
+    console.log('The server is restarted automatically after the hook is created.');
 }
 
 function listUsage() {
@@ -669,7 +692,7 @@ function deleteUsage() {
     console.log('  -y, --yes       Delete without asking for confirmation');
     console.log('  -h, --help      Show this help');
     console.log('');
-    console.log('The server reads hooks.json at startup, so run `gift serve` afterward.');
+    console.log('The server is restarted automatically after the hook is deleted.');
 }
 
 function parseArgs(argv, command) {
@@ -779,6 +802,7 @@ module.exports = {
     // Kept injectable so the gh integration can be verified without network access.
     createGitHubWebhook,
     hasGitHubUser,
+    restartServer,
     webhookUrlProblem,
     // Configuration and path helpers shared with `gift log` and `gift status`.
     readConfig,

@@ -89,7 +89,7 @@ function dashboardPage(config, secrets, options, requestHost, recentDeliveries =
     const hookContent = cards || `
         <div class="empty-state">
           <p>No webhooks are configured.</p>
-          <span>Run <code>gift create</code>, then restart the server.</span>
+          <span>Run <code>gift create</code> to add one.</span>
         </div>`;
 
     const deliveryRows = recentDeliveries.map((delivery) => {
@@ -154,16 +154,10 @@ function dashboardPage(config, secrets, options, requestHost, recentDeliveries =
       line-height: 1.5;
     }
     main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 28px; }
-    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+    header { display: block; }
     .eyebrow { margin: 0 0 8px; color: var(--green); font-size: .76rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
     h1 { margin: 0; font: 600 clamp(1.6rem, 4vw, 2.35rem)/1 "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.055em; }
     .lede { max-width: 620px; margin: 12px 0 0; color: var(--muted); font-size: .94rem; }
-    .online {
-      display: inline-flex; align-items: center; gap: 9px; flex: none;
-      padding: 7px 12px; border: 1px solid #b9dfc8; border-radius: 999px;
-      background: var(--green-soft); color: var(--green); font-size: .78rem; font-weight: 800;
-    }
-    .online::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #21a366; box-shadow: 0 0 0 4px rgba(33, 163, 102, .13); }
     .status-grid { display: grid; grid-template-columns: .8fr .8fr 1.8fr; gap: 10px; margin: 26px 0 30px; }
     .metric { min-width: 0; padding: 14px 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
     .metric span, dt { color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .075em; text-transform: uppercase; }
@@ -209,8 +203,6 @@ function dashboardPage(config, secrets, options, requestHost, recentDeliveries =
     footer a { color: var(--green); text-decoration-thickness: 1px; text-underline-offset: 3px; }
     @media (max-width: 720px) {
       main { padding-top: 24px; }
-      header { display: block; }
-      .online { margin-top: 16px; }
       .status-grid { grid-template-columns: 1fr 1fr; margin: 22px 0 28px; }
       .metric:last-child { grid-column: 1 / -1; }
       .hooks { grid-template-columns: 1fr; }
@@ -233,7 +225,6 @@ function dashboardPage(config, secrets, options, requestHost, recentDeliveries =
         <h1>gift</h1>
         <p class="lede">This server is ready to receive signed GitHub deliveries and route them to the configured local hooks.</p>
       </div>
-      <span class="online">Online</span>
     </header>
 
     <div class="status-grid" aria-label="Server details">

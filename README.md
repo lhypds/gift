@@ -25,7 +25,7 @@ When `gh` has an authenticated GitHub user, `gift create` also creates the
 repository webhook. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public
 delivery URL, including `/hooks/github`; otherwise `gift create` asks for it.
 
-The server reads `hooks.json` at startup, so run `gift serve` after a change.  
+The server restarts automatically after `gift create` or `gift delete`.
 
 Log  
 `gift log` prints the last 10 lines of the server log — `gift log 20` more —
