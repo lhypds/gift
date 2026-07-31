@@ -13,6 +13,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const { ROOT } = require('../functions.js');
 const { ask } = require('./pick.js');
@@ -30,6 +31,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const DEFAULT_SECRET_ENV = 'GITHUB_WEBHOOK_SECRET';
+const WEBHOOK_URL_ENV = 'GIFT_WEBHOOK_URL';
 
 // The branches a created hook watches: the server matches any name in the list,
 // so covering both spellings of the default branch saves asking which one it is.
@@ -149,6 +151,65 @@ function writeConfig(file, config) {
 
 function configFile(options) {
     return path.resolve(options.config || process.env.GIFT_SERVE_CONFIG || DEFAULT_CONFIG);
+}
+
+// --------------------------------------------------------------- GitHub CLI ---
+
+function hasGitHubUser(run = spawnSync) {
+    const result = run(
+        'gh',
+        ['auth', 'status', '--active', '--hostname', 'github.com'],
+        { stdio: 'ignore', timeout: 5000 },
+    );
+    return !result.error && result.status === 0;
+}
+
+function webhookUrlProblem(value) {
+    let parsed;
+    try {
+        parsed = new URL(value);
+    } catch {
+        return 'Type the complete public URL, including https://.';
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) return 'The webhook URL must use http:// or https://.';
+    if (parsed.username || parsed.password) return 'Do not put credentials in the webhook URL.';
+    return null;
+}
+
+/** Create a repository webhook without ever placing its secret on the command line. */
+function createGitHubWebhook(repo, url, hook, secret, run = spawnSync) {
+    const body = JSON.stringify({
+        name: 'web',
+        active: true,
+        events: hook.events,
+        config: {
+            url,
+            content_type: 'json',
+            secret,
+            insecure_ssl: '0',
+        },
+    });
+    const result = run(
+        'gh',
+        [
+            'api',
+            '--method', 'POST',
+            `repos/${repo}/hooks`,
+            '--header', 'Accept: application/vnd.github+json',
+            '--input', '-',
+            '--silent',
+        ],
+        { input: body, encoding: 'utf8', maxBuffer: 1024 * 1024 },
+    );
+
+    if (!result.error && result.status === 0) return { ok: true };
+    const said = String(result.stderr || '').trim().split('\n').find(Boolean);
+    const message = result.error
+        ? result.error.code === 'ENOENT'
+            ? 'gh is not installed'
+            : result.error.message
+        : said || `gh api exited ${result.status}`;
+    return { ok: false, message };
 }
 
 // ------------------------------------------------------------------- fields ---

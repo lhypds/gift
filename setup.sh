@@ -57,13 +57,16 @@ for example in .env.example functions/*/.env.example; do
     fi
 done
 
-if [ -f "hooks.example.json" ]; then
-    if [ ! -f "hooks.json" ]; then
-        cp "hooks.example.json" "hooks.json"
-        echo "==> Created hooks.json from hooks.example.json"
-    else
-        echo "==> Keeping existing hooks.json"
-    fi
+if [ ! -f "hooks.json" ]; then
+    cat > hooks.json <<'EOF'
+{
+  "log": "hooks.log",
+  "hooks": []
+}
+EOF
+    echo "==> Created hooks.json with no hooks — see hooks.example.json for the format"
+else
+    echo "==> Keeping existing hooks.json"
 fi
 
 chmod +x ./*.sh bin/gift.js 2>/dev/null || true
