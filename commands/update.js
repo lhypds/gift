@@ -54,7 +54,7 @@ function parseArgs(argv) {
  * server, so the lines below are kept for the ones that do.
  */
 function hasServer() {
-    return fs.existsSync(path.join(ROOT, 'webhooks', 'hooks.json'));
+    return fs.existsSync(path.join(ROOT, 'hooks.json'));
 }
 
 function serveHint() {
@@ -163,7 +163,7 @@ async function main(argv) {
     );
     console.log('');
 
-    const requestLog = path.join(ROOT, 'webhooks', 'server.log');
+    const requestLog = path.join(ROOT, 'server.log');
     const requestLogBefore = fileState(requestLog);
 
     // `gift serve` — the same restart that would be typed next, pull included.
@@ -184,7 +184,7 @@ async function main(argv) {
     // response-finished callback appends its access line in the PM2 process.
     if (!(await waitForFileChange(requestLog, requestLogBefore))) {
         console.error(`gift update: /health answered, but no request was written to ${requestLog}.`);
-        console.error('Check the PM2 logs and write permissions for the webhooks folder.');
+        console.error('Check the PM2 logs and write permissions for the project folder.');
         return 1;
     }
 
@@ -207,7 +207,7 @@ function usage() {
     console.log('was not already running. A running server is restarted even when Git is');
     console.log('already up to date, so it cannot remain on older code loaded in memory.');
     console.log('After the restart, /health is checked and its request must appear in');
-    console.log('webhooks/server.log.');
+    console.log('server.log.');
     console.log('');
     console.log('options:');
     console.log('  --no-restart    Pull only, leaving the server on the code it is running');

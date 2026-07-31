@@ -1,7 +1,7 @@
 {
   "name": "gift",
   "version": "0.0.1",
-  "description": "git functions — one function per folder, plus a GitHub webhook server",
+  "description": "GitHub webhook server with additional Git and GitHub helper functions",
   "license": "MIT",
   "bin": {
     "gift": "bin/gift.js"
@@ -18,12 +18,14 @@
     "functions/**/README.*",
     "functions.js",
     "utils",
-    "webhooks/*.js",
-    "webhooks/*.cjs",
-    "webhooks/*.sh",
-    "webhooks/*.txt",
-    "webhooks/*.example.json",
-    "webhooks/.env.example",
+    "server.js",
+    "ecosystem.config.cjs",
+    "start.sh",
+    "stop.sh",
+    "restart.sh",
+    "README.txt",
+    "hooks.example.json",
+    ".env.example",
     "VERSION"
   ]
 }

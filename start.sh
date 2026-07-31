@@ -8,7 +8,7 @@ echo "Starting..."
 
 cd "$ROOT"
 if [ ! -f .env ]; then
-  echo ".env not found — run ../setup.sh first" >&2
+  echo ".env not found — run ./setup.sh first" >&2
   exit 1
 fi
 

@@ -1,10 +1,10 @@
-// `gift hook` — the hooks the webhook server runs, from the command line.
+// The implementation shared by the top-level hook-management commands.
 //
-//   gift hook list            what is configured right now
-//   gift hook create          add one, asking for each field
-//   gift hook delete [name]   remove one
+//   gift list            show what is configured
+//   gift create          add one, asking for each field
+//   gift delete [name]   remove one
 //
-// All three work on webhooks/hooks.json — the file `gift serve` reads at startup
+// All three work on hooks.json — the file `gift serve` reads at startup
 // (--config=FILE, or GIFT_SERVE_CONFIG, points them somewhere else). The server
 // only reads it when it starts, so a change here takes effect on the next
 // `gift serve`. What the server then writes is read by `gift log`.
@@ -15,10 +15,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { ROOT } = require('../functions.js');
-const { ask } = require('../utils/pick.js');
-const { WEBHOOK_DIR } = require('../utils/service.js');
+const { ask } = require('./pick.js');
+const { SERVER_DIR } = require('./service.js');
 
-const DEFAULT_CONFIG = path.join(WEBHOOK_DIR, 'hooks.json');
+const DEFAULT_CONFIG = path.join(SERVER_DIR, 'hooks.json');
 
 // What a freshly created hooks.json is seeded with — the same defaults the
 // server falls back to, written out so the file is a complete picture.
@@ -34,12 +34,6 @@ const DEFAULT_SECRET_ENV = 'GITHUB_WEBHOOK_SECRET';
 const VALID_REPO_PART = /^[A-Za-z0-9._-]+$/;
 const VALID_HOOK_NAME = /^[A-Za-z0-9._-]+$/;
 const VALID_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-const SUBCOMMANDS = {
-    list: 'Show the configured hooks.',
-    create: 'Add a hook, asking for each field.',
-    delete: 'Remove a hook.',
-};
 
 // -------------------------------------------------------------------- paths ---
 
@@ -194,13 +188,13 @@ function parseRepo(text) {
 
 /**
  * The rows shown for one hook, by `list` and by the confirmation in `create`.
- * `run` and `cwd` are resolved against webhooks/ — where the server resolves
+ * `run` and `cwd` are resolved against the project root — where the server resolves
  * them from, wherever the configuration file itself is.
  */
 function describe(hook) {
     const events = Array.isArray(hook.events) && hook.events.length ? hook.events : ['push'];
     const branches = Array.isArray(hook.branches) ? hook.branches : [];
-    const run = hook.run ? path.resolve(WEBHOOK_DIR, expandHome(String(hook.run))) : '';
+    const run = hook.run ? path.resolve(SERVER_DIR, expandHome(String(hook.run))) : '';
 
     const rows = [
         ['repo', hook.repo || '*'],
@@ -216,7 +210,7 @@ function describe(hook) {
     rows.push([
         'cwd',
         hook.cwd
-            ? show(path.resolve(WEBHOOK_DIR, expandHome(String(hook.cwd))))
+            ? show(path.resolve(SERVER_DIR, expandHome(String(hook.cwd))))
             : run
                 ? `${show(path.dirname(run))} (the script's folder)`
                 : "(the script's folder)",
@@ -300,18 +294,18 @@ async function askYesNo(question, fallback) {
 
 // -------------------------------------------------------------------- list ---
 
-function printList(file) {
+function listHooks(file) {
     const { config, missing } = readConfig(file);
     if (missing) {
-        console.error(`gift hook: no ${show(file)}`);
-        console.error('Run `gift hook create` to write one.');
+        console.error(`gift list: no ${show(file)}`);
+        console.error('Run `gift create` to write one.');
         return 1;
     }
 
     const hooks = config.hooks;
     if (hooks.length === 0) {
         console.log(`${show(file)} configures no hooks.`);
-        console.log('Run `gift hook create` to add one.');
+        console.log('Run `gift create` to add one.');
         return 0;
     }
 
@@ -345,7 +339,7 @@ function defaultName(repoName, taken) {
 
 async function createHook(file) {
     if (!process.stdin.isTTY) {
-        console.error('gift hook: `create` needs a terminal to ask in.');
+        console.error('gift create: a terminal is needed to ask for the hook fields.');
         console.error(`Add the hook to ${show(file)} by hand instead.`);
         return 2;
     }
@@ -482,7 +476,7 @@ async function createHook(file) {
     console.log(`Added '${name}' to ${show(file)}.`);
     if (!process.env[secretEnv]) {
         console.log(`warning: ${secretEnv} is not set — the server refuses to start without a secret.`);
-        console.log(`         Put it in webhooks/.env, the same value as the webhook's Secret on GitHub.`);
+        console.log(`         Put it in .env, the same value as the webhook's Secret on GitHub.`);
     }
     console.log('Run `gift serve` to restart the server with it.');
     return 0;
@@ -528,11 +522,11 @@ async function pickHook(hooks) {
 async function deleteHook(file, options, positionals) {
     const { config, missing } = readConfig(file);
     if (missing) {
-        console.error(`gift hook: no ${show(file)}`);
+        console.error(`gift delete: no ${show(file)}`);
         return 1;
     }
     if (config.hooks.length === 0) {
-        console.error(`gift hook: ${show(file)} configures no hooks.`);
+        console.error(`gift delete: ${show(file)} configures no hooks.`);
         return 1;
     }
 
@@ -541,24 +535,24 @@ async function deleteHook(file, options, positionals) {
         const token = positionals[0];
         const result = resolveHook(config.hooks, token);
         if (result.status === 'ambiguous') {
-            console.error(`gift hook: '${token}' matches more than one hook:`);
+            console.error(`gift delete: '${token}' matches more than one hook:`);
             for (const match of result.matches) console.error(`  ${match}`);
             console.error('Type more of the name to pick one.');
             return 2;
         }
         if (result.status === 'out-of-range') {
-            console.error(`gift hook: there is no hook ${token} — ${show(file)} has ${config.hooks.length}.`);
+            console.error(`gift delete: there is no hook ${token} — ${show(file)} has ${config.hooks.length}.`);
             return 2;
         }
         if (result.status !== 'ok') {
-            console.error(`gift hook: no hook called '${token}' in ${show(file)}`);
-            console.error('Run `gift hook list` to see them.');
+            console.error(`gift delete: no hook called '${token}' in ${show(file)}`);
+            console.error('Run `gift status` to see the configured hooks.');
             return 2;
         }
         index = result.index;
     } else {
         if (!process.stdin.isTTY) {
-            console.error('gift hook: `delete` needs a hook name, or a terminal to ask in.');
+            console.error('gift delete: a hook name or a terminal is needed.');
             return 2;
         }
         index = await pickHook(config.hooks);
@@ -573,7 +567,7 @@ async function deleteHook(file, options, positionals) {
 
     if (!options.yes) {
         if (!process.stdin.isTTY) {
-            console.error('gift hook: nothing to ask on — pass --yes to delete without confirming.');
+            console.error('gift delete: nothing to ask on — pass --yes to delete without confirming.');
             return 2;
         }
         console.log('');
@@ -597,108 +591,146 @@ async function deleteHook(file, options, positionals) {
 
 // ---------------------------------------------------------------- dispatch ---
 
-function usage() {
-    const width = Math.max(...Object.keys(SUBCOMMANDS).map((n) => n.length)) + 8;
-    const line = (name, description) => console.log(`  ${name.padEnd(width)}  ${description}`);
-
-    console.log('usage: gift hook <command>');
+function createUsage() {
+    console.log('usage: gift create [--config=FILE]');
     console.log('');
-    console.log('commands:');
-    line('list', SUBCOMMANDS.list);
-    line('create', SUBCOMMANDS.create);
-    line('delete [name]', SUBCOMMANDS.delete);
+    console.log('Create a server hook, asking for each field and confirmation before writing.');
     console.log('');
     console.log('options:');
-    console.log('  --config=FILE   Hook configuration file (default: webhooks/hooks.json)');
+    console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
+    console.log('  -h, --help      Show this help');
+    console.log('');
+    console.log('The server reads hooks.json at startup, so run `gift serve` afterward.');
+}
+
+function listUsage() {
+    console.log('usage: gift list [--config=FILE]');
+    console.log('');
+    console.log('List the configured server hooks and their settings.');
+    console.log('');
+    console.log('options:');
+    console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
+    console.log('  -h, --help      Show this help');
+}
+
+function deleteUsage() {
+    console.log('usage: gift delete [name] [options]');
+    console.log('');
+    console.log('Delete a server hook by name, unique name prefix, or list position.');
+    console.log('With no name, choose from a menu.');
+    console.log('');
+    console.log('options:');
+    console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
     console.log('  -y, --yes       Delete without asking for confirmation');
     console.log('  -h, --help      Show this help');
     console.log('');
-    console.log('Hooks live in webhooks/hooks.json, which the server reads at startup, so');
-    console.log('run `gift serve` after adding or deleting one. A command name can be');
-    console.log('shortened to any unique prefix: `gift hook cr`, `gift hook li`.');
-    console.log('');
-    console.log('`gift log` prints the tail of what the server writes.');
+    console.log('The server reads hooks.json at startup, so run `gift serve` afterward.');
 }
 
-function parseArgs(argv) {
+function parseArgs(argv, command) {
     const options = { yes: false, help: false };
     const positionals = [];
 
     for (const arg of argv) {
         if (arg === '-h' || arg === '--help') options.help = true;
-        else if (arg === '-y' || arg === '--yes') options.yes = true;
-        else if (arg.startsWith('--config=')) options.config = arg.slice(9);
-        else if (arg.startsWith('-')) throw new Error(`unknown option '${arg}' (try: gift hook --help)`);
+        else if (arg === '-y' || arg === '--yes') {
+            if (command !== 'delete') throw new Error(`unknown option '${arg}' (try: gift create --help)`);
+            options.yes = true;
+        } else if (arg.startsWith('--config=')) options.config = arg.slice(9);
+        else if (arg.startsWith('-')) throw new Error(`unknown option '${arg}' (try: gift ${command} --help)`);
         else positionals.push(arg);
     }
     return { options, positionals };
 }
 
-/** Exact name, or any unique prefix of one — as everywhere else in the CLI. */
-function resolveSubcommand(token) {
-    if (SUBCOMMANDS[token]) return { status: 'ok', name: token };
-
-    const matches = Object.keys(SUBCOMMANDS).filter((name) => name.startsWith(token));
-    if (matches.length === 1) return { status: 'ok', name: matches[0] };
-    if (matches.length > 1) return { status: 'ambiguous', matches: matches.sort() };
-    return { status: 'unknown' };
-}
-
-async function main(argv) {
+async function createMain(argv) {
     let parsed;
     try {
-        parsed = parseArgs(argv);
+        parsed = parseArgs(argv, 'create');
     } catch (err) {
-        console.error(`gift hook: ${err.message}`);
+        console.error(`gift create: ${err.message}`);
         return 2;
     }
 
     const { options, positionals } = parsed;
     if (options.help) {
-        usage();
+        createUsage();
         return 0;
     }
+    if (positionals.length > 0) {
+        console.error(`gift create: '${positionals[0]}' is not expected — create takes no arguments`);
+        return 2;
+    }
 
-    const [token, ...rest] = positionals;
-    if (!token) {
-        usage();
+    try {
+        return await createHook(configFile(options));
+    } catch (err) {
+        console.error(`gift create: ${err && err.message ? err.message : err}`);
         return 1;
     }
+}
 
-    const command = resolveSubcommand(token);
-    if (command.status === 'ambiguous') {
-        console.error(`gift hook: '${token}' matches more than one command:`);
-        for (const match of command.matches) console.error(`  ${match}`);
-        console.error('Type more of the name to pick one.');
-        return 2;
-    }
-    if (command.status !== 'ok') {
-        console.error(`gift hook: unknown command '${token}'`);
-        console.error('Run `gift hook --help` to see the commands.');
-        return 2;
-    }
-
-    const file = configFile(options);
+async function listMain(argv) {
+    let parsed;
     try {
-        switch (command.name) {
-            case 'list':
-                return printList(file);
-            case 'create':
-                return await createHook(file);
-            case 'delete':
-                return await deleteHook(file, options, rest);
-            default:
-                return 2;
-        }
+        parsed = parseArgs(argv, 'list');
     } catch (err) {
-        console.error(`gift hook: ${err && err.message ? err.message : err}`);
+        console.error(`gift list: ${err.message}`);
+        return 2;
+    }
+
+    const { options, positionals } = parsed;
+    if (options.help) {
+        listUsage();
+        return 0;
+    }
+    if (positionals.length > 0) {
+        console.error(`gift list: '${positionals[0]}' is not expected — list takes no arguments`);
+        return 2;
+    }
+
+    try {
+        return listHooks(configFile(options));
+    } catch (err) {
+        console.error(`gift list: ${err && err.message ? err.message : err}`);
+        return 1;
+    }
+}
+
+async function deleteMain(argv) {
+    let parsed;
+    try {
+        parsed = parseArgs(argv, 'delete');
+    } catch (err) {
+        console.error(`gift delete: ${err.message}`);
+        return 2;
+    }
+
+    const { options, positionals } = parsed;
+    if (options.help) {
+        deleteUsage();
+        return 0;
+    }
+    if (positionals.length > 1) {
+        console.error(`gift delete: '${positionals[1]}' is not expected — pass at most one hook name`);
+        return 2;
+    }
+
+    try {
+        return await deleteHook(configFile(options), options, positionals);
+    } catch (err) {
+        console.error(`gift delete: ${err && err.message ? err.message : err}`);
         return 1;
     }
 }
 
 module.exports = {
-    main,
-    usage,
+    createMain,
+    createUsage,
+    deleteMain,
+    deleteUsage,
+    listMain,
+    listUsage,
     // Configuration and path helpers shared with `gift log` and `gift status`.
     readConfig,
     configFile,

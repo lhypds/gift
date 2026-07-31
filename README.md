@@ -2,20 +2,7 @@
 gift
 ====
 
-`gift` is short for `git functions`.  
-Provide Git and GitHub helper functions and a GitHub webhooks server.  
-
-
-Git and GitHub helper functions
--------------------------------
-
-List functions  
-`gift list` lists all functions.  
-
-Run a function  
-`gift run` then choose a function to run.
-Or run a function directly with  
-`gift <function-name>`.  
+`gift` is a simple webhook server.  
 
 
 Webhooks Server
@@ -36,10 +23,10 @@ when it does not, and `gift status --json` prints the same for a script.
 Use `hooks.json` to configure which functions run for which GitHub events.  
 
 Hooks  
-`gift hook list` shows the configured hooks.  
-`gift hook create` adds one, asking for the repository, the events, the script
-and the working directory it runs in.  
-`gift hook delete` removes one.  
+`gift list` shows the configured hooks.
+`gift create` adds one, asking for the repository, the events, the script and
+the working directory it runs in.
+`gift delete [name]` removes one. `gift status` shows the configured hooks.
 
 The server reads `hooks.json` at startup, so run `gift serve` after a change.  
 
@@ -47,6 +34,14 @@ Log
 `gift log` prints the last 10 lines of the server log — `gift log 20` more —
 and then keeps watching, printing each line as the server writes it. Ctrl-C
 stops. `gift log --no-follow` prints the lines and exits.  
+
+
+Other functions
+---------------
+
+List functions with `gift help`.  
+Run `gift run` and choose a function, or invoke one directly with
+`gift <function-name>`.  
 
 
 Setup
@@ -60,11 +55,6 @@ Setup and install
 
 Update  
 `gift update` pulls the latest code into the folder gift is installed from.
-Fast-forward only, so local work is never merged over. A running webhooks server
-is then restarted on the current code, since a running server keeps its old files
-until it is — nothing is started that was not already running. The restart also
-happens when Git is already up to date, then `/health` is verified and recorded
-in `webhooks/server.log`. `gift update --no-restart` pulls only.
 
 Uninstall  
 `./uninstall.sh`  

@@ -52,6 +52,6 @@ Uninstall complete.
 
 Local files kept in the checkout (delete them by hand if you want them gone):
     $ROOT_DIR/.env
-    $ROOT_DIR/webhooks/hooks.json
-    $ROOT_DIR/webhooks/hooks.log
+    $ROOT_DIR/hooks.json
+    $ROOT_DIR/hooks.log
 EOF

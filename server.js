@@ -7,10 +7,10 @@
 // may only run scripts named in hooks.json, and payload fields reach them as
 // environment variables.
 //
-// Configuration: webhooks/hooks.json (see hooks.example.json).
-// Secret:        GITHUB_WEBHOOK_SECRET in webhooks/.env or the environment.
-// Activity log:  webhooks/hooks.log (--log=FILE, or --no-log for console only).
-// Request log:   webhooks/server.log (one line for every HTTP request).
+// Configuration: hooks.json (see hooks.example.json).
+// Secret:        GITHUB_WEBHOOK_SECRET in .env or the environment.
+// Activity log:  hooks.log (--log=FILE, or --no-log for console only).
+// Request log:   server.log (one line for every HTTP request).
 'use strict';
 
 const crypto = require('node:crypto');
@@ -155,16 +155,16 @@ function usage() {
 Receive GitHub webhook deliveries and run the scripts configured in hooks.json.
 
 options:
-  --config=FILE    Hook configuration file (default: webhooks/hooks.json)
+  --config=FILE    Hook configuration file (default: hooks.json)
   --host=HOST      Interface to bind (default: ${DEFAULTS.host})
   --port=PORT      Port to listen on (default: ${DEFAULTS.port})
   --path=PATH      Webhook endpoint path (default: ${DEFAULTS.path})
-  --log=FILE       Log file to append to (default: webhooks/hooks.log)
+  --log=FILE       Log file to append to (default: hooks.log)
   --no-log         Log to the console only, writing no file
   --dry-run        Verify and match deliveries, but never run a hook script
   -h, --help       Show this help
 
-environment (from webhooks/.env, or the real environment, which wins):
+environment (from .env, or the real environment, which wins):
   GITHUB_WEBHOOK_SECRET   Secret configured on the GitHub webhook (required)
   GIFT_SERVE_HOST         Default for --host
   PORT                    Default for --port (GIFT_SERVE_PORT overrides it)
@@ -363,7 +363,7 @@ function explainSignatureFailure(rawBody, signatureHeader, secrets, headers = {}
             notes.push('the sha1 X-Hub-Signature arrived but the sha256 one did not, so something in front dropped it.');
         } else {
             notes.push('the delivery carried no signature header, so the webhook on GitHub has no Secret set.');
-            notes.push('Set it under Settings -> Webhooks -> Edit -> Secret, to the same value as the secret in webhooks/.env.');
+            notes.push('Set it under Settings -> Webhooks -> Edit -> Secret, to the same value as the secret in .env.');
         }
         return { fields, notes };
     }
@@ -399,7 +399,7 @@ function explainSignatureFailure(rawBody, signatureHeader, secrets, headers = {}
         for (const [label, variant] of secretVariants(secret)) {
             if (!signedWith(variant)) continue;
             notes.push(`the delivery was signed with the value of ${name} ${label} — the same secret, pasted differently.`);
-            notes.push(`Fix the one that has it wrong: the Secret field on GitHub, or ${name} in webhooks/.env.`);
+            notes.push(`Fix the one that has it wrong: the Secret field on GitHub, or ${name} in .env.`);
             return { fields, notes };
         }
     }
@@ -848,10 +848,10 @@ function main(argv) {
         return 0;
     }
 
-    // `gift serve` already loaded webhooks/.env; do it here too so that
-    // `node webhooks/server.js` and a systemd unit behave the same way.
+    // `gift serve` already loaded .env; do it here too so that
+    // `node server.js` and a systemd unit behave the same way.
     try {
-        require('../utils/env.js').loadFor(HERE);
+        require('./utils/env.js').loadFor();
     } catch {
         /* running outside the repo — rely on the real environment */
     }
@@ -890,7 +890,7 @@ function main(argv) {
     if (secrets.size === 0) {
         console.error(`gift serve: no webhook secret configured.
 
-Set GITHUB_WEBHOOK_SECRET in webhooks/.env (or the environment) to the same
+Set GITHUB_WEBHOOK_SECRET in .env (or the environment) to the same
 value as the webhook's "Secret" field on GitHub. Generate one with:
 
     openssl rand -hex 32`);

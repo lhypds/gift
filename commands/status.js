@@ -23,9 +23,9 @@ const http = require('node:http');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { readConfig, configFile, show, expandHome } = require('./hook.js');
+const { readConfig, configFile, show, expandHome } = require('../utils/hooks.js');
 const { version } = require('./version.js');
-const { WEBHOOK_DIR } = require('../utils/service.js');
+const { SERVER_DIR } = require('../utils/service.js');
 
 const DEFAULTS = { host: '127.0.0.1', port: 3999, path: '/hooks/github' };
 const DEFAULT_LOG = 'hooks.log';
@@ -109,7 +109,7 @@ function settingsFrom(options) {
         path: endpoint,
         config: { file, missing, unreadable },
         hooks: Array.isArray(config.hooks) ? config.hooks : [],
-        log: off ? null : path.resolve(WEBHOOK_DIR, expandHome(String(setting))),
+        log: off ? null : path.resolve(SERVER_DIR, expandHome(String(setting))),
     };
 }
 
@@ -139,7 +139,7 @@ function missingSecrets(hooks) {
  * bytes of its SHA-256, which is not the secret and cannot be turned back into
  * it.
  *
- * This is the value in webhooks/.env as gift reads it now. The server prints the
+ * This is the value in .env as gift reads it now. The server prints the
  * same fingerprint for what it is actually running on, at startup and on every
  * 401, so the two together answer the question a rotated secret raises: whether
  * the process ever picked the new value up. A variable already in the
@@ -426,7 +426,7 @@ function printReport(state) {
     for (const secret of state.secrets) {
         rows.push([
             'secret',
-            `${secret.name}:${secret.fingerprint} in webhooks/.env — the server logs the fingerprint it runs on`,
+            `${secret.name}:${secret.fingerprint} in .env — the server logs the fingerprint it runs on`,
         ]);
     }
     // Only worth raising when the server is down: it is the usual reason one
@@ -435,7 +435,7 @@ function printReport(state) {
     // its secret from somewhere gift does not read — a systemd EnvironmentFile.)
     if (!state.health.ok) {
         for (const secret of state.missingSecrets) {
-            rows.push(['note', `${secret} is not set in webhooks/.env — the server will not start without a secret`]);
+            rows.push(['note', `${secret} is not set in .env — the server will not start without a secret`]);
         }
     }
 
@@ -507,7 +507,7 @@ function usage() {
     console.log('options:');
     console.log('  --json          Print the report as JSON, for a script');
     console.log(`  --timeout=SEC   How long to wait for the health check (default: ${DEFAULT_TIMEOUT_MS / 1000})`);
-    console.log('  --config=FILE   Hook configuration file (default: webhooks/hooks.json)');
+    console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
     console.log('  -h, --help      Show this help');
     console.log('');
     console.log('The exit code is 0 when the server answers and 1 when it does not, so');

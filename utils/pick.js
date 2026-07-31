@@ -127,5 +127,5 @@ async function pick() {
     }
 }
 
-// `ask` is shared with `gift hook`, which asks for a hook's fields one at a time.
+// `ask` is shared with `gift create`, which asks for a hook's fields one at a time.
 module.exports = { pick, ask };

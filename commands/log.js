@@ -8,7 +8,7 @@
 // `--no-follow` prints the window and stops, for a pipe or a script.
 //
 // The file read is the one the server writes to: `--log=FILE`, then
-// GIFT_SERVE_LOG, then `log` in webhooks/hooks.json — the same order the server
+// GIFT_SERVE_LOG, then `log` in hooks.json — the same order the server
 // resolves it in, so both ends agree on which file is the log.
 'use strict';
 
@@ -16,10 +16,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-// hooks.json is the hook command's file; `log` is one setting in it, so the
-// reading and the path helpers are shared rather than written twice.
-const { readConfig, configFile, show, expandHome } = require('./hook.js');
-const { WEBHOOK_DIR } = require('../utils/service.js');
+// hooks.json is shared with the list/create/delete commands; `log` is one setting in
+// it, so the reading and path helpers are shared rather than written twice.
+const { readConfig, configFile, show, expandHome } = require('../utils/hooks.js');
+const { SERVER_DIR } = require('../utils/service.js');
 
 const DEFAULT_LOG = 'hooks.log';
 const DEFAULT_LINES = 10;
@@ -69,7 +69,7 @@ function target(options, positionals) {
         return { code: 2 };
     }
 
-    return { logPath: path.resolve(WEBHOOK_DIR, expandHome(String(setting))), count };
+    return { logPath: path.resolve(SERVER_DIR, expandHome(String(setting))), count };
 }
 
 /**
@@ -185,7 +185,7 @@ function usage() {
     console.log('  --no-follow     Print the lines and stop, for a pipe or a script');
     console.log('  --log=FILE      Log file to read (default: the one in hooks.json)');
     console.log(`  --lines=N       How many lines to start with (default: ${DEFAULT_LINES})`);
-    console.log('  --config=FILE   Hook configuration file (default: webhooks/hooks.json)');
+    console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
     console.log('  -f, --follow    Keep watching — the default, so this is never needed');
     console.log('  -h, --help      Show this help');
     console.log('');

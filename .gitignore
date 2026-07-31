@@ -2,9 +2,9 @@
 .DS_Store
 # Local configuration and secrets
 .env
-webhooks/hooks.json
+hooks.json
 # Left behind only if `gift hook create` or `delete` dies mid-write
-webhooks/hooks.json.tmp
+hooks.json.tmp
 
 # Build / release output
 node_modules/

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build a source-tree release zip and hand off to release_gh.sh to publish it on
 # GitHub. The archive contains everything ./setup.sh and ./install.sh need in a
-# fresh checkout: bin/, commands/, functions/, utils/, and webhooks/, plus the
-# top-level modules and scripts.
-# Local config (.env, webhooks/hooks.json) is never shipped.
+# fresh checkout: the root webhook server plus bin/, commands/, functions/, and
+# utils/ for the additional CLI functions.
+# Local config (.env, hooks.json) is never shipped.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,14 +31,18 @@ echo "Cleared previous release artifacts."
 
 echo "==> Staging release files in $STAGING_DIR"
 
-# The CLI, command modules, shared utilities, functions, and webhook server.
+# The CLI, command modules, shared utilities, and additional functions.
 cp -R "$ROOT_DIR/bin"       "$STAGING_DIR/bin"
 cp -R "$ROOT_DIR/commands"  "$STAGING_DIR/commands"
 cp -R "$ROOT_DIR/functions" "$STAGING_DIR/functions"
 cp -R "$ROOT_DIR/utils"     "$STAGING_DIR/utils"
-cp -R "$ROOT_DIR/webhooks"  "$STAGING_DIR/webhooks"
 
-# Top-level scripts and project files
+# Root webhook server, scripts, and project files.
+cp "$ROOT_DIR/server.js"    "$STAGING_DIR/"
+cp "$ROOT_DIR/ecosystem.config.cjs" "$STAGING_DIR/"
+cp "$ROOT_DIR/hooks.example.json" "$STAGING_DIR/"
+cp "$ROOT_DIR/start.sh"     "$STAGING_DIR/"
+cp "$ROOT_DIR/stop.sh"      "$STAGING_DIR/"
 cp "$ROOT_DIR/cli.js"       "$STAGING_DIR/"
 cp "$ROOT_DIR/functions.js" "$STAGING_DIR/"
 cp "$ROOT_DIR/setup.sh"     "$STAGING_DIR/"
@@ -49,6 +53,7 @@ cp "$ROOT_DIR/release.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release_gh.sh" "$STAGING_DIR/"
 cp "$ROOT_DIR/package.json" "$STAGING_DIR/"
 cp "$ROOT_DIR/README.md"    "$STAGING_DIR/"
+cp "$ROOT_DIR/README.txt"   "$STAGING_DIR/"
 cp "$ROOT_DIR/LICENSE"      "$STAGING_DIR/"
 cp "$ROOT_DIR/VERSION"      "$STAGING_DIR/"
 
