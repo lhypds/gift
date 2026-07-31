@@ -169,26 +169,6 @@ function restartServer(run = spawnSync) {
 
 // --------------------------------------------------------------- GitHub CLI ---
 
-function hasGitHubUser(run = spawnSync) {
-    const result = run(
-        'gh',
-        ['auth', 'status', '--active', '--hostname', 'github.com', '--json', 'hosts'],
-        { encoding: 'utf8', timeout: 5000 },
-    );
-    if (result.error) return false;
-
-    // In JSON mode gh reports configured accounts even when its live token
-    // validation fails (for example, while api.github.com is unreachable).
-    // Remote creation should still be attempted so `gh api` can report the
-    // actual authentication or network error instead of claiming no user exists.
-    try {
-        const accounts = JSON.parse(String(result.stdout || '')).hosts?.['github.com'];
-        return Array.isArray(accounts) && accounts.some((account) => account.active === true);
-    } catch {
-        return false;
-    }
-}
-
 function webhookUrlProblem(value) {
     let parsed;
     try {
@@ -502,7 +482,7 @@ async function createHook(file) {
     if (repo !== '*' && secret) {
         const createRemote = await askYesNo(`Create a GitHub webhook for ${repo} with gh?`, true);
         if (createRemote === null) return cancelled();
-        if (createRemote && hasGitHubUser()) {
+        if (createRemote) {
             const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
             if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
                 githubUrl = configuredUrl;
@@ -514,8 +494,6 @@ async function createHook(file) {
                 });
                 if (githubUrl === null) return cancelled();
             }
-        } else if (createRemote) {
-            console.log('  note: gh has no active GitHub account, so only the local hook will be created.');
         }
     }
 
@@ -675,7 +653,7 @@ function createUsage() {
     console.log('');
     console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
     console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
-    console.log(`When gh has an active GitHub user, gift asks whether to create a repository hook remotely; set`);
+    console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh; set`);
     console.log(`${WEBHOOK_URL_ENV} to its complete public delivery URL, or gift will ask for it.`);
     console.log('');
     console.log('options:');
@@ -815,7 +793,6 @@ module.exports = {
     listUsage,
     // Kept injectable so the gh integration can be verified without network access.
     createGitHubWebhook,
-    hasGitHubUser,
     restartServer,
     webhookUrlProblem,
     // Configuration and path helpers shared with `gift log` and `gift status`.
