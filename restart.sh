@@ -12,5 +12,4 @@ git pull --ff-only
 
 # Nothing to install or build — gift uses only the Node standard library.
 
-"$ROOT/stop.sh"
 "$ROOT/start.sh"

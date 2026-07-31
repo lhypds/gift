@@ -4,8 +4,6 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-echo "Starting..."
-
 cd "$ROOT"
 if [ ! -f .env ]; then
   echo ".env not found — run ./setup.sh first" >&2
@@ -21,20 +19,15 @@ if [ -z "$SECRET" ]; then
   exit 1
 fi
 
-# PM2 keeps the environment an app was first started with. `--update-env` does
-# not drop a variable that has since left the shell, and the daemon hands its own
-# environment to everything it spawns — so a GITHUB_WEBHOOK_SECRET that was
-# exported once outlives every later edit to .env, because the server takes the
-# real environment over the file. That reads as a webhook which will not verify
-# whatever the file says. Recreating the entry is what rebuilds the environment;
-# stopping and starting it is not.
 PM2_NAME=$(grep '^PM2_NAME=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo gift-webhooks)
 PM2_NAME="${PM2_NAME:-gift-webhooks}"
 if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
-  pm2 delete "$PM2_NAME" >/dev/null
+  echo "Restarting..."
+  pm2 restart ecosystem.config.cjs --only "$PM2_NAME" --update-env
+else
+  echo "Starting..."
+  pm2 start ecosystem.config.cjs --update-env
 fi
-
-pm2 start ecosystem.config.cjs --update-env
 
 # Read the listener settings from .env for display
 PORT=$(grep '^PORT=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 3999)
