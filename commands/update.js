@@ -11,13 +11,12 @@
 //
 // The webhooks server is the one thing that does not pick new code up by itself:
 // it is a process that started from the old files and keeps running from them. So
-// when the pull brought something new and the server is up, `gift serve` runs
-// straight after — the same restart that would otherwise be typed next.
+// when the server is up, `gift serve` runs straight after — the same restart
+// that would otherwise be typed next. This is deliberate even when Git had
+// nothing new: the checkout may already have been updated while the process is
+// still holding older code in memory.
 //
-// Nothing is started that was not already running, and a pull that changed
-// nothing leaves the server alone rather than dropping deliveries for a restart
-// onto the code it is already on. `gift serve` on its own is still the way to
-// restart it deliberately.
+// Nothing is started that was not already running.
 'use strict';
 
 const fs = require('node:fs');
@@ -60,6 +59,31 @@ function hasServer() {
 
 function serveHint() {
     if (hasServer()) console.log('Run `gift serve` to restart the webhooks server on this code.');
+}
+
+function fileState(file) {
+    try {
+        const stat = fs.statSync(file);
+        return { inode: stat.ino, size: stat.size, modified: stat.mtimeMs };
+    } catch {
+        return null;
+    }
+}
+
+function fileChanged(before, after) {
+    if (!after) return false;
+    if (!before) return true;
+    return before.inode !== after.inode || before.size !== after.size || before.modified !== after.modified;
+}
+
+async function waitForServer(attempts = 5) {
+    let state;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        state = await status.probe();
+        if (state.answering) return state;
+        if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return state;
 }
 
 async function main(argv) {
@@ -113,15 +137,9 @@ async function main(argv) {
         return 0;
     }
 
-    // A commit that git could not name is treated as new: better a restart that
-    // was not needed than a server left on code the user thinks it replaced.
     const commitAfter = head();
-    if (commitBefore && commitAfter && commitBefore === commitAfter) {
-        // Nothing was asked of the server either way, so nothing is claimed about
-        // whether it is up — it is simply untouched.
-        if (hasServer()) console.log('Nothing new, so the webhooks server was left alone.');
-        return 0;
-    }
+    const changed = !commitBefore || !commitAfter || commitBefore !== commitAfter;
+    if (!changed) console.log('Git is already up to date; checking the running server.');
 
     const state = await status.probe();
     if (!state.up) {
@@ -137,10 +155,31 @@ async function main(argv) {
     );
     console.log('');
 
+    const requestLog = path.join(ROOT, 'webhooks', 'server.log');
+    const requestLogBefore = fileState(requestLog);
+
     // `gift serve` — the same restart that would be typed next, pull included.
-    // Its exit code becomes this command's: the pull is done either way, and a
-    // restart that failed is not an update that went through.
-    return runFunction(SERVE, []);
+    const restartCode = await runFunction(SERVE, []);
+    if (restartCode !== 0) return restartCode;
+
+    // Do not trust PM2 accepting the start command as proof that the process is
+    // serving. This health request also proves the new process is recording
+    // requests in server.log.
+    const restarted = await waitForServer();
+    if (!restarted.answering) {
+        console.error('gift update: PM2 restarted the process, but /health is not answering.');
+        console.error(`Run \`pm2 logs ${process.env.PM2_NAME || 'gift-webhooks'}\` for the startup error.`);
+        return 1;
+    }
+
+    if (!fileChanged(requestLogBefore, fileState(requestLog))) {
+        console.error(`gift update: /health answered, but no request was written to ${requestLog}.`);
+        console.error('Check the PM2 logs and write permissions for the webhooks folder.');
+        return 1;
+    }
+
+    console.log(`Verified /health and recorded the request in ${requestLog}.`);
+    return 0;
 }
 
 function usage() {
@@ -155,8 +194,10 @@ function usage() {
     console.log('');
     console.log('A running webhooks server is then restarted on the new code, since a');
     console.log('running server keeps its old files until it does. Nothing is started that');
-    console.log('was not already running, and a pull that brought nothing new restarts');
-    console.log('nothing.');
+    console.log('was not already running. A running server is restarted even when Git is');
+    console.log('already up to date, so it cannot remain on older code loaded in memory.');
+    console.log('After the restart, /health is checked and its request must appear in');
+    console.log('webhooks/server.log.');
     console.log('');
     console.log('options:');
     console.log('  --no-restart    Pull only, leaving the server on the code it is running');

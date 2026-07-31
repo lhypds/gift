@@ -61,9 +61,10 @@ Setup and install
 Update  
 `gift update` pulls the latest code into the folder gift is installed from.
 Fast-forward only, so local work is never merged over. A running webhooks server
-is then restarted on the new code, since a running server keeps its old files
-until it is — nothing is started that was not already running, and a pull that
-brought nothing new restarts nothing. `gift update --no-restart` pulls only.  
+is then restarted on the current code, since a running server keeps its old files
+until it is — nothing is started that was not already running. The restart also
+happens when Git is already up to date, then `/health` is verified and recorded
+in `webhooks/server.log`. `gift update --no-restart` pulls only.
 
 Uninstall  
 `./uninstall.sh`  
