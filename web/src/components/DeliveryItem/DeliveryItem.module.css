@@ -5,11 +5,11 @@
   padding: 10px 14px;
   border: 1px solid var(--line);
 }
-.itemTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.itemTop { position: relative; }
 .timestamp { font-size: .8rem; color: var(--muted); }
 .title { font-size: .92rem; font-weight: 600; overflow-wrap: anywhere; }
 
-.deliveryState { flex: none; display: inline-block; padding: 4px 8px; border: 1px solid var(--line); font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.deliveryState { position: absolute; top: 0; right: 0; display: inline-block; padding: 4px 8px; border: 1px solid var(--line); font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .deliveryState.ready { background: var(--fill); color: var(--fill-ink); }
 .deliveryState.warning { background: var(--surface); color: var(--ink); border-style: dashed; }
 .deliveryState.neutral { background: var(--soft); color: var(--muted); border-color: var(--line-soft); }
