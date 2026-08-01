@@ -27,10 +27,11 @@ const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
 const DEFAULT_LOG = path.join(HERE, 'hooks.log');
 const DEFAULT_REQUEST_LOG = path.join(HERE, 'server.log');
+const DEFAULT_DELIVERIES_FILE = path.join(HERE, 'deliveries.json');
 
 // GitHub rejects payloads above 25 MB, so anything larger is not from GitHub.
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
-const RECENT_DELIVERY_LIMIT = 10;
+const RECENT_DELIVERY_LIMIT = 20;
 
 const DEFAULTS = {
     host: '127.0.0.1',
@@ -664,6 +665,38 @@ function repositoryHooksLink(repo, fallback) {
     return { label: value, href, title: `Open webhook settings for ${value}` };
 }
 
+// ------------------------------------------------------------ deliveries ---
+//
+// Recent deliveries live in memory for fast reads, but are mirrored to disk
+// so that a restart — `gift update`, `pm2 restart`, a crash — does not wipe
+// the dashboard back to empty.
+
+function loadDeliveries(file) {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+const deliveriesFileState = { disabled: false };
+
+/** Write through a temporary file, so a crash mid-write cannot truncate it. */
+function saveDeliveries(file, deliveries) {
+    if (deliveriesFileState.disabled) return;
+    const temp = `${file}.tmp`;
+    try {
+        fs.writeFileSync(temp, JSON.stringify(deliveries), { mode: 0o600 });
+        fs.renameSync(temp, file);
+    } catch (err) {
+        deliveriesFileState.disabled = true;
+        log('warn', `cannot write ${file}: ${err.message}`, {
+            hint: 'recent deliveries will not survive a restart until this is fixed',
+        });
+    }
+}
+
 /** The read-only status behind GET /api/status. */
 function dashboardData(config, secrets, options, recentDeliveries = []) {
     const hooks = Array.isArray(config.hooks) ? config.hooks : [];
@@ -704,7 +737,10 @@ function dashboardData(config, secrets, options, recentDeliveries = []) {
 }
 
 function createApp(config, secrets, options) {
-    const recentDeliveries = [];
+    const recentDeliveries = options.deliveriesFile ? loadDeliveries(options.deliveriesFile) : [];
+    const persistDeliveries = () => {
+        if (options.deliveriesFile) saveDeliveries(options.deliveriesFile, recentDeliveries);
+    };
     const beginDelivery = (event, id) => {
         const delivery = {
             id,
@@ -715,6 +751,7 @@ function createApp(config, secrets, options) {
         };
         recentDeliveries.unshift(delivery);
         if (recentDeliveries.length > RECENT_DELIVERY_LIMIT) recentDeliveries.length = RECENT_DELIVERY_LIMIT;
+        persistDeliveries();
         return delivery;
     };
     const finishDelivery = (delivery, outcome, detail, repo) => {
@@ -726,6 +763,7 @@ function createApp(config, secrets, options) {
             : outcome === 'Rejected'
                 ? 'warning'
                 : 'neutral';
+        persistDeliveries();
     };
 
     /** Everything past signature verification: parse, match, run, respond. */
@@ -1003,6 +1041,7 @@ function main(argv) {
         log: options.log || process.env.GIFT_SERVE_LOG || config.log || DEFAULT_LOG,
         dryRun: options.dryRun,
         configFile,
+        deliveriesFile: DEFAULT_DELIVERIES_FILE,
     };
     if (!settings.path.startsWith('/')) settings.path = `/${settings.path}`;
 
@@ -1057,6 +1096,7 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
         log('info', `request log ${requestLogFile.path}`);
+        log('info', `deliveries ${settings.deliveriesFile}`);
         // With the fingerprint of each: after a rotation, this line is what says
         // whether the process is running on the value that is now in .env.
         log('info', `secrets accepted from ${fingerprints(secrets)}`);

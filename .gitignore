@@ -14,3 +14,7 @@ dist/
 # Logs, the webhook server's hooks.log and its rotated hooks.log.1 included
 *.log
 *.log.[0-9]
+
+# Recent-deliveries state, mirrored to disk so a restart doesn't lose it
+deliveries.json
+deliveries.json.tmp
