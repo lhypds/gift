@@ -7,14 +7,16 @@
 // `git pull --ff-only` in the folder gift is installed from, wherever the user
 // happens to be standing. Fast-forward only, so an update never merges and never
 // touches local work: if the branch has diverged, git says so and nothing moves.
-// Nothing is installed or built afterwards — gift uses only the standard library.
+// The CLI itself uses only the standard library, so nothing needs installing for
+// it — but the webhooks dashboard is a built React app, so restarting the server
+// (below) installs dependencies and rebuilds it too.
 //
 // The webhooks server is the one thing that does not pick new code up by itself:
 // it is a process that started from the old files and keeps running from them. So
-// when the server is up, its normal `gift serve` start path runs straight after.
-// This is deliberate even when Git had
-// nothing new: the checkout may already have been updated while the process is
-// still holding older code in memory.
+// when the server is up, its normal `gift serve` start path (pull, install,
+// rebuild the dashboard, restart) runs straight after. This is deliberate even
+// when Git had nothing new: the checkout may already have been updated while the
+// process is still holding older code in memory.
 //
 // Nothing is started that was not already running.
 'use strict';
@@ -200,15 +202,15 @@ function usage() {
     console.log(`installed from (${ROOT}).`);
     console.log('');
     console.log('Fast-forward only, so nothing is merged and local work is left alone; a');
-    console.log('branch that has diverged is reported instead. There is nothing to install');
-    console.log('afterwards.');
+    console.log('branch that has diverged is reported instead.');
     console.log('');
     console.log('A running webhooks server is then restarted on the new code, since a');
     console.log('running server keeps its old files until it does. Nothing is started that');
     console.log('was not already running. A running server is restarted even when Git is');
     console.log('already up to date, so it cannot remain on older code loaded in memory.');
-    console.log('After the restart, /health is checked and its request must appear in');
-    console.log('server.log.');
+    console.log('The restart pulls, installs dependencies, and rebuilds the dashboard before');
+    console.log('putting the server back — after which /health is checked and its request');
+    console.log('must appear in server.log.');
     console.log('');
     console.log('options:');
     console.log('  --no-restart    Pull only, leaving the server on the code it is running');

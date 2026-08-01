@@ -22,9 +22,9 @@ const SERVER_DIR = ROOT;
 
 const SERVE = {
     name: 'serve',
-    description: 'Start or restart the webhooks server under PM2.',
+    description: 'Pull, rebuild the dashboard, and (re)start the webhooks server under PM2.',
     dir: SERVER_DIR,
-    entry: path.join(SERVER_DIR, 'start.sh'),
+    entry: path.join(SERVER_DIR, 'restart.sh'),
 };
 
 const STOP = {
