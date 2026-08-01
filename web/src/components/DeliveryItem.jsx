@@ -3,16 +3,14 @@ import RepoLink from './RepoLink.jsx';
 export default function DeliveryItem({ delivery }) {
   return (
     <div className="item">
-      <div className="info">
-        <div className="title">{delivery.event}</div>
-        <div className="subtitle">
-          <RepoLink repo={delivery.repo} /> · {delivery.id} · {delivery.timestamp}
-        </div>
-      </div>
-      <div className="meta">
+      <div className="item-top">
+        <span className="timestamp">{delivery.timestamp}</span>
         <span className={`delivery-state ${delivery.tone}`}>{delivery.outcome}</span>
-        {delivery.detail && <span className="delivery-detail">{delivery.detail}</span>}
       </div>
+      <div className="title">
+        [{delivery.event.toUpperCase()}] <RepoLink repo={delivery.repo} />
+      </div>
+      {delivery.detail && <div className="delivery-detail">{delivery.detail}</div>}
     </div>
   );
 }
