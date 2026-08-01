@@ -23,11 +23,14 @@ PM2_NAME=$(grep '^PM2_NAME=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo gift
 PM2_NAME="${PM2_NAME:-gift-webhooks}"
 if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
   echo "Restarting..."
-  pm2 restart ecosystem.config.cjs --only "$PM2_NAME" --update-env
+  # PM2 restart keeps the entrypoint it cached when the process was created.
+  # Recreate the entry so changes in ecosystem.config.cjs (such as renaming
+  # server.js to serve.js) and removed environment variables take effect.
+  pm2 delete "$PM2_NAME" >/dev/null
 else
   echo "Starting..."
-  pm2 start ecosystem.config.cjs --update-env
 fi
+pm2 start ecosystem.config.cjs --only "$PM2_NAME" --update-env
 
 # Read the listener settings from .env for display
 PORT=$(grep '^PORT=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 3999)
@@ -37,3 +40,4 @@ HOOK_PATH=$(grep '^GIFT_SERVE_PATH=' "$ROOT/.env" 2>/dev/null | cut -d= -f2 || e
 BASE="http://${HOST:-127.0.0.1}:${PORT:-3999}"
 echo "gift webhooks listening on ${BASE}${HOOK_PATH:-/hooks/github}"
 echo "health check: ${BASE}/health"
+echo "web: ${BASE}"

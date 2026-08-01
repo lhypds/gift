@@ -4,7 +4,7 @@
 //
 // PM2_NAME and PORT come from this folder's .env, so the process name and the
 // listening port are set in one place. Everything else the server needs — the
-// secret, the host, the endpoint path — server.js reads from the same .env at
+// secret, the host, the endpoint path — serve.js reads from the same .env at
 // startup, which keeps the secret out of the PM2 process list.
 const fs = require('fs');
 const path = require('path');
@@ -29,11 +29,11 @@ module.exports = {
   apps: [
     {
       name: PM2_NAME,
-      script: 'server.js',
+      script: 'serve.js',
       cwd: __dirname,
       time: true,
       env: {
-        // GIFT_SERVE_PORT is the name server.js reads; PORT is kept in step so
+        // GIFT_SERVE_PORT is the name serve.js reads; PORT is kept in step so
         // both names agree no matter which one something downstream looks at.
         GIFT_SERVE_PORT: PORT,
         PORT: PORT,

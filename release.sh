@@ -25,6 +25,12 @@ if [ -n "$PKG_VERSION" ] && [ "$PKG_VERSION" != "$VERSION" ]; then
     exit 1
 fi
 
+# The dashboard is React, built by Vite; the release ships the built web/dist
+# alongside its web/src source, so the zip runs standalone without forcing a
+# build on the target machine.
+echo "==> Installing dependencies and building the dashboard"
+(cd "$ROOT_DIR" && pnpm install --frozen-lockfile && pnpm run build)
+
 rm -rf "$RELEASE_DIR"
 mkdir -p "$STAGING_DIR"
 echo "Cleared previous release artifacts."
@@ -36,10 +42,10 @@ cp -R "$ROOT_DIR/bin"       "$STAGING_DIR/bin"
 cp -R "$ROOT_DIR/commands"  "$STAGING_DIR/commands"
 cp -R "$ROOT_DIR/functions" "$STAGING_DIR/functions"
 cp -R "$ROOT_DIR/utils"     "$STAGING_DIR/utils"
+cp -R "$ROOT_DIR/web"       "$STAGING_DIR/web"
 
 # Root webhook server, scripts, and project files.
-cp "$ROOT_DIR/server.js"    "$STAGING_DIR/"
-cp "$ROOT_DIR/dashboard.js" "$STAGING_DIR/"
+cp "$ROOT_DIR/serve.js"     "$STAGING_DIR/"
 cp "$ROOT_DIR/ecosystem.config.cjs" "$STAGING_DIR/"
 cp "$ROOT_DIR/hooks.example.json" "$STAGING_DIR/"
 cp "$ROOT_DIR/start.sh"     "$STAGING_DIR/"
@@ -53,6 +59,7 @@ cp "$ROOT_DIR/restart.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release_gh.sh" "$STAGING_DIR/"
 cp "$ROOT_DIR/package.json" "$STAGING_DIR/"
+[ -f "$ROOT_DIR/pnpm-lock.yaml" ] && cp "$ROOT_DIR/pnpm-lock.yaml" "$STAGING_DIR/"
 cp "$ROOT_DIR/README.md"    "$STAGING_DIR/"
 cp "$ROOT_DIR/README.txt"   "$STAGING_DIR/"
 cp "$ROOT_DIR/LICENSE"      "$STAGING_DIR/"

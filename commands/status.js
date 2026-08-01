@@ -13,7 +13,7 @@
 // when the server answers, 1 when it does not — so a monitor can run
 // `gift status --json` and read either.
 //
-// Settings are resolved the way server.js resolves them, so both ends agree on
+// Settings are resolved the way serve.js resolves them, so both ends agree on
 // which address, config file and log are being talked about.
 'use strict';
 

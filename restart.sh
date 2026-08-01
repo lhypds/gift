@@ -10,6 +10,10 @@ cd "$ROOT"
 echo "Pulling latest code..."
 git pull --ff-only
 
-# Nothing to install or build — gift uses only the Node standard library.
+# web/dist (the built dashboard) is git-ignored, so it has to be rebuilt here
+# after every pull, not just when a dependency changes.
+echo "Installing dependencies and rebuilding the dashboard..."
+pnpm install
+pnpm run build
 
 "$ROOT/start.sh"

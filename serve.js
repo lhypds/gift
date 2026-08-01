@@ -15,13 +15,14 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const express = require('express');
 
 const HERE = __dirname;
 const WEB_DIR = path.join(HERE, 'web');
+const WEB_DIST = path.join(WEB_DIR, 'dist');
 const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
 const DEFAULT_LOG = path.join(HERE, 'hooks.log');
@@ -412,34 +413,6 @@ function explainSignatureFailure(rawBody, signatureHeader, secrets, headers = {}
     return { fields, notes };
 }
 
-function readBody(req, limit) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        let size = 0;
-        let done = false;
-
-        req.on('data', (chunk) => {
-            if (done) return;
-            size += chunk.length;
-            if (size > limit) {
-                done = true;
-                req.destroy();
-                const err = new Error('payload too large');
-                err.code = 'TOO_LARGE';
-                reject(err);
-                return;
-            }
-            chunks.push(chunk);
-        });
-        req.on('end', () => {
-            if (!done) resolve(Buffer.concat(chunks));
-        });
-        req.on('error', (err) => {
-            if (!done) reject(err);
-        });
-    });
-}
-
 /**
  * The delivery's JSON. A webhook's "Content type" on GitHub is either
  * `application/json`, where the body is the JSON itself, or
@@ -630,151 +603,107 @@ function runHook(hook, delivery, options) {
 }
 
 // ------------------------------------------------------------------ server ---
+//
+// Express replaces the old manual node:http routing, but none of the security-
+// relevant logic above (signature verification, hook matching, hook execution,
+// logging) changes — only how a request becomes a call into it.
 
-const REQUEST_RECORDER = Symbol('requestRecorder');
-
-function send(res, status, body) {
-    // Record before sending the response. If a client received a gift response,
-    // its access entry is already on disk.
-    if (res[REQUEST_RECORDER]) res[REQUEST_RECORDER](status);
-    res.writeHead(status, {
-        'content-type': 'text/plain; charset=utf-8',
-        'content-length': Buffer.byteLength(body),
+/** A one-line access log entry for every request, however it ends. */
+function accessLogMiddleware(req, res, next) {
+    const startedAt = Date.now();
+    const pathName = req.path;
+    const from = req.socket.remoteAddress;
+    let logged = false;
+    const recordRequest = (status) => {
+        if (logged) return;
+        logged = true;
+        logRequest(req, status, pathName, from, startedAt);
+    };
+    res.on('finish', () => recordRequest(res.statusCode));
+    res.on('close', () => {
+        if (!res.writableFinished) recordRequest('aborted');
     });
-    res.end(body);
+    next();
 }
 
-function sendHtml(res, status, body) {
-    if (res[REQUEST_RECORDER]) res[REQUEST_RECORDER](status);
-    res.writeHead(status, {
-        'content-type': 'text/html; charset=utf-8',
-        'content-length': Buffer.byteLength(body),
-        'cache-control': 'no-store',
-        'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`,
-        'x-content-type-options': 'nosniff',
-    });
-    res.end(body);
+// Same-origin only: the React bundle and its GET /api/status calls are all
+// this server's own scripts, nothing from anywhere else.
+const CSP = `default-src 'self'; base-uri 'none'; frame-ancestors 'none'`;
+
+function securityHeaders(req, res, next) {
+    res.setHeader('content-security-policy', CSP);
+    res.setHeader('x-content-type-options', 'nosniff');
+    next();
+}
+
+function sendText(res, status, body) {
+    res.status(status).set('content-type', 'text/plain; charset=utf-8').send(body);
 }
 
 // --------------------------------------------------------------- dashboard ---
 //
-// The read-only status page served at GET /. web/index.html is a static shell
-// with {{TOKEN}} placeholders; web/style.css is inlined into it, since the
-// page's CSP (default-src 'none') won't load an external stylesheet.
+// The read-only data behind GET /api/status. web/dist (built by `pnpm run
+// build`) is the React app that renders it; this hands over plain data, not
+// HTML, so nothing here needs escaping — React does that on its own.
 
-const DASHBOARD_TEMPLATE = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
-const DASHBOARD_STYLE = fs.readFileSync(path.join(WEB_DIR, 'style.css'), 'utf8');
-
-// A single-pass regex replace so an inserted value (e.g. an attacker-controlled
-// Host header, or a hook name from local config) can never itself be re-scanned
-// as a template token.
-function renderTemplate(template, values) {
-    return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (
-        Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match
-    ));
-}
-
-function escapeHtml(value) {
-    return String(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-}
-
-function repositoryHtml(repo, fallback) {
+function repositoryLink(repo, fallback) {
     const value = String(repo || '');
     const parts = value.split('/');
-    if (parts.length !== 2 || parts.some((part) => !part)) return escapeHtml(fallback);
+    if (parts.length !== 2 || parts.some((part) => !part)) return { label: fallback, href: null, title: null };
 
     const href = `https://github.com/${parts.map(encodeURIComponent).join('/')}`;
-    return `<a class="repo-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(value)} on GitHub">${escapeHtml(value)}</a>`;
+    return { label: value, href, title: `Open ${value} on GitHub` };
 }
 
 function repositoryHooksLink(repo, fallback) {
     const value = String(repo || '');
     const parts = value.split('/');
-    if (parts.length !== 2 || parts.some((part) => !part)) return escapeHtml(fallback);
+    if (parts.length !== 2 || parts.some((part) => !part)) return { label: fallback, href: null, title: null };
 
     const href = `https://github.com/${parts.map(encodeURIComponent).join('/')}/settings/hooks`;
-    return `<a class="repo-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="Open webhook settings for ${escapeHtml(value)}">${escapeHtml(value)}</a>`;
+    return { label: value, href, title: `Open webhook settings for ${value}` };
 }
 
-function hookReadiness(hook, secrets, options) {
-    const secretEnv = hook.secretEnv || 'GITHUB_WEBHOOK_SECRET';
-    if (!secrets.has(secretEnv)) return { label: 'Secret missing', tone: 'warning' };
-
-    try {
-        fs.accessSync(hook.run, fs.constants.X_OK);
-    } catch {
-        return { label: 'Script unavailable', tone: 'warning' };
-    }
-
-    if (options.dryRun) return { label: 'Dry run', tone: 'neutral' };
-    return { label: 'Ready', tone: 'ready' };
-}
-
-/** The read-only dashboard served at GET /. */
-function dashboardPage(config, secrets, options, recentDeliveries = []) {
+/** The read-only status behind GET /api/status. */
+function dashboardData(config, secrets, options, recentDeliveries = []) {
     const hooks = Array.isArray(config.hooks) ? config.hooks : [];
-    const items = hooks.map((hook, index) => {
+    const hookItems = hooks.map((hook, index) => {
         const name = hook.name || `hook-${index + 1}`;
-        const repo = hook.repo === '*' || !hook.repo ? 'Any repository' : hook.repo;
+        const repoFallback = hook.repo === '*' || !hook.repo ? 'Any repository' : hook.repo;
         const events = Array.isArray(hook.events) && hook.events.length ? hook.events : ['push'];
         const branches = Array.isArray(hook.branches) && hook.branches.length && !hook.branches.includes('*')
             ? hook.branches.join(', ')
             : 'Any branch';
-        const readiness = hookReadiness(hook, secrets, options);
 
-        return `
-          <div class="item">
-            <div class="info">
-              <div class="title">${escapeHtml(name)}</div>
-              <div class="subtitle">${repositoryHooksLink(hook.repo, repo)} · ${escapeHtml(events.join(', '))} · ${escapeHtml(branches)}</div>
-              <div class="subtitle mono"><code class="script-path">${escapeHtml(hook.run || 'Not configured')}</code></div>
-            </div>
-            <span class="hook-state ${readiness.tone}">${escapeHtml(readiness.label)}</span>
-          </div>`;
-    }).join('');
-
-    const hookContent = items || `
-        <div class="empty-state">
-          <p>No webhooks are configured.</p>
-          <span>Run <code>gift create</code> to add one.</span>
-        </div>`;
+        return {
+            name,
+            repo: repositoryHooksLink(hook.repo, repoFallback),
+            events: events.join(', '),
+            branches,
+            run: hook.run || 'Not configured',
+        };
+    });
 
     const deliveryItems = recentDeliveries.map((delivery) => {
         const receivedAt = new Date(delivery.receivedAt);
         const validTime = !Number.isNaN(receivedAt.getTime());
         const timestamp = validTime ? `${receivedAt.toISOString().slice(11, 19)} UTC` : '—';
 
-        return `
-          <div class="item">
-            <div class="info">
-              <div class="title">${escapeHtml(delivery.event || 'Unknown event')}</div>
-              <div class="subtitle">${repositoryHtml(delivery.repo, 'Unknown repository')} · ${escapeHtml(delivery.id || 'No delivery ID')} · ${escapeHtml(timestamp)}</div>
-            </div>
-            <div class="meta">
-              <span class="delivery-state ${escapeHtml(delivery.tone || 'neutral')}">${escapeHtml(delivery.outcome || 'Receiving')}</span>
-              ${delivery.detail ? `<span class="delivery-detail">${escapeHtml(delivery.detail)}</span>` : ''}
-            </div>
-          </div>`;
-    }).join('');
-
-    const deliveryContent = deliveryItems || `
-        <div class="empty-state">
-          <p>No deliveries received yet.</p>
-        </div>`;
-
-    return renderTemplate(DASHBOARD_TEMPLATE, {
-        STYLE: DASHBOARD_STYLE,
-        HOOKS_CONTENT: hookContent,
-        DELIVERIES_CONTENT: deliveryContent,
+        return {
+            event: delivery.event || 'Unknown event',
+            repo: repositoryLink(delivery.repo, 'Unknown repository'),
+            id: delivery.id || 'No delivery ID',
+            timestamp,
+            outcome: delivery.outcome || 'Receiving',
+            tone: delivery.tone || 'neutral',
+            detail: delivery.detail || null,
+        };
     });
+
+    return { hooks: hookItems, deliveries: deliveryItems };
 }
 
-function createServer(config, secrets, options) {
+function createApp(config, secrets, options) {
     const recentDeliveries = [];
     const beginDelivery = (event, id) => {
         const delivery = {
@@ -799,103 +728,10 @@ function createServer(config, secrets, options) {
                 : 'neutral';
     };
 
-    return http.createServer(async (req, res) => {
-        const startedAt = Date.now();
-        const from = req.socket.remoteAddress;
-        const pathName = String(req.url || '/').split('?', 1)[0];
-        let requestLogged = false;
-        const recordRequest = (status) => {
-            if (requestLogged) return;
-            requestLogged = true;
-            logRequest(req, status, pathName, from, startedAt);
-        };
-        res[REQUEST_RECORDER] = recordRequest;
-        res.once('close', () => {
-            if (!res.writableFinished) recordRequest('aborted');
-        });
-
-        const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-
-        if (req.method === 'GET' && url.pathname === '/health') {
-            send(res, 200, 'ok');
-            return;
-        }
-
-        if (req.method === 'GET' && url.pathname === '/') {
-            const page = dashboardPage(config, secrets, options, recentDeliveries);
-            sendHtml(res, 200, page);
-            return;
-        }
-
-        // A delivery is recognised by its X-GitHub-Event header, not only by the
-        // path it arrives on. A Payload URL entered without one — just
-        // `http://host:3999` — reaches the server at `/`, and answering that 404
-        // wastes a delivery over a detail the signature check does not depend on.
-        // The configured path stays the endpoint the docs and proxies use; it is
-        // a label rather than a gate, and anything else off it is still 404.
-        const delivered = req.method === 'POST' && req.headers['x-github-event'] !== undefined;
-
-        if (url.pathname !== options.path && !delivered) {
-            log('warn', 'request to an unknown path', {
-                status: 404,
-                method: req.method,
-                path: url.pathname,
-                from,
-                agent: req.headers['user-agent'],
-            });
-            send(res, 404, 'Not found');
-            return;
-        }
-
-        if (url.pathname !== options.path) {
-            // A line each time: the delivery is handled, but the Payload URL is
-            // not the endpoint this server documents, and that is worth fixing.
-            log('warn', 'delivery on an unexpected path', {
-                path: url.pathname,
-                expected: options.path,
-                from,
-                hint: `set the webhook Payload URL to end in ${options.path}`,
-            });
-        }
-
-        if (req.method !== 'POST') {
-            log('warn', 'request with the wrong method', { status: 405, method: req.method, from });
-            res.setHeader('allow', 'POST');
-            send(res, 405, 'Method not allowed');
-            return;
-        }
-
-        const event = req.headers['x-github-event'];
-        const deliveryId = req.headers['x-github-delivery'];
-        const signature = req.headers['x-hub-signature-256'];
-        const recent = beginDelivery(event, deliveryId);
-
-        // Logged before anything can reject it, so even a delivery that fails
-        // verification leaves a record of having arrived.
-        log('info', 'delivery received', {
-            event,
-            delivery: deliveryId,
-            from,
-            bytes: req.headers['content-length'],
-            signed: signature ? 'yes' : 'no',
-            agent: req.headers['user-agent'],
-        });
-
-        let rawBody;
-        try {
-            rawBody = await readBody(req, MAX_BODY_BYTES);
-        } catch (err) {
-            if (err.code === 'TOO_LARGE') {
-                finishDelivery(recent, 'Rejected', 'Payload too large');
-                log('warn', 'rejected oversized payload', { status: 413, delivery: deliveryId, from });
-                send(res, 413, 'Payload too large');
-            } else {
-                finishDelivery(recent, 'Rejected', 'Request read failed');
-                log('warn', `request read failed: ${err.message}`, { status: 400, delivery: deliveryId });
-                if (!res.headersSent) send(res, 400, 'Bad request');
-            }
-            return;
-        }
+    /** Everything past signature verification: parse, match, run, respond. */
+    function handleDelivery(req, res, ctx) {
+        const { event, deliveryId, signature, recent, from } = ctx;
+        const rawBody = req.body;
 
         const secretNames = verifySignature(rawBody, signature, secrets);
         if (secretNames.length === 0) {
@@ -911,7 +747,7 @@ function createServer(config, secrets, options) {
             // Indented under the line above: sentences, which do not belong in
             // its key=value columns.
             for (const note of why.notes) log('warn', `  ${note}`);
-            send(res, 401, signature ? 'Invalid signature' : 'Missing signature');
+            sendText(res, 401, signature ? 'Invalid signature' : 'Missing signature');
             return;
         }
 
@@ -928,7 +764,7 @@ function createServer(config, secrets, options) {
                 event,
                 type: req.headers['content-type'],
             });
-            send(res, 400, 'Invalid JSON');
+            sendText(res, 400, 'Invalid JSON');
             return;
         }
 
@@ -963,7 +799,7 @@ function createServer(config, secrets, options) {
         if (event === 'ping') {
             finishDelivery(recent, 'Ping', 'Webhook verified', repo);
             log('info', 'ping answered', { status: 200, delivery: deliveryId });
-            send(res, 200, 'pong');
+            sendText(res, 200, 'pong');
             return;
         }
 
@@ -980,7 +816,7 @@ function createServer(config, secrets, options) {
                 repo,
                 configured: config.hooks.length,
             });
-            send(res, 200, 'No hook matched');
+            sendText(res, 200, 'No hook matched');
             return;
         }
 
@@ -994,7 +830,7 @@ function createServer(config, secrets, options) {
         finishDelivery(recent, 'Accepted', triggeredNames.join(', '), repo);
 
         // Answer GitHub before doing any work: deliveries time out after 10s.
-        send(res, 202, `Accepted: ${triggeredNames.join(', ')}`);
+        sendText(res, 202, `Accepted: ${triggeredNames.join(', ')}`);
 
         for (const hook of triggered) {
             try {
@@ -1003,7 +839,124 @@ function createServer(config, secrets, options) {
                 log('error', `hook error: ${err.message}`, { hook: hook.name });
             }
         }
+    }
+
+    const app = express();
+    app.disable('x-powered-by');
+    app.use(securityHeaders);
+    app.use(accessLogMiddleware);
+
+    app.get('/health', (req, res) => {
+        sendText(res, 200, 'ok');
     });
+
+    app.get('/api/status', (req, res) => {
+        res.set('cache-control', 'no-store');
+        res.json(dashboardData(config, secrets, options, recentDeliveries));
+    });
+
+    // The raw hooks.json for the dashboard's info panel — read fresh on every
+    // request so it reflects edits made without restarting the server.
+    app.get('/api/hooks.json', (req, res) => {
+        res.set('cache-control', 'no-store');
+        fs.readFile(options.configFile, 'utf8', (err, data) => {
+            if (err) {
+                sendText(res, 404, `${path.basename(options.configFile)} not found`);
+                return;
+            }
+            res.set('content-type', 'application/json; charset=utf-8').send(data);
+        });
+    });
+
+    // The built React app. index.html stays uncached — it names the current
+    // hashed asset files, and those change on every build.
+    app.use(express.static(WEB_DIST, {
+        setHeaders(res, filePath) {
+            if (path.basename(filePath) === 'index.html') res.setHeader('cache-control', 'no-store');
+        },
+    }));
+
+    const readRawBody = express.raw({ type: '*/*', limit: MAX_BODY_BYTES });
+
+    // A delivery is recognised by its X-GitHub-Event header, not only by the
+    // path it arrives on. A Payload URL entered without one — just
+    // `http://host:3999` — reaches the server at `/`, and answering that 404
+    // wastes a delivery over a detail the signature check does not depend on.
+    // The configured path stays the endpoint the docs and proxies use; it is a
+    // label rather than a gate, and anything else off it falls through to the
+    // 404 catch-all below.
+    app.use((req, res, next) => {
+        const from = req.socket.remoteAddress;
+        const delivered = req.method === 'POST' && req.headers['x-github-event'] !== undefined;
+
+        if (req.path !== options.path && !delivered) return next();
+
+        if (req.path !== options.path) {
+            // A line each time: the delivery is handled, but the Payload URL is
+            // not the endpoint this server documents, and that is worth fixing.
+            log('warn', 'delivery on an unexpected path', {
+                path: req.path,
+                expected: options.path,
+                from,
+                hint: `set the webhook Payload URL to end in ${options.path}`,
+            });
+        }
+
+        if (req.method !== 'POST') {
+            log('warn', 'request with the wrong method', { status: 405, method: req.method, from });
+            res.set('allow', 'POST');
+            sendText(res, 405, 'Method not allowed');
+            return;
+        }
+
+        const event = req.headers['x-github-event'];
+        const deliveryId = req.headers['x-github-delivery'];
+        const signature = req.headers['x-hub-signature-256'];
+        const recent = beginDelivery(event, deliveryId);
+
+        // Logged before anything can reject it, so even a delivery that fails
+        // verification leaves a record of having arrived.
+        log('info', 'delivery received', {
+            event,
+            delivery: deliveryId,
+            from,
+            bytes: req.headers['content-length'],
+            signed: signature ? 'yes' : 'no',
+            agent: req.headers['user-agent'],
+        });
+
+        readRawBody(req, res, (err) => {
+            if (err) {
+                if (err.status === 413 || err.type === 'entity.too.large') {
+                    finishDelivery(recent, 'Rejected', 'Payload too large');
+                    log('warn', 'rejected oversized payload', { status: 413, delivery: deliveryId, from });
+                    sendText(res, 413, 'Payload too large');
+                } else {
+                    finishDelivery(recent, 'Rejected', 'Request read failed');
+                    log('warn', `request read failed: ${err.message}`, { status: 400, delivery: deliveryId });
+                    sendText(res, 400, 'Bad request');
+                }
+                return;
+            }
+
+            handleDelivery(req, res, { event, deliveryId, signature, recent, from });
+        });
+    });
+
+    // Whatever falls through everything above: not the webhook, not a static
+    // file, not the API. A plain 404.
+    app.use((req, res) => {
+        log('warn', 'request to an unknown path', {
+            status: 404,
+            method: req.method,
+            path: req.path,
+            from: req.socket.remoteAddress,
+            agent: req.headers['user-agent'],
+        });
+        sendText(res, 404, 'Not found');
+    });
+
+    return app;
 }
 
 // -------------------------------------------------------------------- main ---
@@ -1049,6 +1002,7 @@ function main(argv) {
         // GIFT_SERVE_LOG= in .env means "unset", not "no log".
         log: options.log || process.env.GIFT_SERVE_LOG || config.log || DEFAULT_LOG,
         dryRun: options.dryRun,
+        configFile,
     };
     if (!settings.path.startsWith('/')) settings.path = `/${settings.path}`;
 
@@ -1077,6 +1031,12 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         });
     }
 
+    if (!fs.existsSync(WEB_DIST)) {
+        log('warn', `${path.relative(HERE, WEB_DIST)} not found — the dashboard will 404 until it is built`, {
+            hint: 'pnpm run build',
+        });
+    }
+
     for (const hook of config.hooks) {
         try {
             fs.accessSync(hook.run, fs.constants.X_OK);
@@ -1088,21 +1048,12 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         }
     }
 
-    const server = createServer({ ...config, path: settings.path }, secrets, settings);
+    const app = createApp({ ...config, path: settings.path }, secrets, settings);
 
-    server.on('error', (err) => {
-        if (err.code === 'EADDRINUSE') {
-            log('error', `port ${settings.port} is already in use`);
-        } else {
-            log('error', `server error: ${err.message}`);
-        }
-        process.exitCode = 1;
-    });
-
-    server.listen(settings.port, settings.host, () => {
-        log('info', `gift serve listening on http://${settings.host}:${settings.port}${settings.path}`);
-        log('info', `status page on http://${settings.host}:${settings.port}/`);
-        log('info', `health check on http://${settings.host}:${settings.port}/health`);
+    const server = app.listen(settings.port, settings.host, () => {
+        log('info', `gift webhooks listening on http://${settings.host}:${settings.port}${settings.path}`);
+        log('info', `health check: http://${settings.host}:${settings.port}/health`);
+        log('info', `web: http://${settings.host}:${settings.port}`);
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
         log('info', `request log ${requestLogFile.path}`);
@@ -1123,6 +1074,15 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         }
     });
 
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            log('error', `port ${settings.port} is already in use`);
+        } else {
+            log('error', `server error: ${err.message}`);
+        }
+        process.exitCode = 1;
+    });
+
     const shutdown = (signal) => {
         log('info', `${signal} received, shutting down`);
         server.close(() => process.exit(0));
@@ -1141,7 +1101,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    createServer,
+    createApp,
     verifySignature,
     signatureCandidates,
     explainSignatureFailure,
@@ -1149,7 +1109,7 @@ module.exports = {
     matches,
     loadConfig,
     collectSecrets,
-    dashboardPage,
+    dashboardData,
     openLog,
     openRequestLog,
     main,

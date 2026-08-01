@@ -11,8 +11,8 @@
 //
 // The webhooks server is the one thing that does not pick new code up by itself:
 // it is a process that started from the old files and keeps running from them. So
-// when the server is up, `gift serve` runs straight after — the same restart
-// that would otherwise be typed next. This is deliberate even when Git had
+// when the server is up, its normal `gift serve` start path runs straight after.
+// This is deliberate even when Git had
 // nothing new: the checkout may already have been updated while the process is
 // still holding older code in memory.
 //
@@ -166,7 +166,8 @@ async function main(argv) {
     const requestLog = path.join(ROOT, 'server.log');
     const requestLogBefore = fileState(requestLog);
 
-    // `gift serve` — the same restart that would be typed next, pull included.
+    // Use the same start/restart path as `gift serve`; the pull already happened
+    // above.
     const restartCode = await runFunction(SERVE, []);
     if (restartCode !== 0) return restartCode;
 

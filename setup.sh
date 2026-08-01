@@ -69,7 +69,16 @@ valid_webhook_url() {
 }
 
 echo "==> Using $($NODE --version) ($(command -v "$NODE"))"
-echo "==> No third-party packages to install (gift uses only the Node standard library)"
+
+if ! command -v pnpm >/dev/null 2>&1; then
+    echo "error: pnpm is required. Install it with: npm install -g pnpm  (or corepack enable pnpm)" >&2
+    exit 1
+fi
+# The full dependency set, not just production ones: the dashboard is a React
+# app built by Vite, and building it locally is how `gift update` (a plain
+# `git pull`, since web/dist is git-ignored) ends up with a working one.
+echo "==> Installing dependencies and building the dashboard (pnpm i && pnpm run build)"
+(cd "$ROOT_DIR" && pnpm i && pnpm run build)
 
 echo "==> Checking the tools the functions use"
 for tool in git gh jq; do
