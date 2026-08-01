@@ -720,13 +720,12 @@ function dashboardData(config, secrets, options, recentDeliveries = []) {
     const deliveryItems = recentDeliveries.map((delivery) => {
         const receivedAt = new Date(delivery.receivedAt);
         const validTime = !Number.isNaN(receivedAt.getTime());
-        const timestamp = validTime ? `${receivedAt.toISOString().slice(11, 19)} UTC` : '—';
 
         return {
             event: delivery.event || 'Unknown event',
             repo: repositoryLink(delivery.repo, 'Unknown repository'),
             id: delivery.id || 'No delivery ID',
-            timestamp,
+            timestamp: validTime ? receivedAt.toISOString() : null,
             outcome: delivery.outcome || 'Receiving',
             tone: delivery.tone || 'neutral',
             detail: delivery.detail || null,
