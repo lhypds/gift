@@ -19,9 +19,9 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { dashboardPage } = require('./dashboard.js');
 
 const HERE = __dirname;
+const WEB_DIR = path.join(HERE, 'web');
 const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
 const DEFAULT_LOG = path.join(HERE, 'hooks.log');
@@ -644,16 +644,134 @@ function send(res, status, body) {
     res.end(body);
 }
 
-function sendHtml(res, status, body, scriptNonce) {
+function sendHtml(res, status, body) {
     if (res[REQUEST_RECORDER]) res[REQUEST_RECORDER](status);
     res.writeHead(status, {
         'content-type': 'text/html; charset=utf-8',
         'content-length': Buffer.byteLength(body),
         'cache-control': 'no-store',
-        'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${scriptNonce}'; base-uri 'none'; frame-ancestors 'none'`,
+        'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`,
         'x-content-type-options': 'nosniff',
     });
     res.end(body);
+}
+
+// --------------------------------------------------------------- dashboard ---
+//
+// The read-only status page served at GET /. web/index.html is a static shell
+// with {{TOKEN}} placeholders; web/style.css is inlined into it, since the
+// page's CSP (default-src 'none') won't load an external stylesheet.
+
+const DASHBOARD_TEMPLATE = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
+const DASHBOARD_STYLE = fs.readFileSync(path.join(WEB_DIR, 'style.css'), 'utf8');
+
+// A single-pass regex replace so an inserted value (e.g. an attacker-controlled
+// Host header, or a hook name from local config) can never itself be re-scanned
+// as a template token.
+function renderTemplate(template, values) {
+    return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (
+        Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match
+    ));
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function repositoryHtml(repo, fallback) {
+    const value = String(repo || '');
+    const parts = value.split('/');
+    if (parts.length !== 2 || parts.some((part) => !part)) return escapeHtml(fallback);
+
+    const href = `https://github.com/${parts.map(encodeURIComponent).join('/')}`;
+    return `<a class="repo-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(value)} on GitHub">${escapeHtml(value)}</a>`;
+}
+
+function repositoryHooksLink(repo, fallback) {
+    const value = String(repo || '');
+    const parts = value.split('/');
+    if (parts.length !== 2 || parts.some((part) => !part)) return escapeHtml(fallback);
+
+    const href = `https://github.com/${parts.map(encodeURIComponent).join('/')}/settings/hooks`;
+    return `<a class="repo-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="Open webhook settings for ${escapeHtml(value)}">${escapeHtml(value)}</a>`;
+}
+
+function hookReadiness(hook, secrets, options) {
+    const secretEnv = hook.secretEnv || 'GITHUB_WEBHOOK_SECRET';
+    if (!secrets.has(secretEnv)) return { label: 'Secret missing', tone: 'warning' };
+
+    try {
+        fs.accessSync(hook.run, fs.constants.X_OK);
+    } catch {
+        return { label: 'Script unavailable', tone: 'warning' };
+    }
+
+    if (options.dryRun) return { label: 'Dry run', tone: 'neutral' };
+    return { label: 'Ready', tone: 'ready' };
+}
+
+/** The read-only dashboard served at GET /. */
+function dashboardPage(config, secrets, options, recentDeliveries = []) {
+    const hooks = Array.isArray(config.hooks) ? config.hooks : [];
+    const items = hooks.map((hook, index) => {
+        const name = hook.name || `hook-${index + 1}`;
+        const repo = hook.repo === '*' || !hook.repo ? 'Any repository' : hook.repo;
+        const events = Array.isArray(hook.events) && hook.events.length ? hook.events : ['push'];
+        const branches = Array.isArray(hook.branches) && hook.branches.length && !hook.branches.includes('*')
+            ? hook.branches.join(', ')
+            : 'Any branch';
+        const readiness = hookReadiness(hook, secrets, options);
+
+        return `
+          <div class="item">
+            <div class="info">
+              <div class="title">${escapeHtml(name)}</div>
+              <div class="subtitle">${repositoryHooksLink(hook.repo, repo)} · ${escapeHtml(events.join(', '))} · ${escapeHtml(branches)}</div>
+              <div class="subtitle mono"><code class="script-path">${escapeHtml(hook.run || 'Not configured')}</code></div>
+            </div>
+            <span class="hook-state ${readiness.tone}">${escapeHtml(readiness.label)}</span>
+          </div>`;
+    }).join('');
+
+    const hookContent = items || `
+        <div class="empty-state">
+          <p>No webhooks are configured.</p>
+          <span>Run <code>gift create</code> to add one.</span>
+        </div>`;
+
+    const deliveryItems = recentDeliveries.map((delivery) => {
+        const receivedAt = new Date(delivery.receivedAt);
+        const validTime = !Number.isNaN(receivedAt.getTime());
+        const timestamp = validTime ? `${receivedAt.toISOString().slice(11, 19)} UTC` : '—';
+
+        return `
+          <div class="item">
+            <div class="info">
+              <div class="title">${escapeHtml(delivery.event || 'Unknown event')}</div>
+              <div class="subtitle">${repositoryHtml(delivery.repo, 'Unknown repository')} · ${escapeHtml(delivery.id || 'No delivery ID')} · ${escapeHtml(timestamp)}</div>
+            </div>
+            <div class="meta">
+              <span class="delivery-state ${escapeHtml(delivery.tone || 'neutral')}">${escapeHtml(delivery.outcome || 'Receiving')}</span>
+              ${delivery.detail ? `<span class="delivery-detail">${escapeHtml(delivery.detail)}</span>` : ''}
+            </div>
+          </div>`;
+    }).join('');
+
+    const deliveryContent = deliveryItems || `
+        <div class="empty-state">
+          <p>No deliveries received yet.</p>
+        </div>`;
+
+    return renderTemplate(DASHBOARD_TEMPLATE, {
+        STYLE: DASHBOARD_STYLE,
+        HOOKS_CONTENT: hookContent,
+        DELIVERIES_CONTENT: deliveryContent,
+    });
 }
 
 function createServer(config, secrets, options) {
@@ -704,9 +822,8 @@ function createServer(config, secrets, options) {
         }
 
         if (req.method === 'GET' && url.pathname === '/') {
-            const scriptNonce = crypto.randomBytes(16).toString('base64');
-            const page = dashboardPage(config, secrets, options, req.headers.host, recentDeliveries, scriptNonce);
-            sendHtml(res, 200, page, scriptNonce);
+            const page = dashboardPage(config, secrets, options, recentDeliveries);
+            sendHtml(res, 200, page);
             return;
         }
 
