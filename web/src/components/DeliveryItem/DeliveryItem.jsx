@@ -1,11 +1,17 @@
 import RepoLink from '../RepoLink/RepoLink.jsx';
 import styles from './DeliveryItem.module.css';
 
+function pad(value) {
+  return String(value).padStart(2, '0');
+}
+
 function formatTimestamp(timestamp) {
   if (!timestamp) return '—';
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleTimeString(undefined, { hour12: false });
+  const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${datePart} ${timePart}`;
 }
 
 export default function DeliveryItem({ delivery }) {
