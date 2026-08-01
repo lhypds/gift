@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ActionButton, Modal, TextArea } from '../ui/index.js';
-import { POLL_MS } from '../pollInterval.js';
+import { ActionButton, Modal, TextArea } from '../../ui/index.js';
+import { POLL_MS } from '../../pollInterval.js';
 import styles from './InfoButton.module.css';
 
 // Polls hooks.json on the same cadence as the status list, but only while the

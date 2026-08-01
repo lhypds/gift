@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import DeliveryItem from './components/DeliveryItem.jsx';
-import EmptyState from './components/EmptyState.jsx';
-import RefreshButton from './components/RefreshButton.jsx';
-import InfoButton from './components/InfoButton.jsx';
+import DeliveryItem from './components/DeliveryItem/DeliveryItem.jsx';
+import EmptyState from './components/EmptyState/EmptyState.jsx';
+import RefreshButton from './components/RefreshButton/RefreshButton.jsx';
+import InfoButton from './components/InfoButton/InfoButton.jsx';
 import { POLL_MS } from './pollInterval.js';
 
 // Replaces the old <meta http-equiv="refresh" content="30">: only the list
