@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActionButton, Modal } from '../ui/index.js';
+import { ActionButton, Modal, TextArea } from '../ui/index.js';
 import { POLL_MS } from '../pollInterval.js';
 import styles from './InfoButton.module.css';
 
@@ -40,7 +40,17 @@ export default function InfoButton() {
         </svg>
       </ActionButton>
       <Modal isOpen={open} onClose={() => setOpen(false)} title="hooks.json" closeOnOverlay>
-        {error ? <p className={styles.error}>{error}</p> : <pre className={styles.code}>{content ?? 'Loading…'}</pre>}
+        {error ? (
+          <p className={styles.error}>{error}</p>
+        ) : (
+          <TextArea
+            className={styles.code}
+            value={content ?? 'Loading…'}
+            readOnly
+            spellCheck={false}
+            style={{ minHeight: 'min(400px, calc(90vh - 100px))', maxHeight: 'calc(90vh - 100px)' }}
+          />
+        )}
       </Modal>
     </>
   );

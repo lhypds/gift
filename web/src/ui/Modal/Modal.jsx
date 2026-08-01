@@ -1,7 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import styles from './modal.module.css';
 
 export default function Modal({ isOpen, onClose, title, children, closeOnOverlay = false, className }) {
+  // The browser's "click" fires on the nearest common ancestor of the
+  // mousedown and mouseup targets — so dragging a resize handle (e.g. inside
+  // TextArea) past the modal's edge ends the gesture over the overlay, and a
+  // naive target check on click alone would misread that as a dismiss click.
+  // Requiring the press to have *also* started on the overlay rules that out.
+  const pressedOnOverlay = useRef(false);
   // Prevent touchmove on the background; allow it on scrollable content
   // (textarea/input/select, or anything that actually scrolls).
   useEffect(() => {
@@ -33,12 +39,16 @@ export default function Modal({ isOpen, onClose, title, children, closeOnOverlay
 
   if (!isOpen) return null;
 
+  const handleOverlayMouseDown = (event) => {
+    pressedOnOverlay.current = event.target === event.currentTarget;
+  };
+
   const handleOverlayClick = (event) => {
-    if (closeOnOverlay && event.target === event.currentTarget) onClose();
+    if (closeOnOverlay && pressedOnOverlay.current && event.target === event.currentTarget) onClose();
   };
 
   return (
-    <div className={styles.overlay} onClick={handleOverlayClick}>
+    <div className={styles.overlay} onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>
       <div className={[styles.modal, className].filter(Boolean).join(' ')}>
         <div className={styles.header}>
           {title && <span className={styles.title}>{title}</span>}
