@@ -1,4 +1,4 @@
-import styles from './RepoLink.module.css';
+import styles from "./link.module.css";
 
 // A repository name, linked to GitHub when the server could resolve a URL for
 // it (see repositoryLink/repositoryHooksLink in server.js), plain text otherwise.
