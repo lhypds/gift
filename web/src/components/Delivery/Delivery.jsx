@@ -14,6 +14,21 @@ function formatTimestamp(timestamp) {
   return `${datePart} ${timePart}`;
 }
 
+function formatRelativeTime(timestamp) {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 export default function Delivery({ delivery, onSelect }) {
   const handleKeyDown = (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -30,7 +45,12 @@ export default function Delivery({ delivery, onSelect }) {
       onKeyDown={handleKeyDown}
     >
       <div className={styles.itemTop}>
-        <span className={styles.timestamp}>{formatTimestamp(delivery.timestamp)}</span>
+        <span className={styles.timestamp}>
+          {formatTimestamp(delivery.timestamp)}
+          {formatRelativeTime(delivery.timestamp) && (
+            <span className={styles.relativeTime}> ({formatRelativeTime(delivery.timestamp)})</span>
+          )}
+        </span>
         <span className={`${styles.deliveryState} ${styles[delivery.tone]}`}>{delivery.outcome}</span>
       </div>
       <div className={styles.title}>

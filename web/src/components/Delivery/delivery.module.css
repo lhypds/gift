@@ -10,6 +10,7 @@
 .clickable:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .itemTop { position: relative; }
 .timestamp { font-size: .8rem; color: var(--muted); }
+.relativeTime { opacity: .7; }
 .title { font-size: .8rem; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
 
 .deliveryState { position: absolute; top: 0; right: 0; display: inline-block; padding: 4px 8px; border: 1px solid var(--line); font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }

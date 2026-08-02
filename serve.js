@@ -31,7 +31,7 @@ const DEFAULT_DELIVERIES_FILE = path.join(HERE, 'deliveries.json');
 
 // GitHub rejects payloads above 25 MB, so anything larger is not from GitHub.
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
-const RECENT_DELIVERY_LIMIT = 20;
+const DELIVERY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 // Captured per hook run and stored into deliveries.json alongside the
 // delivery. Capped so a chatty script can't grow that file without bound.
@@ -729,6 +729,18 @@ function loadDeliveries(file) {
     }
 }
 
+// Deliveries are always unshifted onto the front as they arrive, so the
+// array stays newest-first — meaning anything past the retention window is a
+// contiguous run at the end, not scattered throughout.
+function pruneStaleDeliveries(deliveries, now) {
+    const cutoff = now - DELIVERY_RETENTION_MS;
+    let end = deliveries.length;
+    while (end > 0 && new Date(deliveries[end - 1].receivedAt).getTime() < cutoff) end--;
+    const removed = deliveries.length - end;
+    if (removed > 0) deliveries.length = end;
+    return removed;
+}
+
 const deliveriesFileState = { disabled: false };
 
 /** Write through a temporary file, so a crash mid-write cannot truncate it. */
@@ -800,6 +812,7 @@ function createApp(config, secrets, options) {
     const persistDeliveries = () => {
         if (options.deliveriesFile) saveDeliveries(options.deliveriesFile, recentDeliveries);
     };
+    if (pruneStaleDeliveries(recentDeliveries, Date.now()) > 0) persistDeliveries();
     const beginDelivery = (event, id) => {
         const delivery = {
             id,
@@ -809,7 +822,7 @@ function createApp(config, secrets, options) {
             tone: 'neutral',
         };
         recentDeliveries.unshift(delivery);
-        if (recentDeliveries.length > RECENT_DELIVERY_LIMIT) recentDeliveries.length = RECENT_DELIVERY_LIMIT;
+        pruneStaleDeliveries(recentDeliveries, Date.now());
         persistDeliveries();
         return delivery;
     };
@@ -961,6 +974,7 @@ function createApp(config, secrets, options) {
 
     app.get('/api/status', (req, res) => {
         res.set('cache-control', 'no-store');
+        if (pruneStaleDeliveries(recentDeliveries, Date.now()) > 0) persistDeliveries();
         res.json(dashboardData(config, secrets, options, recentDeliveries));
     });
 
