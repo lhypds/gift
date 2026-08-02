@@ -14,6 +14,8 @@ function formatTimestamp(timestamp) {
   return `${datePart} ${timePart}`;
 }
 
+// Only shown within the first hour — past that the absolute timestamp is
+// close enough and "N hours ago" stops being useful at a glance.
 function formatRelativeTime(timestamp) {
   if (!timestamp) return null;
   const date = new Date(timestamp);
@@ -23,10 +25,7 @@ function formatRelativeTime(timestamp) {
   if (seconds < 60) return "just now";
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  return null;
 }
 
 export default function Delivery({ delivery, onSelect }) {
