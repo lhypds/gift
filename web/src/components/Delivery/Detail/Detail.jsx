@@ -18,7 +18,7 @@ export default function Detail({ delivery, onClose }) {
   const runs = delivery?.runs ?? [];
 
   return (
-    <Modal isOpen={Boolean(delivery)} onClose={onClose} closeOnOverlay>
+    <Modal isOpen={Boolean(delivery)} onClose={onClose} closeOnOverlay className={styles.modal}>
       {runs.length === 0 && <p className={styles.empty}>No hook output for this delivery.</p>}
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>
