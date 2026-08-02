@@ -18,7 +18,7 @@ export default function Detail({ delivery, onClose }) {
   const runs = delivery?.runs ?? [];
 
   return (
-    <Modal isOpen={Boolean(delivery)} onClose={onClose} closeOnOverlay className={styles.modal}>
+    <Modal isOpen={Boolean(delivery)} onClose={onClose} closeOnOverlay>
       {runs.length === 0 && <p className={styles.empty}>No hook output for this delivery.</p>}
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>
@@ -32,7 +32,7 @@ export default function Detail({ delivery, onClose }) {
               value={run.output || "(no output)"}
               readOnly
               spellCheck={false}
-              style={{ minHeight: "min(240px, 50vh)", maxHeight: "calc(80vh - 140px)" }}
+              style={{ minHeight: "min(420px, 70vh)", maxHeight: "calc(80vh - 140px)" }}
             />
           )}
         </div>
