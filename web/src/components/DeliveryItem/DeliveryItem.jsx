@@ -14,9 +14,21 @@ function formatTimestamp(timestamp) {
   return `${datePart} ${timePart}`;
 }
 
-export default function DeliveryItem({ delivery }) {
+export default function DeliveryItem({ delivery, onSelect }) {
+  const handleKeyDown = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onSelect(delivery);
+  };
+
   return (
-    <div className={styles.item}>
+    <div
+      className={`${styles.item} ${styles.clickable}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(delivery)}
+      onKeyDown={handleKeyDown}
+    >
       <div className={styles.itemTop}>
         <span className={styles.timestamp}>{formatTimestamp(delivery.timestamp)}</span>
         <span className={`${styles.deliveryState} ${styles[delivery.tone]}`}>{delivery.outcome}</span>

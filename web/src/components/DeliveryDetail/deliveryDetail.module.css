@@ -1,0 +1,24 @@
+.empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+.run + .run { margin-top: 16px; }
+
+.runHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.hookName { font-size: .85rem; font-weight: 600; color: var(--ink); }
+.runState { font-size: .76rem; color: var(--muted); overflow-wrap: anywhere; text-align: right; }
+
+.output {
+  font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

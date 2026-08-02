@@ -33,6 +33,10 @@ const DEFAULT_DELIVERIES_FILE = path.join(HERE, 'deliveries.json');
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const RECENT_DELIVERY_LIMIT = 20;
 
+// Captured per hook run and stored into deliveries.json alongside the
+// delivery. Capped so a chatty script can't grow that file without bound.
+const HOOK_OUTPUT_LIMIT = 50 * 1024;
+
 const DEFAULTS = {
     host: '127.0.0.1',
     port: 3999,
@@ -478,21 +482,51 @@ function removeQuietly(file) {
     }
 }
 
-function pipeOutput(stream, hookName, level) {
+/**
+ * Accumulates a hook run's combined stdout+stderr, in the order each line
+ * actually surfaced — the same order that lands in hooks.log — capped so one
+ * run can't grow deliveries.json without bound.
+ */
+function createOutputRecorder(limit = HOOK_OUTPUT_LIMIT) {
+    let text = '';
+    let truncated = false;
+    return {
+        append(line) {
+            if (truncated) return;
+            text += line;
+            if (text.length > limit) {
+                text = text.slice(0, limit) + '\n… (truncated)';
+                truncated = true;
+            }
+        },
+        value() {
+            return text;
+        },
+    };
+}
+
+function pipeOutput(stream, hookName, level, recorder) {
     let buffer = '';
     stream.setEncoding('utf8');
     stream.on('data', (chunk) => {
         buffer += chunk;
         const lines = buffer.split('\n');
         buffer = lines.pop();
-        for (const line of lines) if (line.trim()) log(level, `[${hookName}] ${line}`);
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            log(level, `[${hookName}] ${line}`);
+            recorder?.append(`${line}\n`);
+        }
     });
     stream.on('end', () => {
-        if (buffer.trim()) log(level, `[${hookName}] ${buffer.trim()}`);
+        if (buffer.trim()) {
+            log(level, `[${hookName}] ${buffer.trim()}`);
+            recorder?.append(`${buffer.trim()}\n`);
+        }
     });
 }
 
-function runHook(hook, delivery, options) {
+function runHook(hook, delivery, options, recordRun) {
     const status = stateOf(hook);
     if (!hook.detach && status.running) {
         status.pending = delivery;
@@ -572,14 +606,20 @@ function runHook(hook, delivery, options) {
     }
 
     status.running = true;
-    pipeOutput(child.stdout, hook.name, 'info');
-    pipeOutput(child.stderr, hook.name, 'warn');
+    const recorder = createOutputRecorder();
+    pipeOutput(child.stdout, hook.name, 'info', recorder);
+    pipeOutput(child.stderr, hook.name, 'warn', recorder);
 
     child.on('error', (err) => {
         log('error', `hook failed to start: ${err.message}`, {
             hook: hook.name,
             delivery: delivery.id,
             run: hook.run,
+        });
+        recordRun?.(delivery, {
+            hook: hook.name,
+            startedAt: new Date(startedAt).toISOString(),
+            error: err.message,
         });
     });
 
@@ -595,10 +635,19 @@ function runHook(hook, delivery, options) {
             ms: Date.now() - startedAt,
         });
 
+        recordRun?.(delivery, {
+            hook: hook.name,
+            startedAt: new Date(startedAt).toISOString(),
+            exit: signal ? null : code,
+            signal: signal || null,
+            ms: Date.now() - startedAt,
+            output: recorder.value(),
+        });
+
         const queued = status.pending;
         if (queued) {
             status.pending = null;
-            runHook(hook, queued, options);
+            runHook(hook, queued, options, recordRun);
         }
     });
 }
@@ -729,6 +778,17 @@ function dashboardData(config, secrets, options, recentDeliveries = []) {
             outcome: delivery.outcome || 'Receiving',
             tone: delivery.tone || 'neutral',
             detail: delivery.detail || null,
+            runs: Array.isArray(delivery.runs)
+                ? delivery.runs.map((run) => ({
+                    hook: run.hook,
+                    startedAt: run.startedAt || null,
+                    ms: typeof run.ms === 'number' ? run.ms : null,
+                    exit: typeof run.exit === 'number' ? run.exit : null,
+                    signal: run.signal || null,
+                    error: run.error || null,
+                    output: run.output || '',
+                }))
+                : [],
         };
     });
 
@@ -762,6 +822,17 @@ function createApp(config, secrets, options) {
             : outcome === 'Rejected'
                 ? 'warning'
                 : 'neutral';
+        persistDeliveries();
+    };
+    // A delivery can trigger more than one hook, and a hook queued behind a
+    // busy run finishes long after the response was sent — so each run is
+    // recorded against the dashboard entry (`delivery.recent`) as it completes,
+    // rather than all at once.
+    const recordHookRun = (delivery, record) => {
+        const recent = delivery.recent;
+        if (!recent) return;
+        if (!Array.isArray(recent.runs)) recent.runs = [];
+        recent.runs.push(record);
         persistDeliveries();
     };
 
@@ -816,6 +887,7 @@ function createApp(config, secrets, options) {
             before: payload.before,
             after: payload.after,
             sender: payload.sender && payload.sender.login,
+            recent,
         };
 
         log('info', 'delivery accepted', {
@@ -871,7 +943,7 @@ function createApp(config, secrets, options) {
 
         for (const hook of triggered) {
             try {
-                runHook(hook, delivery, options);
+                runHook(hook, delivery, options, recordHookRun);
             } catch (err) {
                 log('error', `hook error: ${err.message}`, { hook: hook.name });
             }

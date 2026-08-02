@@ -5,7 +5,14 @@ import styles from "./link.module.css";
 export default function RepoLink({ repo }) {
   if (!repo.href) return repo.label;
   return (
-    <a className={styles.repoLink} href={repo.href} target="_blank" rel="noopener noreferrer" title={repo.title}>
+    <a
+      className={styles.repoLink}
+      href={repo.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={repo.title}
+      onClick={(event) => event.stopPropagation()}
+    >
       {repo.label}
     </a>
   );

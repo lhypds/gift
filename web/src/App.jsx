@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import DeliveryItem from './components/DeliveryItem/DeliveryItem.jsx';
+import DeliveryDetail from './components/DeliveryDetail/DeliveryDetail.jsx';
 import EmptyState from './components/EmptyState/EmptyState.jsx';
 import RefreshButton from './components/RefreshButton/RefreshButton.jsx';
 import InfoButton from './components/InfoButton/InfoButton.jsx';
@@ -11,6 +12,7 @@ import { POLL_MS } from './pollInterval.js';
 export default function App() {
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [selected, setSelected] = useState(null);
   const cancelledRef = useRef(false);
 
   const load = useCallback(() => {
@@ -39,6 +41,13 @@ export default function App() {
   }, [load]);
 
   const deliveries = data?.deliveries;
+  // Re-read the selected delivery from the latest poll, so output that's
+  // still streaming in appears in an already-open modal. A delivery with no
+  // ID (the "No delivery ID" placeholder) can't be matched back up reliably,
+  // so it just keeps showing the snapshot taken at click time.
+  const selectedDelivery = selected
+    ? (deliveries?.find((d) => d.id === selected.id && d.id !== 'No delivery ID') ?? selected)
+    : null;
 
   return (
     <main>
@@ -58,10 +67,14 @@ export default function App() {
         )}
         {deliveries && deliveries.length > 0 && (
           <div className="list">
-            {deliveries.map((delivery, index) => <DeliveryItem key={index} delivery={delivery} />)}
+            {deliveries.map((delivery, index) => (
+              <DeliveryItem key={index} delivery={delivery} onSelect={setSelected} />
+            ))}
           </div>
         )}
       </section>
+
+      <DeliveryDetail delivery={selectedDelivery} onClose={() => setSelected(null)} />
     </main>
   );
 }
