@@ -1,6 +1,5 @@
-import { Modal, TextArea } from "../../ui/index.js";
-import RepoLink from "../RepoLink/RepoLink.jsx";
-import styles from "./deliveryDetail.module.css";
+import { Modal, TextArea } from "@ui/index.js";
+import styles from "./detail.module.css";
 
 function formatDuration(ms) {
   if (typeof ms !== "number") return null;
@@ -15,22 +14,11 @@ function runStatus(run) {
   return parts.join(" · ");
 }
 
-export default function DeliveryDetail({ delivery, onClose }) {
+export default function Detail({ delivery, onClose }) {
   const runs = delivery?.runs ?? [];
 
   return (
-    <Modal
-      isOpen={Boolean(delivery)}
-      onClose={onClose}
-      closeOnOverlay
-      title={
-        delivery && (
-          <>
-            [{delivery.event.toUpperCase()}] <RepoLink repo={delivery.repo} />
-          </>
-        )
-      }
-    >
+    <Modal isOpen={Boolean(delivery)} onClose={onClose} closeOnOverlay>
       {runs.length === 0 && <p className={styles.empty}>No hook output for this delivery.</p>}
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>

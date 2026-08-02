@@ -1,4 +1,4 @@
-import { ActionButton } from '../../ui/index.js';
+import { ActionButton } from '@ui/index.js';
 
 export default function RefreshButton({ onRefresh, loading }) {
   return (

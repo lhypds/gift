@@ -14,7 +14,7 @@ function formatTimestamp(timestamp) {
   return `${datePart} ${timePart}`;
 }
 
-export default function DeliveryItem({ delivery, onSelect }) {
+export default function Delivery({ delivery, onSelect }) {
   const handleKeyDown = (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();

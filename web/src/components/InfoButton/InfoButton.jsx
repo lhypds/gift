@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActionButton, Modal, TextArea } from '../../ui/index.js';
+import { ActionButton, Modal, TextArea } from '@ui/index.js';
 import { POLL_MS } from '../../pollInterval.js';
 import styles from './InfoButton.module.css';
 

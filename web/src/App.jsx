@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import DeliveryItem from './components/DeliveryItem/DeliveryItem.jsx';
-import DeliveryDetail from './components/DeliveryDetail/DeliveryDetail.jsx';
+import Delivery from './components/Delivery/Delivery.jsx';
+import Detail from './components/Delivery/Detail/Detail.jsx';
 import EmptyState from './components/EmptyState/EmptyState.jsx';
 import RefreshButton from './components/RefreshButton/RefreshButton.jsx';
 import InfoButton from './components/InfoButton/InfoButton.jsx';
@@ -68,13 +68,13 @@ export default function App() {
         {deliveries && deliveries.length > 0 && (
           <div className="list">
             {deliveries.map((delivery, index) => (
-              <DeliveryItem key={index} delivery={delivery} onSelect={setSelected} />
+              <Delivery key={index} delivery={delivery} onSelect={setSelected} />
             ))}
           </div>
         )}
       </section>
 
-      <DeliveryDetail delivery={selectedDelivery} onClose={() => setSelected(null)} />
+      <Detail delivery={selectedDelivery} onClose={() => setSelected(null)} />
     </main>
   );
 }

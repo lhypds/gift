@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -12,6 +13,12 @@ const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:
 export default defineConfig({
   root: __dirname,
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@ui': path.resolve(__dirname, 'src/ui'),
+      '@components': path.resolve(__dirname, 'src/components'),
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
