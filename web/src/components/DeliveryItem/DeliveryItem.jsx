@@ -1,14 +1,14 @@
-import RepoLink from '../RepoLink/RepoLink.jsx';
-import styles from './DeliveryItem.module.css';
+import RepoLink from "../RepoLink/RepoLink.jsx";
+import styles from "./delivery.module.css";
 
 function pad(value) {
-  return String(value).padStart(2, '0');
+  return String(value).padStart(2, "0");
 }
 
 function formatTimestamp(timestamp) {
-  if (!timestamp) return '—';
+  if (!timestamp) return "—";
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return "—";
   const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   return `${datePart} ${timePart}`;
