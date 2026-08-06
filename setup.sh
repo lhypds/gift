@@ -94,6 +94,21 @@ for tool in git gh jq; do
     fi
 done
 
+# Installed is not enough for gh: `gift create` creates the repository webhook
+# through `gh api`, so a signed-out gh means the hook is written to hooks.json
+# while GitHub is never told about it — the one failure worth naming here.
+if command -v gh >/dev/null 2>&1; then
+    if GH_AUTH="$(gh auth status 2>&1)"; then
+        GH_ACCOUNT="$(printf '%s\n' "$GH_AUTH" | sed -n 's/.*account \([^ ]*\).*/\1/p' | head -n 1)"
+        echo "    ok       gh is signed in${GH_ACCOUNT:+ as $GH_ACCOUNT}"
+    else
+        echo "    warning  gh is installed but not signed in — run: gh auth login"
+        echo "             until then \`gift create\` adds the local hook only, and the GitHub"
+        echo "             webhook has to be added under the repository's Settings > Webhooks"
+    fi
+    unset GH_AUTH GH_ACCOUNT
+fi
+
 # The shared .env, plus one per function folder that ships an example — settings
 # only a single function reads live next to that function.
 for example in .env.example functions/*/.env.example; do

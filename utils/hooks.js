@@ -181,6 +181,27 @@ function webhookUrlProblem(value) {
     return null;
 }
 
+/** What gh said went wrong: its first line of stderr, or why it never ran. */
+function ghProblem(result, fallback) {
+    if (result.error) {
+        return result.error.code === 'ENOENT' ? 'gh is not installed' : result.error.message;
+    }
+    const said = String(result.stderr || '').trim().split('\n').find(Boolean);
+    return said || fallback;
+}
+
+/**
+ * Whether gh can act on the user's behalf, as a message or null when it can.
+ * Checked before offering the remote webhook: an installed but signed-out gh is
+ * the ordinary reason a hook lands in hooks.json while GitHub never hears of it,
+ * and finding that out afterwards is finding it out too late.
+ */
+function ghAuthProblem(run = spawnSync) {
+    const result = run('gh', ['auth', 'status'], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+    if (!result.error && result.status === 0) return null;
+    return ghProblem(result, 'gh is not signed in — run: gh auth login');
+}
+
 /** Create a repository webhook without ever placing its secret on the command line. */
 function createGitHubWebhook(repo, url, hook, secret, run = spawnSync) {
     const body = JSON.stringify({
@@ -208,13 +229,55 @@ function createGitHubWebhook(repo, url, hook, secret, run = spawnSync) {
     );
 
     if (!result.error && result.status === 0) return { ok: true };
-    const said = String(result.stderr || '').trim().split('\n').find(Boolean);
-    const message = result.error
-        ? result.error.code === 'ENOENT'
-            ? 'gh is not installed'
-            : result.error.message
-        : said || `gh api exited ${result.status}`;
-    return { ok: false, message };
+    return { ok: false, message: ghProblem(result, `gh api exited ${result.status}`) };
+}
+
+/** The webhooks GitHub currently lists for the repository, as gh reports them. */
+function readGitHubWebhooks(repo, run = spawnSync) {
+    const result = run(
+        'gh',
+        [
+            'api',
+            `repos/${repo}/hooks`,
+            '--header', 'Accept: application/vnd.github+json',
+            '--paginate',
+        ],
+        { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+    );
+    if (result.error || result.status !== 0) {
+        return { ok: false, message: ghProblem(result, `gh api exited ${result.status}`) };
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(result.stdout);
+    } catch {
+        return { ok: false, message: 'gh api returned something other than JSON' };
+    }
+    if (!Array.isArray(parsed)) return { ok: false, message: 'gh api did not return a list of webhooks' };
+    return { ok: true, hooks: parsed };
+}
+
+/**
+ * Ask GitHub whether the webhook is really there, matching on the delivery URL.
+ * `gh api --method POST` exiting 0 is gh's word for it; this is GitHub's — and it
+ * is also what tells a webhook that failed to appear from one that was already
+ * there before gift asked, which GitHub refuses as a duplicate.
+ */
+function verifyGitHubWebhook(repo, url, run = spawnSync) {
+    const listed = readGitHubWebhooks(repo, run);
+    if (!listed.ok) {
+        return { ok: false, message: `the repository's webhooks could not be read: ${listed.message}` };
+    }
+
+    const match = listed.hooks.find((item) => item && item.config && item.config.url === url);
+    if (!match) return { ok: false, message: `GitHub lists no webhook delivering to ${url}` };
+    return {
+        ok: true,
+        id: match.id,
+        active: match.active !== false,
+        events: Array.isArray(match.events) ? match.events : [],
+    };
 }
 
 // ------------------------------------------------------------------- fields ---
@@ -487,20 +550,32 @@ async function createHook(file) {
 
     let githubUrl = null;
     const secret = process.env[DEFAULT_SECRET_ENV];
-    if (repo !== '*' && secret) {
-        const createRemote = await askYesNo(`Create a GitHub webhook for ${repo} with gh?`, true);
-        if (createRemote === null) return cancelled();
-        if (createRemote) {
-            const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
-            if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
-                githubUrl = configuredUrl;
-                console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
-            } else {
-                if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
-                githubUrl = await askText(`Public webhook URL for ${repo} — gh will create the remote webhook`, {
-                    validate: webhookUrlProblem,
-                });
-                if (githubUrl === null) return cancelled();
+    if (repo !== '*') {
+        // Creating the webhook on GitHub needs the shared secret to sign its
+        // deliveries with and a gh that is signed in. When one is missing, say
+        // which: not being asked and being asked look the same afterwards, and so
+        // does a hooks.json entry GitHub never calls.
+        const blocked = !secret
+            ? `${DEFAULT_SECRET_ENV} is not set, and it is what signs the deliveries`
+            : ghAuthProblem();
+        if (blocked) {
+            console.log(`  note: gift cannot create the GitHub webhook — ${blocked}`);
+            console.log(`        add it under the repository's Settings > Webhooks instead`);
+        } else {
+            const createRemote = await askYesNo(`Create a GitHub webhook for ${repo} with gh?`, true);
+            if (createRemote === null) return cancelled();
+            if (createRemote) {
+                const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
+                if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
+                    githubUrl = configuredUrl;
+                    console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
+                } else {
+                    if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
+                    githubUrl = await askText(`Public webhook URL for ${repo} — gh will create the remote webhook`, {
+                        validate: webhookUrlProblem,
+                    });
+                    if (githubUrl === null) return cancelled();
+                }
             }
         }
     }
@@ -509,15 +584,28 @@ async function createHook(file) {
     writeConfig(file, config);
 
     let githubResult = null;
+    let confirmed = null;
     if (githubUrl) {
         console.log(`Creating the GitHub webhook for ${repo} with gh...`);
         githubResult = createGitHubWebhook(repo, githubUrl, hook, secret);
+        // Asked either way. A POST that reported failure may still have landed,
+        // and a webhook GitHub already had is a pass rather than a problem.
+        console.log('Confirming it with gh...');
+        confirmed = verifyGitHubWebhook(repo, githubUrl);
     }
 
     console.log('');
     console.log(`Added '${name}' to ${show(file)}.`);
-    if (githubResult && githubResult.ok) {
-        console.log(`Created the GitHub webhook for ${repo} at ${githubUrl}.`);
+    if (confirmed && confirmed.ok) {
+        const events = confirmed.events.length ? confirmed.events.join(', ') : 'no events';
+        const active = confirmed.active ? '' : ', inactive';
+        console.log(`GitHub confirms webhook ${confirmed.id} on ${repo} — ${githubUrl}, ${events}${active}.`);
+        if (!githubResult.ok) {
+            console.log(`  note: gh said '${githubResult.message}', but the webhook is there.`);
+        }
+    } else if (githubResult && githubResult.ok) {
+        console.error(`warning: gh created the GitHub webhook, but GitHub does not confirm it: ${confirmed.message}`);
+        console.error('         Check the repository settings before relying on the hook.');
     } else if (githubResult) {
         console.error(`warning: the local hook was added, but GitHub was not updated: ${githubResult.message}`);
         console.error('         Check the gh account has Webhooks write access, then add it in the repository settings.');
@@ -536,7 +624,8 @@ async function createHook(file) {
     if (!restartResult.ok) {
         console.error(`gift create: the hook was saved, but the server could not be restarted: ${restartResult.message}`);
     }
-    return (githubResult && !githubResult.ok) || !restartResult.ok ? 1 : 0;
+    // The webhook counts as created only once GitHub lists it, not when gh says so.
+    return (githubResult && !(confirmed && confirmed.ok)) || !restartResult.ok ? 1 : 0;
 }
 
 // ------------------------------------------------------------------ delete ---
@@ -661,7 +750,8 @@ function createUsage() {
     console.log('');
     console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
     console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
-    console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh; set`);
+    console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh —`);
+    console.log(`when gh is signed in — and then asks GitHub to confirm the webhook is there. Set`);
     console.log(`${WEBHOOK_URL_ENV} to its complete public delivery URL, or gift will ask for it.`);
     console.log('');
     console.log('options:');
@@ -802,6 +892,9 @@ module.exports = {
     listUsage,
     // Kept injectable so the gh integration can be verified without network access.
     createGitHubWebhook,
+    readGitHubWebhooks,
+    verifyGitHubWebhook,
+    ghAuthProblem,
     restartServer,
     webhookUrlProblem,
     // Configuration and path helpers shared with `gift log` and `gift status`.
