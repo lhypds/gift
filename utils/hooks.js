@@ -470,7 +470,8 @@ async function createHook(file) {
     ));
 
     console.log(`Adding a hook to ${show(file)}${missing ? ', which will be created' : ''}.`);
-    console.log('Four local questions; Enter takes the [default], Ctrl-C stops without writing anything.');
+    console.log('Four questions about the hook, and for one repository whether to create its');
+    console.log('GitHub webhook too. Enter takes the [default], Ctrl-C stops without writing anything.');
     console.log('');
 
     const cancelled = () => {
@@ -498,6 +499,45 @@ async function createHook(file) {
     if (repoAnswer !== '*') {
         const parsed = parseRepo(repoAnswer);
         repo = `${parsed.owner}/${parsed.name}`;
+    }
+
+    // Whether GitHub is told about the hook is settled here, before the three
+    // questions about the script and before anything is written. A `*` hook has no
+    // single repository to hang a webhook on, so it is never offered one.
+    //
+    // Asking first, then checking: gh has to be installed and signed in, and the
+    // secret has to be set, or the webhook the user just asked for cannot be made.
+    // That is a stop, not a warning — a local hook GitHub never calls looks exactly
+    // like a working one, and finding out is worth more than a saved hooks.json.
+    let githubUrl = null;
+    const secret = process.env[DEFAULT_SECRET_ENV];
+    if (repo !== '*') {
+        const createRemote = await askYesNo(`Create the GitHub webhook for ${repo} with gh?`, true);
+        if (createRemote === null) return cancelled();
+        if (createRemote) {
+            // ghAuthProblem covers both: a missing gh reports itself as not installed.
+            const problem = ghAuthProblem()
+                || (secret ? null : `${DEFAULT_SECRET_ENV} is not set, and it is what signs the deliveries`);
+            if (problem) {
+                console.log('');
+                console.error(`gift create: the GitHub webhook for ${repo} cannot be created — ${problem}`);
+                console.error('Nothing was written. Fix that and run `gift create` again, or answer n to the');
+                console.error("GitHub question and add the webhook under the repository's Settings > Webhooks.");
+                return 2;
+            }
+
+            const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
+            if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
+                githubUrl = configuredUrl;
+                console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
+            } else {
+                if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
+                githubUrl = await askText(`Public webhook URL for ${repo} — gh will create the remote webhook`, {
+                    validate: webhookUrlProblem,
+                });
+                if (githubUrl === null) return cancelled();
+            }
+        }
     }
 
     const name = await askText('Hook name — the label it appears under in the log', {
@@ -547,38 +587,6 @@ async function createHook(file) {
         detach: false,
         secretEnv: DEFAULT_SECRET_ENV,
     };
-
-    let githubUrl = null;
-    const secret = process.env[DEFAULT_SECRET_ENV];
-    if (repo !== '*') {
-        // Creating the webhook on GitHub needs the shared secret to sign its
-        // deliveries with and a gh that is signed in. When one is missing, say
-        // which: not being asked and being asked look the same afterwards, and so
-        // does a hooks.json entry GitHub never calls.
-        const blocked = !secret
-            ? `${DEFAULT_SECRET_ENV} is not set, and it is what signs the deliveries`
-            : ghAuthProblem();
-        if (blocked) {
-            console.log(`  note: gift cannot create the GitHub webhook — ${blocked}`);
-            console.log(`        add it under the repository's Settings > Webhooks instead`);
-        } else {
-            const createRemote = await askYesNo(`Create a GitHub webhook for ${repo} with gh?`, true);
-            if (createRemote === null) return cancelled();
-            if (createRemote) {
-                const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
-                if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
-                    githubUrl = configuredUrl;
-                    console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
-                } else {
-                    if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
-                    githubUrl = await askText(`Public webhook URL for ${repo} — gh will create the remote webhook`, {
-                        validate: webhookUrlProblem,
-                    });
-                    if (githubUrl === null) return cancelled();
-                }
-            }
-        }
-    }
 
     config.hooks.push(hook);
     writeConfig(file, config);
@@ -750,9 +758,11 @@ function createUsage() {
     console.log('');
     console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
     console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
-    console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh —`);
-    console.log(`when gh is signed in — and then asks GitHub to confirm the webhook is there. Set`);
-    console.log(`${WEBHOOK_URL_ENV} to its complete public delivery URL, or gift will ask for it.`);
+    console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh`);
+    console.log(`before asking anything else. Answering yes needs gh installed and signed in and`);
+    console.log(`${DEFAULT_SECRET_ENV} set: without them nothing is written at all. Set`);
+    console.log(`${WEBHOOK_URL_ENV} to the complete public delivery URL, or gift will ask for it.`);
+    console.log(`Afterwards gift asks GitHub to confirm the webhook is really there.`);
     console.log('');
     console.log('options:');
     console.log('  --config=FILE   Hook configuration file (default: hooks.json)');

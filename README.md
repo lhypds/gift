@@ -23,15 +23,18 @@ Hooks
 Hook names are labels and may be reused; delete same-named hooks by their list position.
 
 For a specific repository, `gift create` asks whether to create the GitHub
-webhook with `gh`. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public
-delivery URL, including `/hooks/github`; otherwise it asks for the URL too.
-It then asks GitHub to confirm the webhook is there, so a hook in `hooks.json`
-that GitHub never calls is reported rather than assumed to work.
+webhook with `gh` — right after the repository, before anything else is asked or
+written. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public delivery URL,
+including `/hooks/github`; otherwise it asks for the URL too. Once the hook is
+saved, gift asks GitHub to confirm the webhook is really there, so a hook in
+`hooks.json` that GitHub never calls is reported rather than assumed to work.
 
-This needs a signed-in `gh` on the machine gift runs on — `gh auth login`, with
-an account that may write the repository's webhooks. Without one, `gift create`
-says so and adds the local hook only; add the webhook under the repository's
-Settings > Webhooks, with the same secret as `GITHUB_WEBHOOK_SECRET`.
+Answering yes needs `gh` installed and signed in on the machine gift runs on
+(`gh auth login`, with an account that may write the repository's webhooks) and
+`GITHUB_WEBHOOK_SECRET` set. If either is missing, `gift create` says which and
+stops without writing anything. Answer `n` to add the local hook on its own and
+create the webhook under the repository's Settings > Webhooks, using the same
+secret.
 
 The server restarts automatically after `gift create` or `gift delete`.
 
