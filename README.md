@@ -22,6 +22,11 @@ Hooks
 `gift create` adds one.  
 Hook names are labels and may be reused; delete same-named hooks by their list position.
 
+`gift create` asks five things: the repository, the branches to watch (comma
+separated, `*` for any, `main, master` by default), the hook name, the script to
+run and the working directory it runs in. A push to a branch outside the list is
+answered with `No match` and runs nothing.
+
 For a specific repository, `gift create` asks whether to create the GitHub
 webhook with `gh` — right after the repository, before anything else is asked or
 written. Set `GIFT_WEBHOOK_URL` in `.env` to the complete public delivery URL,

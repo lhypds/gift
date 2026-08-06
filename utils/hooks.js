@@ -33,12 +33,15 @@ const DEFAULT_SETTINGS = {
 const DEFAULT_SECRET_ENV = 'GITHUB_WEBHOOK_SECRET';
 const WEBHOOK_URL_ENV = 'GIFT_WEBHOOK_URL';
 
-// The branches a created hook watches: the server matches any name in the list,
-// so covering both spellings of the default branch saves asking which one it is.
+// What the branch question takes when the user just presses Enter: the server
+// matches any name in the list, so offering both spellings of the default branch
+// covers the common case without the user having to know which one the repo uses.
 const DEFAULT_BRANCHES = ['main', 'master'];
 
 const VALID_REPO_PART = /^[A-Za-z0-9._-]+$/;
 const VALID_HOOK_NAME = /^[A-Za-z0-9._-]+$/;
+// Branch names are git refs, so slashes belong in them — release/1.2 is one name.
+const VALID_BRANCH_NAME = /^[A-Za-z0-9._/-]+$/;
 
 // -------------------------------------------------------------------- paths ---
 
@@ -301,6 +304,39 @@ function parseRepo(text) {
 }
 
 /**
+ * The branch list out of one typed answer. Commas or spaces separate, so
+ * `main, master` and `main master` both give two branches, and a name repeated
+ * only counts once — the server matches any name in the list.
+ */
+function parseBranches(text) {
+    const branches = [];
+    for (const part of String(text).split(/[\s,]+/)) {
+        const value = part.trim();
+        if (value && !branches.includes(value)) branches.push(value);
+    }
+    return branches;
+}
+
+/**
+ * Whether the answer names branches the server could ever match, as a message or
+ * null. The server compares whole branch names, so anything git would not accept
+ * as one is a branch that never fires — worth catching while it can still be
+ * retyped rather than at the first push that goes missing.
+ */
+function branchesProblem(branches) {
+    if (branches.length === 0) return 'Name at least one branch, or * for any.';
+    if (branches.includes('*')) {
+        return branches.length === 1 ? null : '* already covers every branch — list names, or just *.';
+    }
+    for (const branch of branches) {
+        if (!VALID_BRANCH_NAME.test(branch)) return `'${branch}' is not a branch name.`;
+        if (branch.startsWith('/') || branch.endsWith('/')) return `'${branch}' cannot start or end with /.`;
+        if (branch.includes('..') || branch.endsWith('.lock')) return `'${branch}' is not a name git allows.`;
+    }
+    return null;
+}
+
+/**
  * The rows shown for one hook, by `list` and by the confirmation in `create`.
  * `run` and `cwd` are resolved against the project root — where the server resolves
  * them from, wherever the configuration file itself is.
@@ -470,7 +506,7 @@ async function createHook(file) {
     ));
 
     console.log(`Adding a hook to ${show(file)}${missing ? ', which will be created' : ''}.`);
-    console.log('Four questions about the hook, and for one repository whether to create its');
+    console.log('Five questions about the hook, and for one repository whether to create its');
     console.log('GitHub webhook too. Enter takes the [default], Ctrl-C stops without writing anything.');
     console.log('');
 
@@ -500,6 +536,17 @@ async function createHook(file) {
         const parsed = parseRepo(repoAnswer);
         repo = `${parsed.owner}/${parsed.name}`;
     }
+
+    // Which branches, asked next because it is the other half of the same
+    // question: together with the repository it is everything the server checks
+    // before running the script. A push to a branch outside the list is a delivery
+    // the server answers with 'No match'.
+    const branchesAnswer = await askText('Branches — comma separated, * for any', {
+        fallback: DEFAULT_BRANCHES.join(', '),
+        validate: (value) => branchesProblem(parseBranches(value)),
+    });
+    if (branchesAnswer === null) return cancelled();
+    const branches = parseBranches(branchesAnswer);
 
     // Whether GitHub is told about the hook is settled here, before the three
     // questions about the script and before anything is written. A `*` hook has no
@@ -572,15 +619,14 @@ async function createHook(file) {
     const cwd = resolveTyped(cwdAnswer);
     if (!isDirectory(cwd)) console.log(`  note: no directory at ${cwd} yet`);
 
-    // Everything else takes the common answer — a push to whichever of main and
-    // master the repository uses, no arguments, not detached, the shared secret.
-    // Field order matches hooks.example.json, so hand-written and generated hooks
-    // read the same way.
+    // Everything not asked about takes the common answer — a push, no arguments,
+    // not detached, the shared secret. Field order matches hooks.example.json, so
+    // hand-written and generated hooks read the same way.
     const hook = {
         name,
         repo,
         events: ['push'],
-        branches: [...DEFAULT_BRANCHES],
+        branches,
         run,
         args: [],
         cwd,
@@ -753,14 +799,15 @@ async function deleteHook(file, options, positionals) {
 function createUsage() {
     console.log('usage: gift create [--config=FILE]');
     console.log('');
-    console.log('Create a server hook, asking four things: the repository, the hook name,');
-    console.log('the script to run and the working directory it runs in.');
+    console.log('Create a server hook, asking five things: the repository, the branches to');
+    console.log('watch, the hook name, the script to run and the working directory it runs in.');
     console.log('');
-    console.log(`The rest takes the common answer — a push to ${DEFAULT_BRANCHES.join(' or ')}, no arguments,`);
-    console.log(`not detached, the secret in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
+    console.log(`The rest takes the common answer — a push, no arguments, not detached, the secret`);
+    console.log(`in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
+    console.log('');
     console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh`);
-    console.log(`before asking anything else. Answering yes needs gh installed and signed in and`);
-    console.log(`${DEFAULT_SECRET_ENV} set: without them nothing is written at all. Set`);
+    console.log(`before the questions about the script. Answering yes needs gh installed and signed`);
+    console.log(`in and ${DEFAULT_SECRET_ENV} set: without them nothing is written at all. Set`);
     console.log(`${WEBHOOK_URL_ENV} to the complete public delivery URL, or gift will ask for it.`);
     console.log(`Afterwards gift asks GitHub to confirm the webhook is really there.`);
     console.log('');
