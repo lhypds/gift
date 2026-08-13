@@ -313,6 +313,14 @@ async function main(argv) {
         state.message = '';
         draw();
 
+        // Some commands are the last thing repo-master does. `goto folder` is
+        // asked for in order to be somewhere else, and putting the table back up
+        // in front of somebody who has just typed `exit` is one screen too many:
+        // leaving that shell leaves repo-master. The resume hook has to know
+        // before the command finishes, because a table painted and taken down
+        // again a line later shows as a flicker.
+        let leaving = Boolean(action.last);
+
         let message = '';
         try {
             message = await actionsLib.run(action, chosen, {
@@ -321,7 +329,9 @@ async function main(argv) {
                     renderTimer = null;
                     screen.suspend();
                 },
-                resume: () => screen.resume(),
+                resume: () => {
+                    if (!leaving) screen.resume();
+                },
             });
         } catch (failure) {
             message = failure.message || String(failure);
@@ -329,6 +339,15 @@ async function main(argv) {
 
         state.busy = false;
         state.selected.clear();
+
+        // A command that would not start has a line about it to read, and
+        // reading it needs the table back after all.
+        if (leaving && !message) {
+            finish(0);
+            return;
+        }
+        if (!screen.running) screen.resume();
+
         state.message = message || '';
         draw();
     };
@@ -709,6 +728,18 @@ async function main(argv) {
     process.off('SIGHUP', onSignal);
     watchers.close();
     screen.stop();
+
+    // Leave now, rather than when the event loop happens to empty. A sweep of
+    // every repository leaves a queue of git reads behind it, and quitting does
+    // not cancel them: waiting would hold the terminal with the table already
+    // gone and the shell prompt not yet back — which is a freeze, however
+    // briefly it lasts. Those reads have nothing left to draw on, so nothing is
+    // lost by walking away from them. The screen was put right just above, and a
+    // terminal takes those writes synchronously, so none of it is still on its
+    // way out. A commit or push is the exception: it is worth finishing, so the
+    // loop is left to drain for it — only a signal gets here while one runs, as
+    // `q` is not read at all until it is done.
+    if (!state.busy) process.exit(code);
 
     return code;
 }

@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=18"
   },
-  "packageManager": "pnpm@10.11.0",
+  "packageManager": "pnpm@11.21.0",
   "scripts": {
     "build": "vite build --config web/vite.config.js",
     "dev": "vite --config web/vite.config.js"

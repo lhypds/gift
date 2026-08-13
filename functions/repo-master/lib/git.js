@@ -63,11 +63,72 @@ function parseRemote(url) {
     return slug.includes('/') ? slug : null;
 }
 
-/** The parts of a repository that do not change between refreshes. */
+/**
+ * Where a repository keeps its .git. Usually the folder of that name; a
+ * submodule or a linked worktree leaves a file pointing at the real one.
+ */
+async function gitDir(dir) {
+    const dot = path.join(dir, '.git');
+    try {
+        if ((await fsp.stat(dot)).isDirectory()) return dot;
+        const pointer = await fsp.readFile(dot, 'utf8');
+        const target = pointer.match(/^gitdir:\s*(.+)$/m);
+        return target ? path.resolve(dir, target[1].trim()) : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * origin's URL out of a git config file. Deliberately a plain read of the
+ * simplest shape a config takes, rather than a config parser: anything it does
+ * not recognise falls back to asking git, which is always right and only slow.
+ */
+function originUrl(config) {
+    let inOrigin = false;
+    for (const line of config.split(/\r?\n/)) {
+        const text = line.trim();
+        if (text.startsWith('[')) {
+            inOrigin = /^\[remote\s+"origin"\]$/.test(text);
+            continue;
+        }
+        if (!inOrigin) continue;
+        const url = text.match(/^url\s*=\s*(.+)$/i);
+        if (url) return url[1].trim();
+    }
+    return '';
+}
+
+/**
+ * The parts of a repository that do not change between refreshes.
+ *
+ * The name is only a label, and the file it is written in is right there:
+ * reading it beats `git remote get-url origin`, which costs a whole process to
+ * say the same thing. Spawning git is what a sweep of a folder full of
+ * repositories actually spends its time on, and this one runs once per row
+ * before anything is drawn at all.
+ */
 async function identify(dir) {
+    const home = await gitDir(dir);
+    if (home) {
+        try {
+            const slug = parseRemote(originUrl(await fsp.readFile(path.join(home, 'config'), 'utf8')));
+            if (slug) return { name: slug };
+        } catch {
+            /* unreadable, or not a shape we know — ask git below */
+        }
+    }
+
     const remote = await git(dir, ['remote', 'get-url', 'origin']);
     const slug = remote.ok ? parseRemote(remote.stdout) : null;
     return { name: slug || path.basename(dir) };
+}
+
+/** The short commit to show where there is no branch name to show instead. */
+async function detachedHead(dir) {
+    const head = await git(dir, ['rev-parse', '--short', 'HEAD']);
+    if (head.ok && head.stdout.trim()) return `(${head.stdout.trim()})`;
+    return '-'; // a repository with no commits yet
 }
 
 /** The checked-out branch, or the short commit when HEAD is detached. */
@@ -75,15 +136,33 @@ async function currentBranch(dir) {
     const branch = await git(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
     if (branch.ok && branch.stdout.trim()) return branch.stdout.trim();
 
-    const head = await git(dir, ['rev-parse', '--short', 'HEAD']);
-    if (head.ok && head.stdout.trim()) return `(${head.stdout.trim()})`;
+    return detachedHead(dir);
+}
 
-    return '-'; // a repository with no commits yet
+/**
+ * The branch out of a `--branch` status header, which reads `## main`,
+ * `## main...origin/main [ahead 1]`, `## No commits yet on main`, or
+ * `## HEAD (no branch)` when HEAD is detached. Null means detached: there is no
+ * name in the header to use, and the commit has to be asked for separately.
+ */
+function branchFromHeader(header) {
+    let text = header.slice(3).trim();
+    if (text === 'HEAD (no branch)') return null;
+
+    const unborn = text.match(/^No commits yet on (.+)$/);
+    if (unborn) text = unborn[1];
+
+    // `...` separates the branch from its upstream, and cannot appear in a ref
+    // name; the ahead/behind count that may follow goes with the upstream.
+    return text.split('...')[0].replace(/\s*\[.*\]$/, '').trim() || '-';
 }
 
 /**
  * Split `git status --porcelain=v1 -z` output. Entries are NUL terminated, and
  * a rename or copy is followed by its original path as a field of its own.
+ * Under `--branch` the first record is the branch header instead of an entry;
+ * no entry can be mistaken for it, since one always begins with two status
+ * letters and a space.
  */
 function parsePorcelain(output) {
     const fields = output.split('\0');
@@ -92,6 +171,7 @@ function parsePorcelain(output) {
     for (let i = 0; i < fields.length; i++) {
         const field = fields[i];
         if (field.length < 4) continue;
+        if (i === 0 && field.startsWith('## ')) continue;
 
         const index = field[0];
         const tree = field[1];
@@ -154,29 +234,38 @@ function isInside(parent, child) {
  *   the newest change time, and an error string when git refused to answer.
  */
 async function inspect(dir, exclude = []) {
-    const [branch, status, tracked] = await Promise.all([
-        currentBranch(dir),
-        git(dir, ['status', '--porcelain=v1', '-uall', '-z', '--ignore-submodules=dirty']),
-        git(dir, ['diff', '--numstat', '--ignore-submodules=dirty', 'HEAD']),
-    ]);
-
+    // Starting git is what a sweep costs — the work each one does is nothing
+    // beside the process it takes to do it, and a folder of fifty repositories
+    // pays that fifty times over, refresh after refresh. So a row asks once and
+    // asks for everything: `--branch` puts the branch in the same answer as the
+    // working tree, and the patch below is only measured when there is a tracked
+    // change to measure, which most repositories most of the time have not got.
+    const status = await git(dir, ['status', '--porcelain=v1', '-uall', '-z', '-b', '--ignore-submodules=dirty']);
     if (!status.ok) {
-        return { branch, error: status.stderr.split('\n')[0] || 'git status failed' };
+        return { branch: await currentBranch(dir), error: status.stderr.split('\n')[0] || 'git status failed' };
     }
+
+    const header = status.stdout.split('\0', 1)[0];
+    // A detached HEAD is the one state the header cannot name, and the one
+    // repository in a hundred that is in it can afford to be asked twice.
+    const branch = branchFromHeader(header) ?? (await detachedHead(dir));
 
     const entries = parsePorcelain(status.stdout).filter((entry) => {
         const absolute = path.join(dir, entry.path.replace(/\/$/, ''));
         return !exclude.some((nested) => isInside(nested, absolute));
     });
 
-    // An unborn HEAD makes the diff above fail; everything staged in such a
-    // repository is new, so compare against the index instead.
     let counts = { adds: 0, dels: 0 };
-    if (tracked.ok) {
-        counts = sumNumstat(tracked.stdout);
-    } else {
-        const staged = await git(dir, ['diff', '--numstat', '--cached']);
-        if (staged.ok) counts = sumNumstat(staged.stdout);
+    if (entries.some((entry) => !entry.untracked)) {
+        const tracked = await git(dir, ['diff', '--numstat', '--ignore-submodules=dirty', 'HEAD']);
+        // An unborn HEAD makes that diff fail; everything staged in such a
+        // repository is new, so compare against the index instead.
+        if (tracked.ok) {
+            counts = sumNumstat(tracked.stdout);
+        } else {
+            const staged = await git(dir, ['diff', '--numstat', '--cached']);
+            if (staged.ok) counts = sumNumstat(staged.stdout);
+        }
     }
 
     const untracked = entries.filter((entry) => entry.untracked && !entry.path.endsWith('/'));

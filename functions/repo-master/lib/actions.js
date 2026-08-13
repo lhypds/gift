@@ -10,7 +10,9 @@
 //
 // `goto folder` is the same borrowing, with a shell as the tool: no process can
 // move the shell that started it, so the folder is reached by a shell of its own
-// standing in it. Leaving that shell brings the table back.
+// standing in it. That one is asked for in order to be somewhere else, and it is
+// the last thing repo-master does: leaving the shell leaves the table too,
+// rather than putting it back up in front of somebody on their way out.
 //
 // `commit & push` is the exception to all of it: every chosen repository is a
 // project of its own there, each committed with the same message and pushed,
@@ -37,6 +39,11 @@ function actions(env) {
             // aliases; `sh` is only there so the row still works without one.
             command: env.GIFT_REPO_MASTER_SHELL || env.SHELL || 'sh',
             kind: 'terminal',
+            // Somewhere else is the whole point, so there is nothing to come
+            // back to: leaving this shell ends the session. The tools below keep
+            // the table, because opening one is a thing you do between looks at
+            // it rather than instead of them.
+            last: true,
         },
         {
             id: 'vscode',
@@ -114,7 +121,8 @@ function runHere(command, args, cwd) {
  * @param {object[]} repos Rows to act on, main project first.
  * @param {object} hooks
  * @param {() => void} hooks.suspend Hide the table; the terminal is about to be borrowed.
- * @param {() => void} hooks.resume Bring it back.
+ * @param {() => void} hooks.resume Bring it back — a no-op for a `last` action,
+ *   which the caller ends the session on rather than returning to the table.
  * @returns {Promise<string|null>} A message to show, or null when there is nothing to say.
  */
 async function run(action, repos, { suspend, resume }) {

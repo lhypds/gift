@@ -107,7 +107,10 @@ this one: the table steps aside and comes back when the tool exits.
 `goto folder` is the same borrowing with a shell as the tool. No program can move
 the shell that started it, so the folder is reached by a shell of its own
 standing in it — your `$SHELL`, with your prompt and your aliases. Work there as
-usual; `exit`, or Ctrl-D, brings the table back where you left it.
+usual; `exit`, or Ctrl-D, ends it. That one ends repo-master with it, rather than
+putting the table back: somewhere else is what the command was for, and a table
+in front of somebody on their way out is one screen too many. The tools above
+keep the table, because opening one is something you do between looks at it.
 
 The commands can be pointed somewhere else, for anyone whose tools are named
 differently. These are not written into config.json — their defaults suit nearly
