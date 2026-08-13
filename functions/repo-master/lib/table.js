@@ -85,6 +85,23 @@ function needsAttention(repo) {
     return Boolean(repo.hasChanges);
 }
 
+/**
+ * The keys along the foot of the window, cut at a whole one rather than through
+ * the middle of a word when there are more of them than the window is wide. What
+ * was dropped is not lost: the menu is the list of everything, and the ellipsis
+ * is there to say there is more of this than fits.
+ *
+ * They are written in the order they are worth reading, so a narrow window keeps
+ * the ones nobody could work without.
+ */
+function keyLine(entries, columns) {
+    if (width(entries.join(' · ')) <= columns) return entries.join(' · ');
+
+    const kept = [...entries];
+    while (kept.length > 1 && width(`${kept.join(' · ')} · …`) > columns) kept.pop();
+    return truncate(`${kept.join(' · ')} · …`, columns);
+}
+
 // The boxes drawn over the table. Each mode builds one panel for modal.js to
 // draw — what is in it, how it is coloured, and what the footer says. The table
 // itself is drawn either way and goes on refreshing underneath.
@@ -500,22 +517,25 @@ function frame(state, palette, size) {
     } else if (state.interactive) {
         tail.push(
             palette.dim(
-                fit(
+                keyLine(
                     [
                         'up/down move',
                         'space select',
-                        'enter run',
+                        'enter menu',
+                        '/ search',
                         'e code',
+                        'v vim',
+                        'c claude',
                         'd diff',
                         'f fetch',
                         'p pull',
                         't worktree',
                         'D delete',
-                        '/ search',
                         state.filter ? 'esc clear search' : 'esc clear',
                         'r refresh',
                         'q quit',
-                    ].join(' · '),
+                    ],
+                    tableWidth,
                 ),
             ),
         );

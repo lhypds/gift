@@ -83,7 +83,20 @@ function actions(env) {
             kind: 'windowed',
         },
         {
+            id: 'vim',
+            key: 'v',
+            label: 'open with vim',
+            command: env.GIFT_REPO_MASTER_VIM || 'vim',
+            kind: 'terminal',
+            // A folder rather than nothing: vim started in a repository with no
+            // arguments opens an empty buffer, and what was asked for was the
+            // repository. `.` is the folder it is already standing in, which vim
+            // opens as a list of what is in it.
+            args: ['.'],
+        },
+        {
             id: 'claude',
+            key: 'c',
             label: 'open with claude code',
             command: env.GIFT_REPO_MASTER_CLAUDE || 'claude',
             kind: 'terminal',
@@ -117,6 +130,21 @@ function actions(env) {
             sync: 'pull',
         },
         {
+            id: 'commit',
+            label: 'commit & push',
+            kind: 'commit',
+            // Nothing is committed until there is something to call it: the
+            // message is asked for in a box of its own first.
+            prompt: {
+                title: 'Commit message',
+                footer: 'enter commit & push · esc back',
+                empty: 'a message first',
+            },
+        },
+        // The number keys in the menu reach nine rows, and these are the last
+        // two: both carry a key of their own, so being past the ninth costs them
+        // nothing, while `commit & push` above has no other way in.
+        {
             id: 'worktree',
             key: 't a',
             label: 'worktree add',
@@ -127,18 +155,6 @@ function actions(env) {
                 title: 'Worktree add',
                 footer: 'enter add · esc back',
                 empty: 'a branch name first',
-            },
-        },
-        {
-            id: 'commit',
-            label: 'commit & push',
-            kind: 'commit',
-            // Nothing is committed until there is something to call it: the
-            // message is asked for in a box of its own first.
-            prompt: {
-                title: 'Commit message',
-                footer: 'enter commit & push · esc back',
-                empty: 'a message first',
             },
         },
         {
@@ -213,7 +229,7 @@ async function run(action, repos, { suspend, resume }) {
 
     suspend();
     try {
-        return await runHere(action.command, addDirArgs(action, extra), main.dir);
+        return await runHere(action.command, [...(action.args || []), ...addDirArgs(action, extra)], main.dir);
     } finally {
         resume();
     }

@@ -53,7 +53,8 @@ Options:
 Keys:
   up/down or k/j   move                  space   add to the selection
   enter            the command menu      /       search the table
-  e                open with code        d       read the diff
+  e                open with code        v       open with vim
+  c                open with claude      d       read the diff
   f                fetch                 p       pull
   t then a         add a worktree        D       delete the folder
   esc              clear                 r       refresh now
@@ -65,6 +66,8 @@ The menu prints each command's key beside it, so nothing has to be learned twice
 
 The ones that open something open the main project — the first repository picked
 — and claude and codex are handed the rest as directories they may also work in.
+vim, claude and codex want a terminal of their own and borrow this one: the table
+steps aside and comes back when they exit.
 The ones that reach a remote, and the one that deletes a folder, are asked for
 first in a box naming every repository they are about: enter runs it, esc backs
 out. Pulling marks the ones with uncommitted changes, which is where a pull goes
@@ -1050,6 +1053,12 @@ async function main(argv) {
             // editor opens, fetch and pull ask, delete asks in earnest.
             case 'e':
                 startAction(command('code'), targets(), 'table');
+                return;
+            case 'v':
+                startAction(command('vim'), targets(), 'table');
+                return;
+            case 'c':
+                startAction(command('claude'), targets(), 'table');
                 return;
             case 'd':
                 // The one command that reads a row rather than acting on a

@@ -31,7 +31,7 @@ Watching ~/projects · 12 repos · 3 changed · 2 open PRs
     +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
 ---------------------------------------------------------------------------------------------------------
 
-up/down move · space select · enter run · e code · d diff · f fetch · p pull · t worktree · D delete · / search · esc clear · r refresh · q quit
+up/down move · space select · enter menu · / search · e code · v vim · c claude · d diff · f fetch · p pull · …
 ```
 
 
@@ -89,6 +89,8 @@ Keys
 | space            | Add the row to the selection and step down — the first one added is the main project, the rest are marked `+` |
 | enter            | Open the command menu for the selection, or the row under the cursor                                          |
 | e                | Open the main project in your editor, straight away                                                           |
+| v                | Open the main project in vim, in this terminal                                                                |
+| c                | Open the main project in Claude Code, in this terminal                                                        |
 | d                | Read the diff of the row under the cursor                                                                     |
 | f                | Fetch everything picked, after a box asking whether to                                                        |
 | p                | Pull everything picked, after a box asking whether to                                                         |
@@ -133,21 +135,29 @@ row as well. The commands are:
 |-----------------------|---------|--------------------------------------------------------------------------------------|
 | goto folder           |         | your shell, standing in the main project's folder                                    |
 | open with code        | `e`     | `code <main project>`                                                                |
-| open with claude code |         | `claude` in the main project, with `--add-dir` for each added repository             |
+| open with vim         | `v`     | `vim .` in the main project                                                          |
+| open with claude code | `c`     | `claude` in the main project, with `--add-dir` for each added repository             |
 | open with codex       |         | `codex` in the main project, the same way                                            |
 | diff                  | `d`     | the box below, holding what changed in the main project                              |
 | fetch                 | `f`     | `git fetch --all` in every picked repository — see below                             |
 | pull                  | `p`     | `git pull` in every picked repository — see below                                    |
-| worktree add          | `t` `a` | `git worktree add` beside every picked repository — see below                        |
 | commit & push         |         | `git add -A`, `git commit` and `git push` in **every** picked repository — see below |
+| worktree add          | `t` `a` | `git worktree add` beside every picked repository — see below                        |
 | delete repo folder    | `D`     | removes the folder of every picked repository — see below                            |
+
+The number keys reach the first nine rows. The last two are past them on purpose:
+both carry a key of their own, while `commit & push` has no other way in.
 
 A selection has a shape. The repository picked first is the **main project** and
 wears no mark; the ones picked after it are marked `+`. The editor opens the main
 project — a window is a window, and the marked repositories were not asked for.
 `claude` and `codex` open the main project too, and are handed the marked ones as
-directories they may also work in. Both want a terminal of their own and borrow
-this one: the table steps aside and comes back when the tool exits.
+directories they may also work in. `vim` opens the main project and nothing else,
+having no way of being told about the rest.
+
+`vim`, `claude` and `codex` want a terminal of their own and borrow this one: the
+table steps aside and comes back when the tool exits. `code` does not, having a
+window of its own, which is why it is the one that costs nothing to press.
 
 `e` is the one command that asks nothing and takes no time: a window is only a
 window, and nothing it opens cannot be closed again. `f`, `p` and `D` all put a
@@ -175,6 +185,7 @@ one:
 |------------------|-------------|--------------------------------------------------------------------------------------------------------------------|
 | `shell_command`  | `$SHELL`    | `goto folder`; `sh` when there is no `$SHELL`                                                                      |
 | `code_command`   | `code`      | `open with code` and the `e` key; `cursor` and `windsurf` take a folder the same way                               |
+| `vim_command`    | `vim`       | `open with vim` and the `v` key; `nvim` and `hx` take a folder the same way                                        |
 | `claude_command` | `claude`    | `open with claude code`                                                                                            |
 | `codex_command`  | `codex`     | `open with codex`                                                                                                  |
 | `claude_add_dir` | `--add-dir` | How `claude` is told about the repositories added to the main one, once each. `false` opens the main project alone |

@@ -39,6 +39,14 @@
             "advanced": true
         },
         {
+            "key": "vim_command",
+            "env": "GIFT_REPO_MASTER_VIM",
+            "type": "string",
+            "default": "vim",
+            "description": "Command behind `open with vim` and the `v` key — `nvim`, `hx` and the like take a folder the same way.",
+            "advanced": true
+        },
+        {
             "key": "claude_command",
             "env": "GIFT_REPO_MASTER_CLAUDE",
             "type": "string",
