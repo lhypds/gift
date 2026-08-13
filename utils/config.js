@@ -4,8 +4,8 @@
 //         "github_webhook_secret": "...",     gift's own settings at the top
 //         "port": 3999,
 //         "functions": {                      each function's under its name
-//             "list-weekly-prs": { "repos": "owner/repo", "author": "octocat" },
-//             "repo-master":     { "repo_root": "/Users/me/projects" }
+//             "repo-master": { "repo_root": "/Users/me/projects" },
+//             "weekly-prs":  { "repos": "owner/repo", "author": "octocat" }
 //         }
 //     }
 //
@@ -18,7 +18,7 @@
 //
 // config.json is git-ignored: it holds the webhook secret. A value already in
 // the real environment wins over it, so a one-off `GIFT_REPOS=... gift
-// list-weekly-prs` still works.
+// weekly-prs` still works.
 //
 // Precedence, highest first:
 //     the real environment

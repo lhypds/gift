@@ -10,8 +10,8 @@ const FUNCTIONS_DIR = path.join(ROOT, 'functions');
 
 /**
  * Entry script names accepted inside a function folder, most specific first.
- * Folder names are hyphenated; some scripts spell theirs with underscores
- * (`list-weekly-prs/list_weekly_prs.sh`), so both spellings are accepted.
+ * Folder names are hyphenated; a script may spell its own name with underscores
+ * (`weekly-prs/weekly_prs.sh`), so both spellings are accepted.
  */
 function entryCandidates(name) {
     const underscored = name.replace(/-/g, '_');
@@ -72,7 +72,15 @@ function readDescription(dir) {
     return '';
 }
 
-/** All function folders in functions/, sorted by name. */
+/**
+ * Functions that come before the rest, in this order, wherever the list is
+ * printed: `gift help`, the `gift run` menu, `gift config`. Everything else
+ * follows alphabetically. A name in here that no longer names a folder is
+ * simply not found, and costs nothing.
+ */
+const FIRST = ['repo-master'];
+
+/** All function folders in functions/, the featured ones first and the rest by name. */
 function list() {
     let entries;
     try {
@@ -96,7 +104,9 @@ function list() {
             description: readDescription(dir),
         });
     }
-    return found.sort((a, b) => a.name.localeCompare(b.name));
+    // Unlisted names sort after every listed one, and against each other by name.
+    const rank = (name) => (FIRST.includes(name) ? FIRST.indexOf(name) : FIRST.length);
+    return found.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
 }
 
 module.exports = { ROOT, list };

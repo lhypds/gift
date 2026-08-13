@@ -69,9 +69,9 @@ for tool in git gh jq; do
     else
         echo "    missing  $tool"
         case "$tool" in
-            git) echo "             needed by: recursively-pull-repos, repo-master  (xcode-select --install)" ;;
-            gh)  echo "             needed by: gift create, list-weekly-prs, repo-master  (brew install gh, then gh auth login)" ;;
-            jq)  echo "             needed by: list-weekly-prs  (brew install jq)" ;;
+            git) echo "             needed by: pull-repos, repo-master  (xcode-select --install)" ;;
+            gh)  echo "             needed by: gift create, weekly-prs, repo-master  (brew install gh, then gh auth login)" ;;
+            jq)  echo "             needed by: weekly-prs  (brew install jq)" ;;
         esac
     fi
 done

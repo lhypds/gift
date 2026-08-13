@@ -1,5 +1,5 @@
-recursively-pull-repos
-======================
+pull-repos
+==========
 
 
 Recursively find all git repositories under the current directory and run `git pull` in each one.
@@ -8,27 +8,27 @@ Recursively find all git repositories under the current directory and run `git p
 Files
 -----
 
-| File                        | Description                                                                |
-|-----------------------------|-----------------------------------------------------------------------------|
-| `recursively-pull-repos.sh` | Core logic script — run through `gift recur`, or directly from the terminal |
-| `config.schema.json`        | The settings this function has, and their defaults — see `functions.recursively-pull-repos` in config.json |
+| File                 | Description                                                                |
+|----------------------|-----------------------------------------------------------------------------|
+| `pull-repos.sh`      | Core logic script — run through `gift pull`, or directly from the terminal |
+| `config.schema.json` | The settings this function has, and their defaults — see `functions.pull-repos` in config.json |
 
 
 Usage
 -----
 
 ```bash
-gift recur [--dir=PATH] [options]
+gift pull-repos [--dir=PATH] [options]
 ```
 
-(`gift recur` is the short form of `gift recursively-pull-repos`.)
+(`gift pull` is enough of the name.)
 
 The function searches one directory recursively for `.git` folders and runs
 `git pull --recurse-submodules --autostash` in each repository root. That
 directory is **your current directory**, unless `--dir` or the configured
 `repo_root` names another one — so either `cd` to the folder holding your repos,
-or set it once under `functions.recursively-pull-repos` in config.json and run
-the function from anywhere.
+or set it once under `functions.pull-repos` in config.json and run the function
+from anywhere.
 
 
 Parameters
@@ -52,16 +52,16 @@ Examples
 
 ```bash
 # Pull every repo under the current directory
-cd ~/code && gift recur
+cd ~/code && gift pull-repos
 
 # Pull every repo under a folder chosen on the spot
-gift recur --dir=~/work
+gift pull-repos --dir=~/work
 
 # Pull every repo under GIFT_PULL_DIR, from wherever you happen to be
-gift recur
+gift pull-repos
 
 # Preview what would be pulled without making any changes
-gift recur --dry-run
+gift pull-repos --dry-run
 ```
 
 The exit status is 2 if any repository failed to pull.

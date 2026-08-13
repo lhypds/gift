@@ -1,7 +1,7 @@
 #!/bin/bash
 # Recursively find git repositories (directories containing a .git folder)
 # and run `git pull` in each one. Supports a dry-run mode.
-# Usage: ./recursively-pull-repos.sh [--dir=PATH] [-n|--dry-run] [-h|--help]
+# Usage: ./pull-repos.sh [--dir=PATH] [-n|--dry-run] [-h|--help]
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -21,7 +21,7 @@ Options:
 This script searches a directory recursively for directories named .git (i.e.
 git repositories) and runs 'git pull --recurse-submodules --autostash' in each
 repository's root. Without --dir it searches the current directory, unless
-repo_root is set under functions.recursively-pull-repos in config.json.
+repo_root is set under functions.pull-repos in config.json.
 USAGE
 }
 

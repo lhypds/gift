@@ -38,7 +38,7 @@ git-ignored and written 0600 — it holds the webhook secret.
   --path    Print the path and exit, without opening anything
 
 A value already in the environment wins over the file, so \`GIFT_REPOS=... gift
-list-weekly-prs\` still overrides what is configured.`);
+weekly-prs\` still overrides what is configured.`);
 }
 
 /** $VISUAL, then $EDITOR, then whichever plain editor is actually installed. */

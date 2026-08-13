@@ -29,7 +29,7 @@ function interpreterFor(entry) {
 
 /**
  * Run a function and resolve with its exit code. The child inherits stdio and
- * the user's working directory — functions like `recursively-pull-repos` act on
+ * the user's working directory — functions like `pull-repos` act on
  * the directory the user is standing in.
  */
 function runFunction(fn, args = []) {

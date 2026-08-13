@@ -4,7 +4,7 @@
 //
 // <function> is the name of a folder in functions/ — or a built-in command such
 // as `serve`, `create`, `delete` and `log` — or any unique prefix.
-// `gift recur` runs recursively-pull-repos, `gift se` runs serve. Everything
+// `gift pull` runs pull-repos, `gift se` runs serve. Everything
 // after the name is forwarded to its entry script untouched. `gift run` asks
 // instead: it prints the function list and runs whichever one is picked — or
 // takes the answer from the command line, as `gift run 3` does.
@@ -119,7 +119,7 @@ function resolveToken(token) {
 
     // No exact name, so gather the prefix matches from both namespaces before
     // deciding. Both have to be counted together: `r` starts the function
-    // recursively-pull-repos *and* the built-in run, and is unique in neither.
+    // repo-master *and* the built-in run, and is unique in neither.
     const folderMatches = available.filter((f) => f.name.startsWith(token)).map((f) => f.name);
     const builtinMatches = Object.keys(BUILTINS).filter((name) => name.startsWith(token));
     const all = [...folderMatches, ...builtinMatches];

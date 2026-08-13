@@ -82,7 +82,7 @@ gift's own settings are at the top level, and each function's are under
     "port": 3999,
     "functions": {
         "repo-master": { "repo_root": "/Users/me/projects" },
-        "list-weekly-prs": { "repos": "owner/repo1,owner/repo2", "author": "octocat" }
+        "weekly-prs": { "repos": "owner/repo1,owner/repo2", "author": "octocat" }
     }
 }
 ```
@@ -100,7 +100,7 @@ which is where its default, its description and the environment variable it is
 handed to scripts as all come from.
 
 A value already in the environment always wins, so `GIFT_REPOS=... gift
-list-weekly-prs` still overrides what is configured for one run.  
+weekly-prs` still overrides what is configured for one run.  
 
 
 Setup

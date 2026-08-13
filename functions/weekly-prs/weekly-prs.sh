@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script to list PRs by an author for a chosen week, grouped by date
-# Usage: ./list_weekly_prs.sh [--repos=owner/repo1,owner/repo2] [--author=login] [--weeks=N] [-v]
+# Usage: ./weekly-prs.sh [--repos=owner/repo1,owner/repo2] [--author=login] [--weeks=N] [-v]
 #   --repos=owner/repo1,owner/repo2 : comma-separated list of repositories to query
 #                                     (default: $GIFT_REPOS)
 #   --author=login                  : GitHub login to list PRs for (default: $GIFT_AUTHOR)
@@ -52,14 +52,14 @@ fi
 # Validate repos
 if [ ${#REPOS[@]} -eq 0 ]; then
     echo "Error: No repositories specified."
-    echo "  Pass --repos=owner/repo1,owner/repo2, or set repos under functions.list-weekly-prs in config.json"
+    echo "  Pass --repos=owner/repo1,owner/repo2, or set repos under functions.weekly-prs in config.json"
     exit 1
 fi
 
 # Validate author
 if [ -z "$AUTHOR" ]; then
     echo "Error: No author specified."
-    echo "  Pass --author=login, or set author under functions.list-weekly-prs in config.json"
+    echo "  Pass --author=login, or set author under functions.weekly-prs in config.json"
     exit 1
 fi
 
