@@ -1,0 +1,11 @@
+{
+    "description": "Recursively find all git repositories under one folder and run `git pull` in each one.",
+    "options": [
+        {
+            "key": "repo_root",
+            "env": "GIFT_PULL_DIR",
+            "type": "path",
+            "description": "Folder to search for git repositories, as an absolute path. Without it the function searches the directory it is run in."
+        }
+    ]
+}

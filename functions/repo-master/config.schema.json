@@ -1,0 +1,74 @@
+{
+    "description": "Watch every git repository under one folder in a live table.",
+    "options": [
+        {
+            "key": "repo_root",
+            "env": "GIFT_REPO_MASTER_REPO_ROOT",
+            "type": "path",
+            "description": "Folder holding the repositories to watch, as an absolute path. Without it repo-master watches the directory it is run in."
+        },
+        {
+            "key": "depth",
+            "env": "GIFT_REPO_MASTER_DEPTH",
+            "type": "number",
+            "min": 1,
+            "default": 4,
+            "description": "How many folders deep to look for repositories."
+        },
+        {
+            "key": "pr_interval",
+            "env": "GIFT_REPO_MASTER_PR_INTERVAL",
+            "type": "number",
+            "min": 1,
+            "default": 10,
+            "description": "Seconds between rounds of pull request checks."
+        },
+        {
+            "key": "pr_rate",
+            "env": "GIFT_REPO_MASTER_PR_RATE",
+            "type": "number",
+            "min": 1,
+            "default": 60,
+            "description": "The most `gh` calls a minute, however short the interval asks for."
+        },
+        {
+            "key": "refresh",
+            "env": "GIFT_REPO_MASTER_REFRESH",
+            "type": "number",
+            "min": 1,
+            "default": 30,
+            "description": "Seconds between full sweeps: a rescan for repositories that came or went, plus a git refresh of every row."
+        },
+        {
+            "key": "vscode_command",
+            "env": "GIFT_REPO_MASTER_VSCODE",
+            "type": "string",
+            "default": "code",
+            "description": "Command behind `open with vscode` — `cursor` and `windsurf` take the same argument.",
+            "advanced": true
+        },
+        {
+            "key": "claude_command",
+            "env": "GIFT_REPO_MASTER_CLAUDE",
+            "type": "string",
+            "default": "claude",
+            "description": "Command behind `open with claude code`.",
+            "advanced": true
+        },
+        {
+            "key": "codex_command",
+            "env": "GIFT_REPO_MASTER_CODEX",
+            "type": "string",
+            "default": "codex",
+            "description": "Command behind `open with codex`.",
+            "advanced": true
+        },
+        {
+            "key": "terminal_command",
+            "env": "GIFT_REPO_MASTER_TERMINAL",
+            "type": "string",
+            "description": "How to open a new terminal window when several repositories are opened at once, for terminals the built-in guesses miss. {cmd} is replaced with the shell command and {dir} with the repository.",
+            "advanced": true
+        }
+    ]
+}

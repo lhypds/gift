@@ -139,11 +139,12 @@ function missingSecrets(hooks) {
  * bytes of its SHA-256, which is not the secret and cannot be turned back into
  * it.
  *
- * This is the value in .env as gift reads it now. The server prints the
+ * This is the configured value as gift reads it now. The server prints the
  * same fingerprint for what it is actually running on, at startup and on every
  * 401, so the two together answer the question a rotated secret raises: whether
- * the process ever picked the new value up. A variable already in the
- * environment wins over .env, so they can differ.
+ * the process ever picked the new value up. They can differ — the server may
+ * have started before the setting changed, or on a value from somewhere gift
+ * does not read.
  */
 function secretFingerprints(hooks) {
     const names = new Set(hooks.map((hook) => String(hook.secretEnv || DEFAULT_SECRET_ENV)));
@@ -419,14 +420,15 @@ function printReport(state) {
         ['hooks', hooksRow(state.settings.hooks, state.settings.config)],
         ['log', logRow(state.log)],
     ];
-    // The secret is what a 401 is usually about, so the fingerprint of the value
-    // in .env belongs in the same picture as the endpoint serving it: the log
-    // prints the same fingerprint for the value the server is running on, and a
-    // mismatch between the two is a process that never picked up a rotation.
+    // The secret is what a 401 is usually about, so the fingerprint of the
+    // configured value belongs in the same picture as the endpoint serving it:
+    // the log prints the same fingerprint for the value the server is running
+    // on, and a mismatch between the two is a process that never picked up a
+    // rotation.
     for (const secret of state.secrets) {
         rows.push([
             'secret',
-            `${secret.name}:${secret.fingerprint} in .env — the server logs the fingerprint it runs on`,
+            `${secret.name}:${secret.fingerprint} as configured — the server logs the fingerprint it runs on`,
         ]);
     }
     // Only worth raising when the server is down: it is the usual reason one
@@ -435,7 +437,10 @@ function printReport(state) {
     // its secret from somewhere gift does not read — a systemd EnvironmentFile.)
     if (!state.health.ok) {
         for (const secret of state.missingSecrets) {
-            rows.push(['note', `${secret} is not set in .env — the server will not start without a secret`]);
+            rows.push([
+                'note',
+                `${secret} is not configured — the server will not start without a secret (\`gift config\`)`,
+            ]);
         }
     }
 
@@ -501,7 +506,7 @@ function usage() {
     console.log('');
     console.log('Report the webhooks server: what PM2 says about the process, what the');
     console.log('server answers on GET /health, and what it is set up to serve — the');
-    console.log('endpoint, the hooks, the log, and a fingerprint of the secret in .env');
+    console.log('endpoint, the hooks, the log, and a fingerprint of the configured secret');
     console.log('to compare with the one the server logs. Nothing is started or stopped.');
     console.log('');
     console.log('options:');

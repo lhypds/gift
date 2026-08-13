@@ -21,7 +21,7 @@ Options:
 This script searches a directory recursively for directories named .git (i.e.
 git repositories) and runs 'git pull --recurse-submodules --autostash' in each
 repository's root. Without --dir it searches the current directory, unless
-GIFT_PULL_DIR is set in this function's .env.
+repo_root is set under functions.recursively-pull-repos in config.json.
 USAGE
 }
 
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -n "$WORK_DIR" ]; then
-	# A `~` read from .env is a literal character — only the shell expands it in
+	# A `~` read from the configuration is a literal character — only the shell expands it in
 	# source code — so it has to be spelled out here.
 	case "$WORK_DIR" in
 		"~") WORK_DIR="$HOME" ;;

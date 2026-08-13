@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Preparation for ./install.sh: check Node.js >= 18, check the tools the
-# functions need, and create the local config files (.env, hooks.json).
+# functions need, and create config.json and hooks.json.
 # Does not install the global `gift` command — run ./install.sh after this.
 set -euo pipefail
 
@@ -27,32 +27,14 @@ if [ -z "$NODE" ]; then
     exit 1
 fi
 
-env_value() {
-    "$NODE" -e '
-        const fs = require("node:fs");
-        const [file, key] = process.argv.slice(1);
-        const line = fs.readFileSync(file, "utf8")
-            .split(/\r?\n/)
-            .find((item) => item.startsWith(`${key}=`));
-        process.stdout.write(line ? line.slice(key.length + 1).trim() : "");
-    ' "$ROOT_DIR/.env" "$1"
+# Settings live in config.json; utils/config.js is the one reader and writer, so
+# this script and the CLI never disagree about what is configured.
+config_get() {
+    "$NODE" "$ROOT_DIR/utils/config.js" get "$1"
 }
 
-set_env_value() {
-    GIFT_SETUP_VALUE="$2" "$NODE" -e '
-        const fs = require("node:fs");
-        const [file, key] = process.argv.slice(1);
-        const value = process.env.GIFT_SETUP_VALUE || "";
-        const mode = fs.statSync(file).mode & 0o777;
-        const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
-        if (lines[lines.length - 1] === "") lines.pop();
-        const index = lines.findIndex((line) => line.startsWith(`${key}=`));
-        if (index >= 0) lines[index] = `${key}=${value}`;
-        else lines.push(`${key}=${value}`);
-        const temp = `${file}.setup.tmp`;
-        fs.writeFileSync(temp, `${lines.join("\n")}\n`, { mode });
-        fs.renameSync(temp, file);
-    ' "$ROOT_DIR/.env" "$1"
+config_set() {
+    "$NODE" "$ROOT_DIR/utils/config.js" set gift "$1" "$2"
 }
 
 valid_webhook_url() {
@@ -87,8 +69,8 @@ for tool in git gh jq; do
     else
         echo "    missing  $tool"
         case "$tool" in
-            git) echo "             needed by: recursively-pull-repos  (xcode-select --install)" ;;
-            gh)  echo "             needed by: gift create, list-weekly-prs  (brew install gh, then gh auth login)" ;;
+            git) echo "             needed by: recursively-pull-repos, repo-master  (xcode-select --install)" ;;
+            gh)  echo "             needed by: gift create, list-weekly-prs, repo-master  (brew install gh, then gh auth login)" ;;
             jq)  echo "             needed by: list-weekly-prs  (brew install jq)" ;;
         esac
     fi
@@ -109,30 +91,32 @@ if command -v gh >/dev/null 2>&1; then
     unset GH_AUTH GH_ACCOUNT
 fi
 
-# The shared .env, plus one per function folder that ships an example — settings
-# only a single function reads live next to that function.
-for example in .env.example functions/*/.env.example; do
-    [ -f "$example" ] || continue
-    target="${example%.example}"
-    if [ ! -f "$target" ]; then
-        cp "$example" "$target"
-        echo "==> Created $target from $example"
-    else
-        echo "==> Keeping existing $target"
-    fi
-done
+# One file, created here with every setting the functions declare so that
+# `gift config` opens a list to work from rather than a blank page.
+CONFIG_FILE="$("$NODE" "$ROOT_DIR/utils/config.js" ensure)"
+echo "==> Settings live in $CONFIG_FILE"
 
-SECRET="$(env_value GITHUB_WEBHOOK_SECRET)"
+# gift used to read .env files, and does not any more. One left over from then
+# is now inert, which is worth saying out loud rather than letting somebody
+# wonder where their settings went.
+STALE_ENV="$(find "$ROOT_DIR" -name ".env" -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null)"
+if [ -n "$STALE_ENV" ]; then
+    echo "    warning  these .env files are no longer read — move what they hold into config.json:"
+    printf '             %s\n' $STALE_ENV
+fi
+unset STALE_ENV
+
+SECRET="$(config_get GITHUB_WEBHOOK_SECRET)"
 if [ -z "$SECRET" ] || [ "$SECRET" = '""' ] || [ "$SECRET" = "''" ]; then
     SECRET="$("$NODE" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-    set_env_value GITHUB_WEBHOOK_SECRET "$SECRET"
-    echo "==> Generated GITHUB_WEBHOOK_SECRET in .env"
+    config_set github_webhook_secret "$SECRET"
+    echo "==> Generated github_webhook_secret in config.json"
 else
-    echo "==> Keeping existing GITHUB_WEBHOOK_SECRET in .env"
+    echo "==> Keeping existing github_webhook_secret"
 fi
 unset SECRET
 
-WEBHOOK_URL="$(env_value GIFT_WEBHOOK_URL)"
+WEBHOOK_URL="$(config_get GIFT_WEBHOOK_URL)"
 if [ -t 0 ]; then
     echo ""
     while true; do
@@ -149,14 +133,14 @@ if [ -t 0 ]; then
         fi
         echo "Invalid URL — use a complete public http:// or https:// URL without credentials or a fragment." >&2
     done
-    set_env_value GIFT_WEBHOOK_URL "$WEBHOOK_URL"
     if [ -n "$WEBHOOK_URL" ]; then
-        echo "==> Saved GIFT_WEBHOOK_URL in .env"
+        config_set webhook_url "$WEBHOOK_URL"
+        echo "==> Saved webhook_url in config.json"
     else
-        echo "==> GIFT_WEBHOOK_URL left empty"
+        echo "==> webhook_url left empty"
     fi
 elif [ -z "$WEBHOOK_URL" ]; then
-    echo "==> GIFT_WEBHOOK_URL left empty (run ./setup.sh in a terminal to enter it)"
+    echo "==> webhook_url left empty (run ./setup.sh in a terminal to enter it)"
 fi
 unset WEBHOOK_URL ENTERED_URL CANDIDATE_URL
 

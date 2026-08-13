@@ -13,7 +13,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const functions = require('./functions.js');
-const env = require('./utils/env.js');
+// The configuration in config.json — see utils/config.js for the order things
+// are read in.
+const settings = require('./utils/config.js');
+const configCommand = require('./commands/config.js');
 const create = require('./commands/create.js');
 const deleteHook = require('./commands/delete.js');
 const listHooks = require('./commands/list.js');
@@ -37,6 +40,7 @@ const BUILTINS = {
     create: 'Create a local hook and, when gh is authenticated, its GitHub webhook.',
     delete: 'Delete a server hook.',
     log: `Print the last ${log.DEFAULT_LINES} lines of the server log.`,
+    config: 'Read and change gift\'s settings, and each function\'s.',
     run: 'Choose a helper function from a menu and run it.',
     update: 'Pull the latest gift code, restarting a running server on it.',
     help: 'Show this help, or a function\'s own documentation.',
@@ -50,6 +54,7 @@ const WEBHOOK_NAMES = ['serve', 'stop', 'status', 'list', 'create', 'delete', 'l
 // The built-ins with commands or options of their own, so `gift help <name>`
 // has real help to print rather than the one-line description.
 const BUILTIN_USAGE = {
+    config: configCommand.usage,
     create: create.usage,
     delete: deleteHook.usage,
     list: listHooks.usage,
@@ -188,7 +193,7 @@ async function runPicked(args) {
     }
 
     console.log('');
-    env.loadFor(choice.fn.dir);
+    settings.loadFor(choice.fn.dir);
     return runFunction(choice.fn, args);
 }
 
@@ -200,6 +205,8 @@ async function runBuiltin(name, rest) {
                 return 0;
             }
             return printFunctionHelp(rest[0]);
+        case 'config':
+            return configCommand.main(rest);
         case 'create':
             return create.main(rest);
         case 'delete':
@@ -243,18 +250,24 @@ async function main(argv) {
     const result = resolveToken(token);
     if (result.status !== 'ok') return reportResolveFailure(token, result);
 
-    // Config is loaded once the function is known, so it can bring its own .env.
-    // `run` is the exception: it loads for whichever function gets picked. The
-    // five below read the root .env, the same settings the server starts with —
-    // the address to ask, and PM2_NAME to look the process up under. `update`
-    // needs them to find the server it restarts, as `status` does to report it.
+    // Settings are loaded once the target is known, so a function brings its
+    // own. `run` is one exception — it loads for whichever function gets picked
+    // — and `config` is the other: it reports where each value comes from, and
+    // loading them first would make every one of them look like the
+    // environment's. The five below read gift's own settings, the same ones the
+    // server starts with: the address to ask, and PM2_NAME to look the process
+    // up under. `update` needs them to find the server it restarts, as `status`
+    // does to report it.
     if (result.builtin) {
-        if (['create', 'delete', 'list', 'log', 'status', 'update'].includes(result.builtin)) env.loadFor(SERVER_DIR);
-        else if (result.builtin !== 'run') env.loadFor();
+        if (['create', 'delete', 'list', 'log', 'status', 'update'].includes(result.builtin)) {
+            settings.loadFor(SERVER_DIR);
+        } else if (!['run', 'config'].includes(result.builtin)) {
+            settings.loadFor();
+        }
         return runBuiltin(result.builtin, rest);
     }
 
-    env.loadFor(result.fn.dir);
+    settings.loadFor(result.fn.dir);
     return runFunction(result.fn, rest);
 }
 

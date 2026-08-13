@@ -12,7 +12,7 @@ Files
 | File                 | Description                                                                     |
 |----------------------|---------------------------------------------------------------------------------|
 | `list_weekly_prs.sh` | Core logic script — run through `gift list-weekly-prs`, or from the terminal    |
-| `.env.example`       | Template for this function's own settings — copied to `.env` by `./setup.sh`     |
+| `config.schema.json` | The settings this function has, and their defaults — see `functions.list-weekly-prs` in config.json |
 
 
 Usage
@@ -44,16 +44,18 @@ Parameters
 | `-v`                            | Verbose mode — shows PR number, state, and URL for each PR | off            |
 | `-h`, `--help`                  | Show the help message and exit                             |                |
 
-`GIFT_REPOS` and `GIFT_AUTHOR` come from this folder's `.env` (git-ignored; copy
-`.env.example`), so the common case needs no flags at all. A value already in the
-environment wins over that file, and the file wins over the repo's `../../.env`.
+`GIFT_REPOS` and `GIFT_AUTHOR` are how the `repos` and `author` settings reach
+this script. Set them once under `functions.list-weekly-prs` in config.json —
+`gift config` opens it — and the common case needs no
+flags at all. A value already in the environment wins over the configuration,
+and a flag wins over both.
 
 
 Examples
 --------
 
 ```bash
-# Last week, repositories from .env
+# Last week, repositories from config.json
 gift list-weekly-prs
 
 # Current week, custom repositories

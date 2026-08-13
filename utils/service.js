@@ -2,8 +2,8 @@
 //
 // The server is not one of the functions/ folders — it is a service that happens
 // to be driven from this CLI — so `serve` and `stop` are named here rather than
-// discovered. Both run a script from the project root, which is also where they
-// pick up their .env.
+// discovered. Both run a script from the project root, and configure themselves
+// from gift's own settings rather than a function's.
 //
 // They hand the process to PM2 rather than running the server in the foreground;
 // `node serve.js` is still the way to run it attached, with --dry-run

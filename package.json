@@ -28,9 +28,11 @@
     "cli.js",
     "commands",
     "functions/**/*.sh",
-    "functions/**/.env.example",
+    "functions/**/*.js",
+    "functions/**/config.schema.json",
     "functions/**/README.*",
     "functions.js",
+    "config.schema.json",
     "utils",
     "serve.js",
     "web",
@@ -40,7 +42,6 @@
     "restart.sh",
     "README.txt",
     "hooks.example.json",
-    ".env.example",
     "VERSION"
   ]
 }

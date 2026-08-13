@@ -50,8 +50,8 @@ cat <<EOF
 
 Uninstall complete.
 
-Local files kept in the checkout (delete them by hand if you want them gone):
-    $ROOT_DIR/.env
+Local files kept (delete them by hand if you want them gone):
+    $ROOT_DIR/config.json
     $ROOT_DIR/hooks.json
     $ROOT_DIR/hooks.log
 EOF

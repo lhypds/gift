@@ -2,28 +2,14 @@
 //
 //     pm2 start ecosystem.config.cjs --update-env
 //
-// PM2_NAME and PORT come from this folder's .env, so the process name and the
-// listening port are set in one place. Everything else the server needs — the
-// secret, the host, the endpoint path — serve.js reads from the same .env at
-// startup, which keeps the secret out of the PM2 process list.
-const fs = require('fs');
-const path = require('path');
+// PM2_NAME and PORT come from gift's configuration — config.json in this folder
+// — so the process name and the listening port are set in one place. Everything else the server needs — the secret, the
+// host, the endpoint path — serve.js reads from the same place at startup, which
+// keeps the secret out of the PM2 process list.
+const config = require('./utils/config.js');
 
-function readEnv() {
-  try {
-    return fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
-  } catch {
-    return '';
-  }
-}
-
-function getEnvVar(key, defaultValue) {
-  const match = readEnv().match(new RegExp(`^${key}=(.*)$`, 'm'));
-  return match ? match[1].trim() : defaultValue;
-}
-
-const PM2_NAME = getEnvVar('PM2_NAME', 'gift-webhooks');
-const PORT = getEnvVar('PORT', getEnvVar('GIFT_SERVE_PORT', '3999'));
+const PM2_NAME = config.get('PM2_NAME', 'gift-webhooks');
+const PORT = config.get('PORT', config.get('GIFT_SERVE_PORT', '3999'));
 
 module.exports = {
   apps: [

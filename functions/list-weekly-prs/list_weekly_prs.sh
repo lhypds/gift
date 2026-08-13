@@ -44,7 +44,7 @@ for arg in "$@"; do
     esac
 done
 
-# Fall back to the repositories configured in this function's .env
+# Fall back to the repositories configured for this function
 if [ ${#REPOS[@]} -eq 0 ] && [ -n "${GIFT_REPOS:-}" ]; then
     IFS=',' read -ra REPOS <<< "$GIFT_REPOS"
 fi
@@ -52,14 +52,14 @@ fi
 # Validate repos
 if [ ${#REPOS[@]} -eq 0 ]; then
     echo "Error: No repositories specified."
-    echo "  Pass --repos=owner/repo1,owner/repo2, or set GIFT_REPOS in this function's .env"
+    echo "  Pass --repos=owner/repo1,owner/repo2, or set repos under functions.list-weekly-prs in config.json"
     exit 1
 fi
 
 # Validate author
 if [ -z "$AUTHOR" ]; then
     echo "Error: No author specified."
-    echo "  Pass --author=login, or set GIFT_AUTHOR in this function's .env"
+    echo "  Pass --author=login, or set author under functions.list-weekly-prs in config.json"
     exit 1
 fi
 

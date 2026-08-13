@@ -3,7 +3,8 @@
 # GitHub. The archive contains everything ./setup.sh and ./install.sh need in a
 # fresh checkout: the root webhook server plus bin/, commands/, functions/, and
 # utils/ for the additional CLI functions.
-# Local config (.env, hooks.json) is never shipped.
+# Local settings and state (config.json, hooks.json, logs) are never shipped —
+# config.json holds the webhook secret.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +53,7 @@ cp "$ROOT_DIR/start.sh"     "$STAGING_DIR/"
 cp "$ROOT_DIR/stop.sh"      "$STAGING_DIR/"
 cp "$ROOT_DIR/cli.js"       "$STAGING_DIR/"
 cp "$ROOT_DIR/functions.js" "$STAGING_DIR/"
+cp "$ROOT_DIR/config.schema.json" "$STAGING_DIR/"
 cp "$ROOT_DIR/setup.sh"     "$STAGING_DIR/"
 cp "$ROOT_DIR/install.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/uninstall.sh" "$STAGING_DIR/"
@@ -65,14 +67,13 @@ cp "$ROOT_DIR/README.txt"   "$STAGING_DIR/"
 cp "$ROOT_DIR/LICENSE"      "$STAGING_DIR/"
 cp "$ROOT_DIR/VERSION"      "$STAGING_DIR/"
 
-# Optional dotfiles worth shipping (never .env — that holds the webhook secret).
-[ -f "$ROOT_DIR/.env.example" ] && cp "$ROOT_DIR/.env.example" "$STAGING_DIR/"
+# Optional dotfiles worth shipping (never config.json — that holds the secret).
 [ -f "$ROOT_DIR/.gitignore"   ] && cp "$ROOT_DIR/.gitignore"   "$STAGING_DIR/"
 
 # Strip anything machine-specific that a function folder may contain.
 find "$STAGING_DIR" \
-    \( -name ".env" -o -name "hooks.json" -o -name "*.command" -o -name ".DS_Store" \
-       -o -name "*.log" -o -name "*.log.[0-9]" \) \
+    \( -name "config.json" -o -name "config.json.tmp" -o -name ".env" -o -name "hooks.json" \
+       -o -name "*.command" -o -name ".DS_Store" -o -name "*.log" -o -name "*.log.[0-9]" \) \
     -delete 2>/dev/null || true
 
 chmod +x "$STAGING_DIR"/*.sh

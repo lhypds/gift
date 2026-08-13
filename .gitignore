@@ -1,6 +1,10 @@
 .vscode
 .DS_Store
-# Local configuration and secrets
+# Local settings and state. config.json holds the webhook secret. gift no longer
+# reads .env at all; the line stays so that one left over from an older
+# installation cannot be committed by accident.
+config.json
+config.json.tmp
 .env
 hooks.json
 # Left behind only if `gift hook create` or `delete` dies mid-write

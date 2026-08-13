@@ -8,7 +8,8 @@
 // environment variables.
 //
 // Configuration: hooks.json (see hooks.example.json).
-// Secret:        GITHUB_WEBHOOK_SECRET in .env or the environment.
+// Secret:        github_webhook_secret in gift's config, or GITHUB_WEBHOOK_SECRET
+//                in the environment.
 // Activity log:  hooks.log (--log=FILE, or --no-log for console only).
 // Request log:   server.log (one line for every HTTP request).
 'use strict';
@@ -172,7 +173,7 @@ options:
   --dry-run        Verify and match deliveries, but never run a hook script
   -h, --help       Show this help
 
-environment (from .env, or the real environment, which wins):
+environment (from config.json, or the real environment, which wins):
   GITHUB_WEBHOOK_SECRET   Secret configured on the GitHub webhook (required)
   GIFT_SERVE_HOST         Default for --host
   PORT                    Default for --port (GIFT_SERVE_PORT overrides it)
@@ -319,12 +320,12 @@ function verifySignature(rawBody, signatureHeader, secrets) {
 /**
  * A short, one-way fingerprint of a secret: the first bytes of its SHA-256.
  * Enough to tell two secrets apart, and to see at a glance whether the running
- * process holds the value that is in .env — which is the question when a secret
- * has been rotated and something stale is still being used.
+ * process holds the value that is configured — which is the question when a
+ * secret has been rotated and something stale is still being used.
  *
  * It is not the secret and cannot be turned back into it. The log is written
- * 0600 in the same folder as .env, so this exposes nothing to anyone who could
- * not already read the secret itself.
+ * 0600, as is the configuration it comes from, so this exposes nothing to anyone
+ * who could not already read the secret itself.
  */
 function fingerprint(secret) {
     return crypto.createHash('sha256').update(String(secret)).digest('hex').slice(0, 8);
@@ -337,7 +338,7 @@ function fingerprints(secrets) {
 /**
  * The ways a secret comes to differ from the one it was pasted from: a newline
  * an editor added, a space that came along with the copy, quotes that were meant
- * to wrap the value in .env rather than be part of it.
+ * to wrap the value rather than be part of it.
  *
  * A delivery signed with one of these names the mistake exactly. None of them is
  * ever accepted — they are compared against only to describe what happened.
@@ -372,7 +373,7 @@ function explainSignatureFailure(rawBody, signatureHeader, secrets, headers = {}
             notes.push('the sha1 X-Hub-Signature arrived but the sha256 one did not, so something in front dropped it.');
         } else {
             notes.push('the delivery carried no signature header, so the webhook on GitHub has no Secret set.');
-            notes.push('Set it under Settings -> Webhooks -> Edit -> Secret, to the same value as the secret in .env.');
+            notes.push('Set it under Settings -> Webhooks -> Edit -> Secret, to the same value as the configured secret.');
         }
         return { fields, notes };
     }
@@ -408,13 +409,13 @@ function explainSignatureFailure(rawBody, signatureHeader, secrets, headers = {}
         for (const [label, variant] of secretVariants(secret)) {
             if (!signedWith(variant)) continue;
             notes.push(`the delivery was signed with the value of ${name} ${label} — the same secret, pasted differently.`);
-            notes.push(`Fix the one that has it wrong: the Secret field on GitHub, or ${name} in .env.`);
+            notes.push(`Fix the one that has it wrong: the Secret field on GitHub, or ${name} in config.json.`);
             return { fields, notes };
         }
     }
 
     notes.push(`the delivery was signed with a secret this server does not have — the Secret on GitHub is a different value from ${fingerprints(secrets)}.`);
-    notes.push('If .env holds the right value, this process is not running on it: `gift status` prints the fingerprint of the file, and a variable already in the environment wins over it. `gift serve` restarts on the file.');
+    notes.push('If the configuration holds the right value, this process is not running on it: `gift status` prints the fingerprint of what is configured, and a variable already in the environment wins over it. `gift serve` restarts on it.');
     return { fields, notes };
 }
 
@@ -1098,10 +1099,10 @@ function main(argv) {
         return 0;
     }
 
-    // `gift serve` already loaded .env; do it here too so that
-    // `node server.js` and a systemd unit behave the same way.
+    // `gift serve` already loaded the settings; do it here too so that
+    // `node serve.js` and a systemd unit behave the same way.
     try {
-        require('./utils/env.js').loadFor();
+        require('./utils/config.js').loadFor();
     } catch {
         /* running outside the repo — rely on the real environment */
     }
@@ -1122,7 +1123,7 @@ function main(argv) {
         ),
         path: options.path || process.env.GIFT_SERVE_PATH || config.path || DEFAULTS.path,
         // Blank falls through to the next source, as it does above: an empty
-        // GIFT_SERVE_LOG= in .env means "unset", not "no log".
+        // An empty GIFT_SERVE_LOG means "unset", not "no log".
         log: options.log || process.env.GIFT_SERVE_LOG || config.log || DEFAULT_LOG,
         dryRun: options.dryRun,
         configFile,
@@ -1142,10 +1143,13 @@ function main(argv) {
     if (secrets.size === 0) {
         console.error(`gift serve: no webhook secret configured.
 
-Set GITHUB_WEBHOOK_SECRET in .env (or the environment) to the same
-value as the webhook's "Secret" field on GitHub. Generate one with:
+Put github_webhook_secret in config.json, the same value as the webhook's
+"Secret" field on GitHub. Run 'gift config' to open the file, and generate a
+value with:
 
-    openssl rand -hex 32`);
+    openssl rand -hex 32
+
+GITHUB_WEBHOOK_SECRET in the environment does just as well, and wins.`);
         return 1;
     }
 
@@ -1183,7 +1187,7 @@ value as the webhook's "Secret" field on GitHub. Generate one with:
         log('info', `request log ${requestLogFile.path}`);
         log('info', `deliveries ${settings.deliveriesFile}`);
         // With the fingerprint of each: after a rotation, this line is what says
-        // whether the process is running on the value that is now in .env.
+        // whether the process is running on the value that is now configured.
         log('info', `secrets accepted from ${fingerprints(secrets)}`);
         if (settings.dryRun) log('warn', 'dry run — hook scripts will not be executed');
         if (config.hooks.length === 0) {

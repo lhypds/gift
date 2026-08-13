@@ -670,7 +670,7 @@ async function createHook(file) {
     console.log('');
     if (!process.env[DEFAULT_SECRET_ENV]) {
         console.log(`warning: ${DEFAULT_SECRET_ENV} is not set — the server refuses to start without a secret.`);
-        console.log(`         Put it in .env, the same value as the webhook's Secret on GitHub.`);
+        console.log(`         Add it to config.json with \`gift config\`, the same value as the webhook's Secret on GitHub.`);
     }
     console.log(`Edit ${show(file)} for anything else — other events or branches, arguments, detach.`);
     console.log('');
