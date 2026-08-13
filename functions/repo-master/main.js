@@ -2,17 +2,16 @@
 // repo-master — one live table for every git repository under a folder.
 //
 // It finds the repositories (nested checkouts and submodules included), watches
-// their working trees, asks GitHub how many pull requests are open, and paints
-// the lot as a table that keeps itself up to date. Rows that want attention are
-// orange. Pick rows with the arrow keys, add more with space, and press enter to
-// open them in VS Code, Claude Code or Codex.
+// their working trees, and paints the lot as a table that keeps itself up to
+// date. Rows that want attention wear an orange bar. Pick rows with the arrow
+// keys, add more with space, and press enter to go to a repository's folder or
+// open it in VS Code, Claude Code or Codex.
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const gitLib = require('./lib/git.js');
-const ghLib = require('./lib/gh.js');
 const reposLib = require('./lib/repos.js');
 const actionsLib = require('./lib/actions.js');
 const { watchAll } = require('./lib/watch.js');
@@ -24,8 +23,6 @@ const VERSION = '0.0.1';
 
 const DEFAULTS = {
     depth: 4,
-    prInterval: 10, // seconds between rounds of `gh pr list`
-    prRate: 60, // and never more than this many calls a minute
     refresh: 30, // full sweep, in case a file watcher missed something
 };
 
@@ -46,27 +43,25 @@ config.json — and failing that, the current directory.
 Options:
   --repo-root=PATH     Folder to watch; same as the positional argument (--dir also works)
   --depth=N            How many folders deep to search        (default ${DEFAULTS.depth})
-  --pr-interval=SEC    Seconds between pull request rounds    (default ${DEFAULTS.prInterval})
-  --pr-rate=N          Most \`gh\` calls a minute, whatever the interval (default ${DEFAULTS.prRate})
   --refresh=SEC        Seconds between full git sweeps        (default ${DEFAULTS.refresh})
-  --no-pr              Do not ask GitHub about pull requests
   --once               Print the table once and exit
   -h, --help           Show this help
 
 Keys:
   up/down or k/j   move            space   add to the selection
   enter            run a command   esc     clear the selection
-  r                refresh now     q       quit`);
+  r                refresh now     q       quit
+
+The first repository picked with space is the main project and wears no mark; the
+ones after it are marked +. Every command opens the main project, and claude and
+codex are handed the marked ones as directories they may also work in.`);
 }
 
 function parseArgs(argv, env) {
     const options = {
         dir: env.GIFT_REPO_MASTER_REPO_ROOT || '',
         depth: Number(env.GIFT_REPO_MASTER_DEPTH) || DEFAULTS.depth,
-        prInterval: Number(env.GIFT_REPO_MASTER_PR_INTERVAL) || DEFAULTS.prInterval,
-        prRate: Number(env.GIFT_REPO_MASTER_PR_RATE) || DEFAULTS.prRate,
         refresh: Number(env.GIFT_REPO_MASTER_REFRESH) || DEFAULTS.refresh,
-        pr: true,
         once: false,
         help: false,
         positional: '',
@@ -85,13 +80,9 @@ function parseArgs(argv, env) {
     for (const argument of argv) {
         if (argument === '-h' || argument === '--help') options.help = true;
         else if (argument === '--once') options.once = true;
-        else if (argument === '--no-pr') options.pr = false;
         else if (argument.startsWith('--repo-root=')) options.dir = argument.slice(12);
         else if (argument.startsWith('--dir=')) options.dir = argument.slice(6); // the older spelling
         else if (argument.startsWith('--depth=')) options.depth = number(argument.slice(8), '--depth', 1) ?? options.depth;
-        else if (argument.startsWith('--pr-interval='))
-            options.prInterval = number(argument.slice(14), '--pr-interval', 1) ?? options.prInterval;
-        else if (argument.startsWith('--pr-rate=')) options.prRate = number(argument.slice(10), '--pr-rate', 1) ?? options.prRate;
         else if (argument.startsWith('--refresh=')) options.refresh = number(argument.slice(10), '--refresh', 1) ?? options.refresh;
         else if (argument.startsWith('-')) options.error = `unknown option: ${argument}`;
         else if (!options.positional) options.positional = argument;
@@ -102,7 +93,7 @@ function parseArgs(argv, env) {
     return options;
 }
 
-/** A blank row, before git or gh has said anything about it. */
+/** A blank row, before git has said anything about it. */
 function makeRow(found, identity) {
     return {
         ...found,
@@ -115,16 +106,6 @@ function makeRow(found, identity) {
         dels: 0,
         lastChange: null,
         error: null,
-        pr: {
-            count: null,
-            numbers: null,
-            baseline: null,
-            hasNew: false,
-            unknown: false,
-            failures: 0,
-            giveUp: false,
-            reason: '',
-        },
     };
 }
 
@@ -164,7 +145,7 @@ async function main(argv) {
         menuIndex: 0,
         menuTargets: [],
         actions: actionsLib.actions(process.env),
-        notes: { gh: '', pr: '', watch: '' },
+        notes: { watch: '' },
         message: '',
         busy: false,
     };
@@ -215,8 +196,7 @@ async function main(argv) {
     // Repositories come and go — that is rather the point of a folder nobody
     // tidies. Rescanning keeps the rows honest without losing what is already
     // known about the ones that stayed: `rows` is edited in place, so the
-    // watchers, the poller and the selection all keep pointing at the same
-    // objects.
+    // watchers and the selection all keep pointing at the same objects.
     let onRowsChanged = () => {};
     let scanning = false;
     const rescan = async () => {
@@ -260,46 +240,6 @@ async function main(argv) {
         }
     };
 
-    // Pull requests. Without gh there is nothing to ask, and the header says so
-    // rather than leaving a column of zeroes that means nothing.
-    let poller = null;
-    if (options.pr && rows.some(ghLib.pollable)) {
-        const auth = await ghLib.available();
-        if (!auth.ok) {
-            state.notes.gh = auth.reason;
-            for (const repo of rows) repo.pr.unknown = true;
-        } else if (options.once) {
-            const ghGate = limiter(GIT_CONCURRENCY);
-            await Promise.all(
-                rows.filter(ghLib.pollable).map((repo) =>
-                    ghGate(async () => {
-                        const result = await ghLib.openPullRequests(repo);
-                        if (result.ok) {
-                            repo.pr.count = result.numbers.length;
-                            repo.pr.baseline = new Set(result.numbers);
-                        } else {
-                            repo.pr.unknown = true;
-                        }
-                    }),
-                ),
-            );
-        } else {
-            poller = ghLib.createPoller({
-                repos: () => rows,
-                interval: options.prInterval,
-                maxPerMinute: options.prRate,
-                onUpdate: () => {
-                    // Say so when there are too many repositories to ask about
-                    // as often as the user asked.
-                    state.notes.pr = poller.stretched() ? `pr every ${poller.interval()}s` : '';
-                    requestRender();
-                },
-            });
-        }
-    } else if (options.pr) {
-        state.notes.pr = 'no GitHub remotes';
-    }
-
     // One shot: print what we know and leave. Nothing scrolls on paper, so the
     // whole list is printed however long it is.
     if (!interactive) {
@@ -321,8 +261,14 @@ async function main(argv) {
         draw();
     };
 
-    const targets = () =>
-        state.selected.size > 0 ? rows.filter((repo) => state.selected.has(repo.dir)) : rows.slice(state.cursor, state.cursor + 1);
+    // The selection is ordered, not just a set of rows: whichever repository was
+    // picked first is the main project, and the rest come along behind it. With
+    // nothing picked, the row under the cursor is the main project on its own.
+    const targets = () => {
+        if (state.selected.size === 0) return rows.slice(state.cursor, state.cursor + 1);
+        const byDir = new Map(rows.map((row) => [row.dir, row]));
+        return [...state.selected].map((dir) => byDir.get(dir)).filter(Boolean);
+    };
 
     const runAction = async (action) => {
         const chosen = state.menuTargets;
@@ -357,12 +303,14 @@ async function main(argv) {
             draw();
             return;
         }
-        if (key === 'up') {
+        // k and j move here too, the same as they do in the table: a menu is no
+        // reason to put a hand back on the arrow keys.
+        if (key === 'up' || key === 'k') {
             state.menuIndex = (state.menuIndex - 1 + state.actions.length) % state.actions.length;
             draw();
             return;
         }
-        if (key === 'down') {
+        if (key === 'down' || key === 'j') {
             state.menuIndex = (state.menuIndex + 1) % state.actions.length;
             draw();
             return;
@@ -460,7 +408,6 @@ async function main(argv) {
     };
 
     refreshAll();
-    poller?.start();
 
     const ticker = setInterval(draw, TICK_MS);
     const sweeper = setInterval(() => {
@@ -486,7 +433,6 @@ async function main(argv) {
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);
     watchers.close();
-    poller?.stop();
     screen.stop();
 
     return code;

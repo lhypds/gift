@@ -1,15 +1,18 @@
 // Drawing the table.
 //
-// A row is orange when it wants attention — the working tree changed, or a pull
-// request appeared that was not there when repo-master started. Everything else
-// keeps the terminal's own colour.
+// Rows are highlighted by their background, never by recolouring their text: a
+// row wanting attention — one whose working tree changed — gets a Claude-orange
+// bar, and the rows the user is pointing at or has picked get the pale grey of
+// an ordinary selection. Everything else keeps the terminal's own colours.
 'use strict';
 
 const { width, pad, truncate, formatRelative, shortenHome } = require('./util.js');
 
-/** Claude's orange, as a truecolor triple and as its nearest xterm-256 shade. */
-const ORANGE_RGB = [217, 119, 87];
-const ORANGE_256 = 173;
+/** Each colour as a truecolor triple and as its nearest xterm-256 shade. */
+const ORANGE = { rgb: [217, 119, 87], xterm: 173 }; // Claude's orange
+const CURSOR_GREY = { rgb: [214, 214, 214], xterm: 252 }; // the row under the cursor
+const SELECTED_GREY = { rgb: [168, 168, 168], xterm: 248 }; // rows picked with space
+const INK = { rgb: [32, 32, 32], xterm: 235 }; // text drawn on top of a bar
 
 const RESET = '\x1b[0m';
 
@@ -17,16 +20,24 @@ function createPalette(stream) {
     const enabled =
         Boolean(stream.isTTY) && process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
     const truecolor = /truecolor|24bit/i.test(process.env.COLORTERM || '');
-    const orangeCode = truecolor ? `\x1b[38;2;${ORANGE_RGB.join(';')}m` : `\x1b[38;5;${ORANGE_256}m`;
+
+    const fg = (colour) =>
+        truecolor ? `\x1b[38;2;${colour.rgb.join(';')}m` : `\x1b[38;5;${colour.xterm}m`;
+    const bg = (colour) =>
+        truecolor ? `\x1b[48;2;${colour.rgb.join(';')}m` : `\x1b[48;5;${colour.xterm}m`;
+
+    /** A row highlight: dark ink on a coloured bar. */
+    const barCode = (colour) => `${bg(colour)}${fg(INK)}`;
 
     const wrap = (code) => (text) => (enabled && text ? `${code}${text}${RESET}` : text);
     return {
         enabled,
-        orange: wrap(orangeCode),
+        orange: wrap(fg(ORANGE)),
         dim: wrap('\x1b[2m'),
         bold: wrap('\x1b[1m'),
-        boldOrange: wrap(`\x1b[1m${orangeCode}`),
-        inverse: wrap('\x1b[7m'),
+        attentionBar: wrap(barCode(ORANGE)),
+        cursorBar: wrap(barCode(CURSOR_GREY)),
+        selectedBar: wrap(barCode(SELECTED_GREY)),
     };
 }
 
@@ -39,11 +50,6 @@ function statusCell(repo) {
     if (repo.error) return 'error';
     if (!repo.loaded) return '…';
     return repo.hasChanges ? 'has changes' : 'no changes';
-}
-
-function prCell(repo) {
-    if (repo.pr.unknown || repo.pr.count === null) return '-';
-    return repo.pr.hasNew ? `${repo.pr.count} new` : String(repo.pr.count);
 }
 
 /** `+1203 lines -30 lines`, or the same thing without the word when squeezed. */
@@ -67,7 +73,7 @@ function diffCells(repo) {
 
 /** Whether a row is one of the ones the user is meant to notice. */
 function needsAttention(repo) {
-    return Boolean(repo.hasChanges) || Boolean(repo.pr.hasNew);
+    return Boolean(repo.hasChanges);
 }
 
 /**
@@ -80,14 +86,13 @@ const COLUMNS = [
     { key: 'repo', title: 'repo', min: 12, max: 34 },
     { key: 'path', title: 'path', min: 8, max: 40 },
     { key: 'branch', title: 'branch', min: 6, max: 24 },
-    { key: 'pr', title: 'pr', min: 2, fixed: true },
     { key: 'status', title: 'status', min: 6, max: 11 },
     { key: 'updated', title: 'last updated', min: 6, max: 12 },
     { key: 'diff', title: 'diff', min: 4, max: 24 },
 ];
 
 const GAP = 2;
-const GUTTER = 2; // '> ' for the cursor, ' *' for a selected row
+const GUTTER = 2; // '> ' for the cursor, ' +' for a repository added to the main one
 
 /**
  * Work out how wide each column may be. Everything starts at its natural width;
@@ -156,7 +161,6 @@ function frame(state, palette, size) {
             repo: `${treePrefix(repo.depth)}${repo.name}`,
             path: repo.relPath,
             branch: repo.branch || '…',
-            pr: prCell(repo),
             status: statusCell(repo),
             updated: repo.hasChanges ? formatRelative(repo.lastChange, now) : '-',
             diff: diff.long,
@@ -174,44 +178,53 @@ function frame(state, palette, size) {
     }
 
     const header = Object.fromEntries(COLUMNS.map((column) => [column.key, column.title]));
-    const tableWidth = Math.min(
-        available,
-        GUTTER + COLUMNS.reduce((sum, column) => sum + widths[column.key], 0) + GAP * (COLUMNS.length - 1),
-    );
+
+    // The table is as wide as the window, however little the columns need of
+    // it: the rules and the highlighted rows reach the right-hand edge. The
+    // columns are laid out against `available` instead, which stops shrinking
+    // at a floor, so a very narrow window cuts the table off rather than
+    // squeezing it into nothing.
+    const tableWidth = Math.max(1, size.columns);
     const rule = '-'.repeat(tableWidth);
 
+    // Every line is cut to the window as well, and cut before it is coloured:
+    // a line wrapping onto the next one would push the whole frame down, and
+    // an escape sequence counted as width, or cut in half, is worse still.
+    const fit = (text) => truncate(text, tableWidth);
+
     const changed = state.rows.filter((repo) => repo.hasChanges).length;
-    const openPulls = state.rows.reduce((sum, repo) => sum + (repo.pr.count || 0), 0);
 
     const summary = [
         `Watching ${shortenHome(state.root)}`,
         `${state.rows.length} ${state.rows.length === 1 ? 'repo' : 'repos'}`,
         `${changed} changed`,
-        `${openPulls} open ${openPulls === 1 ? 'PR' : 'PRs'}`,
     ];
     summary.push(...Object.values(state.notes).filter(Boolean));
 
     const head = [
-        palette.bold(`Repo Master v${state.version}`),
-        palette.dim(summary.join(' · ')),
+        palette.bold(fit(`Repo Master v${state.version}`)),
+        palette.dim(fit(summary.join(' · '))),
         palette.dim(rule),
-        palette.dim(`${' '.repeat(GUTTER)}${joinRow(header, widths)}`),
+        palette.dim(fit(`${' '.repeat(GUTTER)}${joinRow(header, widths)}`)),
     ];
 
     const tail = [palette.dim(rule)];
 
     if (state.mode === 'menu') {
-        const count = state.menuTargets.length;
-        tail.push(`Run on ${count} ${count === 1 ? 'repo' : 'repos'}:`);
+        const [target, ...added] = state.menuTargets;
+        const on = target ? target.name : `${state.menuTargets.length} repos`;
+        tail.push(fit(`Run on ${on}${added.length > 0 ? ` + ${added.length} more` : ''}:`));
         state.actions.forEach((action, index) => {
-            const label = `${index === state.menuIndex ? '>' : ' '} ${index + 1}  ${action.label}`;
+            const label = fit(`${index === state.menuIndex ? '>' : ' '} ${index + 1}  ${action.label}`);
             tail.push(index === state.menuIndex ? palette.bold(label) : label);
         });
-        tail.push(palette.dim('1-3 or up/down then enter · esc cancel'));
+        tail.push(
+            palette.dim(fit(`1-${state.actions.length} pick · up/down or j/k move · enter run · esc cancel`)),
+        );
     } else if (state.interactive) {
         tail.push(
             palette.dim(
-                ['up/down move', 'space select', 'enter run', 'esc clear', 'r refresh', 'q quit'].join(' · '),
+                fit(['up/down move', 'space select', 'enter run', 'esc clear', 'r refresh', 'q quit'].join(' · ')),
             ),
         );
     }
@@ -219,10 +232,10 @@ function frame(state, palette, size) {
     // A row that says "error" owes an explanation; the cursor asks for it.
     const under = state.rows[state.cursor];
     const message = state.message || (under && under.error ? `${under.name}: ${under.error}` : '');
-    if (message) tail.push(palette.orange(truncate(message, available)));
+    if (message) tail.push(palette.orange(fit(message)));
 
     if (state.rows.length === 0) {
-        return [...head, palette.dim(`  no git repositories under ${shortenHome(state.root)}`), ...tail];
+        return [...head, palette.dim(fit(`  no git repositories under ${shortenHome(state.root)}`)), ...tail];
     }
 
     // Whatever is left over after the fixed parts belongs to the rows, minus a
@@ -232,18 +245,25 @@ function frame(state, palette, size) {
     const view = viewport(state.rows.length, state.mode === 'table' ? state.cursor : -1, state.scroll || 0, budget);
     state.scroll = view.start;
 
+    // The repository picked first is the main project and wears no mark; the ones
+    // picked after it are marked `+`, because that is what they are to it.
+    const [mainDir] = state.selected;
+
     const body = [];
     for (let index = view.start; index < view.end; index++) {
         const repo = state.rows[index];
         const cursor = state.mode === 'table' && index === state.cursor;
         const selected = state.selected.has(repo.dir);
-        const gutter = `${cursor ? '>' : ' '}${selected ? '*' : ' '}`;
-        const text = truncate(`${gutter}${joinRow(rowCells[index], widths)}`, available);
+        const gutter = `${cursor ? '>' : ' '}${selected && repo.dir !== mainDir ? '+' : ' '}`;
+        const text = fit(`${gutter}${joinRow(rowCells[index], widths)}`);
 
-        const attention = needsAttention(repo);
-        if (cursor && attention) body.push(palette.boldOrange(text));
-        else if (cursor) body.push(palette.bold(text));
-        else if (attention) body.push(palette.orange(text));
+        // A background only reaches as far as the text does, so a highlighted
+        // row is padded out to the width of the table to draw as a full bar.
+        // Without colour there is no bar to fill, and no reason to trail spaces.
+        const bar = palette.enabled ? pad(text, tableWidth) : text;
+        if (cursor) body.push(palette.cursorBar(bar));
+        else if (selected) body.push(palette.selectedBar(bar));
+        else if (needsAttention(repo)) body.push(palette.attentionBar(bar));
         else body.push(text);
     }
 
@@ -253,7 +273,7 @@ function frame(state, palette, size) {
         const more = [];
         if (above > 0) more.push(`${above} above`);
         if (below > 0) more.push(`${below} below`);
-        body.push(palette.dim(`  … ${more.join(' · ')}`));
+        body.push(palette.dim(fit(`  … ${more.join(' · ')}`)));
     }
 
     return [...head, ...body, ...tail];

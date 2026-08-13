@@ -22,3 +22,5 @@ dist/
 # Recent-deliveries state, mirrored to disk so a restart doesn't lose it
 deliveries.json
 deliveries.json.tmp
+
+*.swp

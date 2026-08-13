@@ -6,7 +6,8 @@
 // as `serve`, `create`, `delete` and `log` — or any unique prefix.
 // `gift recur` runs recursively-pull-repos, `gift se` runs serve. Everything
 // after the name is forwarded to its entry script untouched. `gift run` asks
-// instead: it prints the function list and runs whichever one is picked.
+// instead: it prints the function list and runs whichever one is picked — or
+// takes the answer from the command line, as `gift run 3` does.
 'use strict';
 
 const fs = require('node:fs');
@@ -23,7 +24,7 @@ const listHooks = require('./commands/list.js');
 const log = require('./commands/log.js');
 const status = require('./commands/status.js');
 const update = require('./commands/update.js');
-const { pick } = require('./utils/pick.js');
+const { pick, choose } = require('./utils/pick.js');
 const { runFunction } = require('./commands/run.js');
 // `serve`, `restart` and `stop` are root scripts rather than function folders, so
 // service.js names them; `gift update` restarts a running server through the same
@@ -75,7 +76,7 @@ function printHelp() {
 
     console.log('usage: gift <function> [args...]');
     console.log('       gift list             List configured server hooks.');
-    console.log('       gift run              Pick a helper function from a menu.');
+    console.log('       gift run [name|no.]   Pick a helper function from a menu, or say which.');
     console.log('       gift -h | --help      Show this help.');
     console.log('       gift -v | --version   Show the installed version.');
     console.log('');
@@ -173,16 +174,48 @@ function reportResolveFailure(token, result) {
 }
 
 /**
- * `gift run` — pick a function from the list, then run it. Anything typed after
- * `run` is forwarded to whichever function the user picks.
+ * Read a choice out of `gift run`'s own arguments. The first word after `run` is
+ * the menu's answer rather than an argument for the function — a number, a name,
+ * or enough of one — so `gift run 3` and `gift run repo` run the third function
+ * and repo-master without asking. A flag, and everything after the name, belongs
+ * to the function. A word that names nothing here is still an answer, and a
+ * wrong one: it is reported and dropped rather than handed on, because a
+ * function given a stray `3` to make sense of reads it as a directory.
+ *
+ * @returns {{fn: object|null, rest: string[], message?: string}}
+ */
+function fromArguments(args, available) {
+    const [token, ...rest] = args;
+    if (!token || token.startsWith('-')) return { fn: null, rest: args };
+
+    const choice = choose(token, available);
+    if (choice.status === 'ok') return { fn: choice.fn, rest };
+    return { fn: null, rest, message: choice.message };
+}
+
+/**
+ * `gift run` — pick a function from the list, then run it. Anything left after
+ * the name or number is forwarded to whichever function runs.
  */
 async function runPicked(args) {
-    const choice = await pick();
-
-    if (choice.status === 'empty') {
+    const available = functions.list();
+    if (available.length === 0) {
         console.error('gift: no functions found in functions/');
         return 1;
     }
+
+    // Named on the command line, there is nothing to ask, and nothing a
+    // terminal is needed for either — `gift run repo-master --once` works in a
+    // script the same as `gift repo-master --once` does.
+    const asked = fromArguments(args, available);
+    if (asked.fn) {
+        settings.loadFor(asked.fn.dir);
+        return runFunction(asked.fn, asked.rest);
+    }
+    if (asked.message) console.log(asked.message);
+
+    const choice = await pick();
+
     if (choice.status === 'no-tty') {
         console.error('gift: `gift run` needs a terminal to ask in.');
         console.error('Run `gift <function>` directly, or `gift help` to see the list.');
@@ -195,7 +228,7 @@ async function runPicked(args) {
 
     console.log('');
     settings.loadFor(choice.fn.dir);
-    return runFunction(choice.fn, args);
+    return runFunction(choice.fn, asked.rest);
 }
 
 async function runBuiltin(name, rest) {

@@ -8,18 +8,19 @@ Watch every git repository under one folder in a live table, and open the ones t
 A folder full of half-finished projects is hard to hold in your head. repo-master
 finds every repository under it — nested checkouts and submodules included —
 and keeps one table up to date: which branch each one is on, whether the working
-tree has changes, how many lines that is, and how many pull requests are open.
-Rows that want attention turn orange. Pick them and press enter to open them in
-VS Code, Claude Code or Codex.
+tree has changes, and how many lines that is.
+Rows that want attention wear an orange bar. Pick them and press enter to go to
+one's folder, or to open them in VS Code, Claude Code or Codex — the first one
+picked is the main project, and the rest come along with it.
 
 ```
 Repo Master v0.0.1
 Watching ~/projects · 12 repos · 3 changed · 2 open PRs
 ---------------------------------------------------------------------------------------------------------
-  repo                 path                 branch  pr  status       last updated  diff
-> lhypds/gift          ./gift               main    0   has changes  1min ago      +1203 lines -30 lines
-  gcc3/gcc3-content    ./gcc3               master  0   no changes   -             -
-    +- gcc3/content-hub  ./gcc3/public/notes  main  0   has changes  just now      +3 lines
+  repo                 path                 branch  status       last updated  diff
+> lhypds/gift          ./gift               main    has changes  1min ago      +1203 lines -30 lines
+ +gcc3/gcc3-content    ./gcc3               master  no changes   -             -
+    +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
 ---------------------------------------------------------------------------------------------------------
 up/down move · space select · enter run · esc clear · r refresh · q quit
 ```
@@ -33,7 +34,6 @@ Files
 | `main.js`       | Entry point — run through `gift repo-master`, or directly with `node`        |
 | `lib/repos.js`  | Finding the repositories and working out which sits inside which             |
 | `lib/git.js`    | Branch, working-tree changes, diff size and the time of the last change      |
-| `lib/gh.js`     | Open pull requests, counted with `gh` and paced to stay inside GitHub's limits |
 | `lib/watch.js`  | Hearing about edits, with a timer as the fallback                            |
 | `lib/table.js`  | The table itself, and which rows are orange                                  |
 | `lib/screen.js` | The alternate screen and the keys                                            |
@@ -76,30 +76,38 @@ Keys
 | Key             | Does                                                        |
 |-----------------|-------------------------------------------------------------|
 | up / down, k / j| Move the cursor                                             |
-| space           | Add the row to the selection and step down                  |
+| space           | Add the row to the selection and step down — the first one added is the main project, the rest are marked `+` |
 | enter           | Open the command menu for the selection, or the row under the cursor |
 | esc             | Clear the selection, or close the menu                      |
 | r               | Rescan and refresh everything now                           |
 | q, Ctrl-C       | Quit                                                        |
 
-In the menu, `1`, `2` and `3` run a command straight away; up/down and enter do
-the same thing more slowly. The commands are:
+In the menu, the number keys run a command straight away; up/down or j/k and then
+enter do the same thing more slowly. The commands are:
 
 | Command               | Runs                                                          |
 |-----------------------|----------------------------------------------------------------|
-| open with vscode      | `code <repo>` for each chosen repository                       |
-| open with claude code  | `claude` in each chosen repository                            |
-| open with codex       | `codex` in each chosen repository                              |
+| goto folder           | your shell, standing in the main project's folder              |
+| open with vscode      | `code <main project>`                                          |
+| open with claude code | `claude` in the main project, with `--add-dir` for each added repository |
+| open with codex       | `codex` in the main project, the same way                      |
 
-`claude` and `codex` want a terminal of their own. With one repository chosen
-they borrow this one — the table steps aside and comes back when the tool exits.
-With several, each gets a new terminal window (Terminal or iTerm on macOS, the
-usual suspects on Linux, or whatever the `terminal_command` setting names).
+A selection has a shape. The repository picked first is the **main project** and
+wears no mark; the ones picked after it are marked `+`. VS Code opens the main
+project — a window is a window, and the marked repositories were not asked for.
+`claude` and `codex` open the main project too, and are handed the marked ones as
+directories they may also work in. Both want a terminal of their own and borrow
+this one: the table steps aside and comes back when the tool exits.
 
-All three commands can be pointed somewhere else, for anyone whose tools are
-named differently. These four are not written into config.json — their defaults
-suit nearly everybody — so add the line yourself under `functions.repo-master`
-when you want one:
+`goto folder` is the same borrowing with a shell as the tool. No program can move
+the shell that started it, so the folder is reached by a shell of its own
+standing in it — your `$SHELL`, with your prompt and your aliases. Work there as
+usual; `exit`, or Ctrl-D, brings the table back where you left it.
+
+The commands can be pointed somewhere else, for anyone whose tools are named
+differently. These are not written into config.json — their defaults suit nearly
+everybody — so add the line yourself under `functions.repo-master` when you want
+one:
 
 ```json
 "vscode_command": "cursor"
@@ -107,10 +115,12 @@ when you want one:
 
 | Setting            | Default  | What it runs                                  |
 |--------------------|----------|------------------------------------------------|
+| `shell_command`    | `$SHELL` | `goto folder`; `sh` when there is no `$SHELL`   |
 | `vscode_command`   | `code`   | `open with vscode`; `cursor` and `windsurf` take the same argument |
 | `claude_command`   | `claude` | `open with claude code`                        |
 | `codex_command`    | `codex`  | `open with codex`                              |
-| `terminal_command` | guessed  | How a new terminal window is opened, for terminals the guesses miss |
+| `claude_add_dir`   | `--add-dir` | How `claude` is told about the repositories added to the main one, once each. `false` opens the main project alone |
+| `codex_add_dir`    | `--add-dir` | The same for `codex`, for a version that spells the option differently |
 
 
 Parameters
@@ -120,10 +130,7 @@ Parameters
 |-------------------------|--------------------------------------------------------|---------|
 | `DIR`, `--repo-root=PATH` | Folder to watch (`--dir=PATH` is the older spelling) | the configured `repo_root`, else the current directory |
 | `--depth=N`             | How many folders deep to look for repositories         | 4       |
-| `--pr-interval=SEC`     | Seconds between rounds of pull request checks          | 10      |
-| `--pr-rate=N`           | Most `gh` calls a minute, whatever the interval asks for | 60    |
 | `--refresh=SEC`         | Seconds between full sweeps — new repositories included | 30     |
-| `--no-pr`               | Do not ask GitHub about pull requests at all           | off     |
 | `--once`                | Print the table once and exit, instead of watching     | off     |
 | `-h`, `--help`          | Show the help message and exit                         |         |
 
@@ -144,7 +151,6 @@ What the columns mean
 | repo         | `owner/repo` from the origin remote, or the folder name when there is none. `+-` marks a repository living inside the one above it |
 | path         | Where it is, relative to the watched folder                             |
 | branch       | The checked-out branch, or `(abc1234)` when HEAD is detached            |
-| pr           | Open pull requests. `2 new` means two of them appeared after repo-master started. `-` means nobody could say |
 | status       | Whether the working tree has anything uncommitted                       |
 | last updated | When the newest of those changes was written — not when it was noticed  |
 | diff         | Lines added and removed against HEAD, untracked files counted as added  |
@@ -161,14 +167,6 @@ recursive `fs.watch`, and a burst of edits is answered with a single `git status
 a moment later. Where recursive watching is unavailable, those repositories fall
 back to a timer and the header says how many.
 
-Pull requests cannot be watched, only asked about, so they are polled — one
-repository per slot, spread evenly rather than all at once. GitHub allows an
-authenticated account 5000 API points an hour; `--pr-rate` keeps repo-master to
-60 calls a minute at the very most, which is 3600 an hour with plenty of room for
-your own `gh` use. When there are more repositories than `--pr-interval` can get
-through at that rate, the interval stretches instead of the limit breaking, and
-the header says so: `pr every 24s`.
-
 Every `--refresh` seconds the whole folder is scanned again, so a repository you
 cloned a minute ago shows up on its own, and one you deleted goes away.
 
@@ -183,9 +181,6 @@ cd ~/projects && gift repo-master
 # Watch somewhere else, deeper than the default
 gift repo-master ~/work --depth=6
 
-# Skip GitHub entirely — offline, or just quiet
-gift repo-master --no-pr
-
 # One snapshot, no watching; useful in a pipe
 gift repo-master --once
 ```
@@ -195,6 +190,4 @@ Requirements
 ------------
 
 - `git` — must be installed and available in PATH
-- [GitHub CLI (`gh`)](https://cli.github.com/) — optional, and only for the pull
-  request column; without it the column reads `-` and the header says why
 - A terminal. `code`, `claude` and `codex` are only needed if you use them

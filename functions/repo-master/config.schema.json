@@ -16,28 +16,19 @@
             "description": "How many folders deep to look for repositories."
         },
         {
-            "key": "pr_interval",
-            "env": "GIFT_REPO_MASTER_PR_INTERVAL",
-            "type": "number",
-            "min": 1,
-            "default": 10,
-            "description": "Seconds between rounds of pull request checks."
-        },
-        {
-            "key": "pr_rate",
-            "env": "GIFT_REPO_MASTER_PR_RATE",
-            "type": "number",
-            "min": 1,
-            "default": 60,
-            "description": "The most `gh` calls a minute, however short the interval asks for."
-        },
-        {
             "key": "refresh",
             "env": "GIFT_REPO_MASTER_REFRESH",
             "type": "number",
             "min": 1,
             "default": 30,
             "description": "Seconds between full sweeps: a rescan for repositories that came or went, plus a git refresh of every row."
+        },
+        {
+            "key": "shell_command",
+            "env": "GIFT_REPO_MASTER_SHELL",
+            "type": "string",
+            "description": "Command behind `goto folder` — the shell started in the chosen repository. Without it, your login shell from $SHELL.",
+            "advanced": true
         },
         {
             "key": "vscode_command",
@@ -64,10 +55,19 @@
             "advanced": true
         },
         {
-            "key": "terminal_command",
-            "env": "GIFT_REPO_MASTER_TERMINAL",
+            "key": "claude_add_dir",
+            "env": "GIFT_REPO_MASTER_CLAUDE_ADD_DIR",
             "type": "string",
-            "description": "How to open a new terminal window when several repositories are opened at once, for terminals the built-in guesses miss. {cmd} is replaced with the shell command and {dir} with the repository.",
+            "default": "--add-dir",
+            "description": "The option `open with claude code` passes the repositories picked after the main one, once per repository. Set it to false to open the main project alone.",
+            "advanced": true
+        },
+        {
+            "key": "codex_add_dir",
+            "env": "GIFT_REPO_MASTER_CODEX_ADD_DIR",
+            "type": "string",
+            "default": "--add-dir",
+            "description": "The same for `open with codex`, for a version that spells the option differently.",
             "advanced": true
         }
     ]

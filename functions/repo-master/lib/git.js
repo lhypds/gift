@@ -38,8 +38,8 @@ function git(dir, args, timeout = 20000) {
 }
 
 /**
- * owner/repo and the host it lives on, read from the origin remote. Returns
- * null for a repository with no origin, or a URL we cannot make sense of.
+ * The owner/repo a remote URL names. Returns null for a repository with no
+ * origin, or a URL we cannot make sense of.
  */
 function parseRemote(url) {
     const trimmed = url.trim();
@@ -49,21 +49,15 @@ function parseRemote(url) {
     const match = trimmed.match(/^(?:[\w.+-]+@|[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?)([^:/]+)[:/]+(.+?)(?:\.git)?\/?$/i);
     if (!match) return null;
 
-    const host = match[1].replace(/^ssh\./, '');
     const slug = match[2].replace(/^:\d+\//, ''); // ssh://host:22/owner/repo
-    if (!slug.includes('/')) return null;
-    return { host, slug };
+    return slug.includes('/') ? slug : null;
 }
 
 /** The parts of a repository that do not change between refreshes. */
 async function identify(dir) {
     const remote = await git(dir, ['remote', 'get-url', 'origin']);
-    const parsed = remote.ok ? parseRemote(remote.stdout) : null;
-    return {
-        host: parsed ? parsed.host : null,
-        slug: parsed ? parsed.slug : null,
-        name: parsed ? parsed.slug : path.basename(dir),
-    };
+    const slug = remote.ok ? parseRemote(remote.stdout) : null;
+    return { name: slug || path.basename(dir) };
 }
 
 /** The checked-out branch, or the short commit when HEAD is detached. */

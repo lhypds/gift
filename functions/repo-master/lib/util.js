@@ -85,9 +85,4 @@ function formatRelative(time, now = Date.now()) {
     return `${Math.round(hours / 24)}d ago`;
 }
 
-/** Quote a string for `sh -c`. */
-function shellQuote(value) {
-    return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-module.exports = { limiter, expandHome, shortenHome, width, pad, truncate, formatRelative, shellQuote };
+module.exports = { limiter, expandHome, shortenHome, width, pad, truncate, formatRelative };

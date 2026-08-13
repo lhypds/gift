@@ -1,4 +1,10 @@
-// The menu behind `gift run`: print the function list and read a choice.
+// The menu behind `gift run`: show the function list and take a choice.
+//
+// With a terminal at both ends the list is live — `>` marks the row the keys are
+// pointing at, up/down or j/k move it, enter runs it, and a number key runs its
+// row straight away for anyone whose fingers already know the list. Everywhere
+// else, down a pipe or on a terminal too short to hold the list, there is no
+// cursor to move and the same question is asked in words instead.
 'use strict';
 
 const readline = require('node:readline');
@@ -14,16 +20,21 @@ function pad(text, width) {
     return text + ' '.repeat(Math.max(0, width - text.length));
 }
 
-/** One line per function: number, name, and as much description as fits. */
-function menuLines(available) {
+/**
+ * One line per function: the cursor, a number, the name, and as much description
+ * as fits. `cursor` is the row the keys are on, or -1 when nothing is pointing
+ * at anything — the list is then printed as it always was.
+ */
+function menuLines(available, cursor = -1) {
     const numberWidth = String(available.length).length;
     const nameWidth = Math.max(...available.map((f) => f.name.length));
-    // What is left for the description after '  1  name  ', one column short of
+    // What is left for the description after '> 1  name  ', one column short of
     // the full width so no line ends exactly at the edge and wraps.
     const room = menuWidth() - numberWidth - nameWidth - 7;
 
     return available.map((fn, index) => {
-        let line = `  ${pad(String(index + 1), numberWidth)}  ${pad(fn.name, nameWidth)}`;
+        const mark = index === cursor ? '>' : ' ';
+        let line = `${mark} ${pad(String(index + 1), numberWidth)}  ${pad(fn.name, nameWidth)}`;
         if (fn.description) {
             const description =
                 room > 12 && fn.description.length > room
@@ -86,6 +97,10 @@ function ask(question) {
             resolve(answer);
         };
         const giveUp = () => {
+            // Answering closes the interface too, and that close is not a giving
+            // up: readline has already ended the prompt line, so a newline here
+            // would leave a blank one behind.
+            if (done) return;
             process.stdout.write('\n'); // the prompt line has no newline yet
             finish(null);
         };
@@ -96,20 +111,138 @@ function ask(question) {
     });
 }
 
+/** Turn a chunk of stdin into key names, ignoring escape sequences we have no use for. */
+function decode(chunk) {
+    const keys = [];
+    let index = 0;
+
+    while (index < chunk.length) {
+        const rest = chunk.slice(index);
+
+        // Arrow keys, in both the normal and the application cursor forms.
+        const arrow = rest.match(/^\x1b(?:\[|O)([ABCD])/);
+        if (arrow) {
+            keys.push({ A: 'up', B: 'down', C: 'right', D: 'left' }[arrow[1]]);
+            index += arrow[0].length;
+            continue;
+        }
+        if (rest.startsWith('\x1b[')) {
+            // Some other sequence — a page key, a mouse report. Skip to its
+            // final byte rather than reading it as a run of letters.
+            const end = rest.slice(2).search(/[\x40-\x7e]/);
+            index += end === -1 ? rest.length : end + 3;
+            continue;
+        }
+
+        const character = chunk[index];
+        index++;
+        if (character === '\r' || character === '\n') keys.push('enter');
+        else if (character === '\x1b') keys.push('escape');
+        else if (character === '\x03') keys.push('ctrl-c');
+        else if (character === '\x04') keys.push('ctrl-d');
+        else keys.push(character);
+    }
+    return keys;
+}
+
+const HIDE_CURSOR = '\x1b[?25l';
+const SHOW_CURSOR = '\x1b[?25h';
+const CLEAR_LINE = '\x1b[K';
+const CLEAR_BELOW = '\x1b[0J';
+
 /**
- * Show the function list and let the user pick one. Keeps asking until the
- * answer names a function or backs out.
+ * The live list. Paints the rows and repaints them in place as the keys move the
+ * cursor, and leaves the chosen row on screen as a record of what was picked.
  *
- * @returns {Promise<{status: 'ok', fn: object} | {status: 'cancelled'}
- *          | {status: 'empty'} | {status: 'no-tty'}>}
+ * @returns {Promise<{status: 'ok', fn: object} | {status: 'cancelled'}>}
  */
-async function pick() {
-    // Without a terminal there is nobody to ask; the caller says so and exits.
-    if (!process.stdin.isTTY) return { status: 'no-tty' };
+function select(available) {
+    return new Promise((resolve) => {
+        const input = process.stdin;
+        const output = process.stdout;
 
-    const available = functions.list();
-    if (available.length === 0) return { status: 'empty' };
+        const digits = Math.min(available.length, 9);
+        const hint = ['up/down or j/k move', digits > 1 ? `1-${digits} pick` : null, 'enter run', 'q quit']
+            .filter(Boolean)
+            .join(' · ');
 
+        let cursor = 0;
+        let painted = 0;
+
+        // Whatever the menu would like to be, a line wider than the terminal
+        // wraps, and a wrapped line puts the repaint one row out for good.
+        const clip = (line) => {
+            const room = Math.max(1, (output.columns || 80) - 1);
+            return line.length > room ? `${line.slice(0, room - 1)}…` : line;
+        };
+
+        const draw = (withHint = true) => {
+            const lines = menuLines(available, cursor);
+            if (withHint) lines.push('', hint);
+
+            // Back up over the last paint and write the block again. Each line
+            // clears what was longer before it; CLEAR_BELOW takes the hint away
+            // on the last paint, when the block has grown shorter.
+            const body = lines.map((line) => `${clip(line)}${CLEAR_LINE}`).join('\n');
+            output.write(`${painted > 0 ? `\x1b[${painted}A` : ''}${body}\n${CLEAR_BELOW}`);
+            painted = lines.length;
+        };
+
+        let done = false;
+        const finish = (choice) => {
+            if (done) return;
+            done = true;
+            draw(false); // the hint has had its say; the chosen row stays
+            input.off('data', onData);
+            if (input.isTTY) input.setRawMode(false);
+            input.pause();
+            output.write(SHOW_CURSOR);
+            resolve(choice);
+        };
+
+        function onData(chunk) {
+            for (const key of decode(chunk)) {
+                if (done) return;
+                switch (key) {
+                    case 'up':
+                    case 'k':
+                        cursor = (cursor - 1 + available.length) % available.length;
+                        draw();
+                        break;
+                    case 'down':
+                    case 'j':
+                        cursor = (cursor + 1) % available.length;
+                        draw();
+                        break;
+                    case 'enter':
+                        finish({ status: 'ok', fn: available[cursor] });
+                        break;
+                    case 'q':
+                    case 'escape':
+                    case 'ctrl-c':
+                    case 'ctrl-d':
+                        finish({ status: 'cancelled' });
+                        break;
+                    default:
+                        if (/^[1-9]$/.test(key) && Number(key) <= available.length) {
+                            cursor = Number(key) - 1;
+                            finish({ status: 'ok', fn: available[cursor] });
+                        }
+                }
+            }
+        }
+
+        output.write(HIDE_CURSOR);
+        input.setRawMode(true);
+        input.resume();
+        input.setEncoding('utf8');
+        input.on('data', onData);
+        draw();
+    });
+}
+
+/** Ask in words: the list, then a question, until an answer names a function. */
+async function prompt(available) {
     console.log('functions:');
     for (const line of menuLines(available)) console.log(line);
     console.log('');
@@ -127,5 +260,29 @@ async function pick() {
     }
 }
 
+/**
+ * Show the function list and let the user pick one.
+ *
+ * @returns {Promise<{status: 'ok', fn: object} | {status: 'cancelled'}
+ *          | {status: 'empty'} | {status: 'no-tty'}>}
+ */
+async function pick() {
+    // Without a terminal there is nobody to ask; the caller says so and exits.
+    if (!process.stdin.isTTY) return { status: 'no-tty' };
+
+    const available = functions.list();
+    if (available.length === 0) return { status: 'empty' };
+
+    // The live list repaints itself by moving the cursor back up over its own
+    // rows, which only lands where it was aimed while every row is still on
+    // screen. Too many functions for the window, or a stdout that is not a
+    // terminal at all, and the question gets asked in words.
+    const tall = available.length + 3 > (process.stdout.rows || 24) - 1;
+    if (!process.stdout.isTTY || tall) return prompt(available);
+
+    console.log('functions:');
+    return select(available);
+}
+
 // `ask` is shared with `gift create`, which asks for a hook's fields one at a time.
-module.exports = { pick, ask };
+module.exports = { pick, ask, choose, menuLines, decode };

@@ -58,8 +58,13 @@ Other functions
 ---------------
 
 List functions with `gift help`.  
-Run `gift run` and choose a function, or invoke one directly with
-`gift <function-name>`.  
+Run `gift run` and choose a function — `>` marks the one the keys are on,
+up/down or j/k move it, enter runs it, and a number key runs its row straight
+away — or invoke one directly with `gift <function-name>`.
+
+`gift run 3` and `gift run repo` skip the menu: the first word after `run` is the
+answer to it, a number or a name or enough of one. Anything after that word, and
+any flag, is passed on to the function itself — `gift run 3 --once`.  
 
 
 Configuration
