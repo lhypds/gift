@@ -16,6 +16,8 @@ const MAX_UNTRACKED_BYTES = 512 * 1024;
 const MAX_UNTRACKED_FILES = 300;
 /** How many changed files are stat'd to find the "last updated" time. */
 const MAX_STAT_FILES = 200;
+/** How many lines of a patch the preview keeps; the rest is a note. */
+const MAX_DIFF_LINES = 5000;
 
 const MAX_BUFFER = 32 * 1024 * 1024;
 
@@ -197,4 +199,71 @@ async function inspect(dir, exclude = []) {
     };
 }
 
-module.exports = { git, identify, inspect, parseRemote };
+/**
+ * The working-tree changes of one repository, as lines ready to be shown.
+ *
+ * This is the same ground `inspect` covers, told at length instead of counted:
+ * the patch against HEAD, and then the untracked files, which no patch mentions
+ * because git has never seen them. Nested repositories are left out of both, the
+ * way they are left out of the row.
+ *
+ * @param {string} dir Repository root.
+ * @param {string[]} [exclude] Absolute paths of repositories nested inside it.
+ * @returns {Promise<{lines: string[], error: string|null}>}
+ */
+async function diff(dir, exclude = []) {
+    const [tracked, status] = await Promise.all([
+        git(dir, ['diff', '--no-color', '--no-ext-diff', '--ignore-submodules=dirty', 'HEAD']),
+        git(dir, ['status', '--porcelain=v1', '-uall', '-z', '--ignore-submodules=dirty']),
+    ]);
+
+    // An unborn HEAD has nothing to diff against, as in `inspect`.
+    const patch = tracked.ok ? tracked : await git(dir, ['diff', '--no-color', '--no-ext-diff', '--cached']);
+    if (!patch.ok && !status.ok) {
+        // Whatever is wrong, status says it plainly — the diff of a folder that
+        // is not a repository complains about the wrong thing entirely.
+        const reason = status.stderr.split('\n')[0] || patch.stderr.split('\n')[0];
+        return { lines: [], error: reason || 'git diff failed' };
+    }
+
+    // Tabs are expanded here rather than left to the terminal: the box the
+    // preview is drawn in counts characters, and a tab it counted as one would
+    // push the line through the right-hand border.
+    const lines = patch.ok
+        ? patch.stdout.split('\n').map((line) => line.replace(/\r$/, '').replace(/\t/g, '    '))
+        : [];
+    while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+
+    // Status answered and the diff did not: say so, rather than let the
+    // untracked files below stand in for the whole of what changed.
+    if (!patch.ok) lines.push(`error: ${patch.stderr.split('\n')[0] || 'git diff failed'}`);
+
+    const untracked = status.ok
+        ? parsePorcelain(status.stdout).filter((entry) => {
+              if (!entry.untracked || entry.path.endsWith('/')) return false;
+              const absolute = path.join(dir, entry.path);
+              return !exclude.some((nested) => isInside(nested, absolute));
+          })
+        : [];
+
+    if (untracked.length > 0) {
+        if (lines.length > 0) lines.push('');
+        lines.push(`untracked (${untracked.length}):`);
+        for (const entry of untracked.slice(0, MAX_UNTRACKED_FILES)) {
+            const count = await countLines(path.join(dir, entry.path));
+            lines.push(`+ ${entry.path}${count > 0 ? `  ${count} ${count === 1 ? 'line' : 'lines'}` : ''}`);
+        }
+        const rest = untracked.length - MAX_UNTRACKED_FILES;
+        if (rest > 0) lines.push(`  … ${rest} more`);
+    }
+
+    if (lines.length > MAX_DIFF_LINES) {
+        const dropped = lines.length - MAX_DIFF_LINES;
+        lines.length = MAX_DIFF_LINES;
+        lines.push('', `… ${dropped} more lines`);
+    }
+
+    return { lines, error: null };
+}
+
+module.exports = { git, identify, inspect, diff, parseRemote };

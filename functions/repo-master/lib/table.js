@@ -7,12 +7,15 @@
 'use strict';
 
 const { width, pad, truncate, formatRelative, shortenHome } = require('./util.js');
+const { overlay } = require('./modal.js');
 
 /** Each colour as a truecolor triple and as its nearest xterm-256 shade. */
 const ORANGE = { rgb: [217, 119, 87], xterm: 173 }; // Claude's orange
 const CURSOR_GREY = { rgb: [214, 214, 214], xterm: 252 }; // the row under the cursor
 const SELECTED_GREY = { rgb: [168, 168, 168], xterm: 248 }; // rows picked with space
 const INK = { rgb: [32, 32, 32], xterm: 235 }; // text drawn on top of a bar
+const GREEN = { rgb: [87, 166, 106], xterm: 71 }; // an added line in the preview
+const RED = { rgb: [197, 90, 90], xterm: 167 }; // a removed one
 
 const RESET = '\x1b[0m';
 
@@ -33,6 +36,8 @@ function createPalette(stream) {
     return {
         enabled,
         orange: wrap(fg(ORANGE)),
+        added: wrap(fg(GREEN)),
+        removed: wrap(fg(RED)),
         dim: wrap('\x1b[2m'),
         bold: wrap('\x1b[1m'),
         attentionBar: wrap(barCode(ORANGE)),
@@ -146,14 +151,28 @@ function viewport(count, cursor, scroll, budget) {
  * Build the whole screen as an array of lines.
  *
  * @param {object} state Everything the table draws: the rows, the cursor, the
- *   selection, the menu and the last message. `state.scroll` is written back,
- *   because only the renderer knows how many rows fit.
+ *   selection, the menu, the preview and the last message. `state.scroll` is
+ *   written back, because only the renderer knows how many rows fit.
  * @param {object} palette From createPalette().
  * @param {{columns: number, rows: number}} size
  */
 function frame(state, palette, size) {
     const now = Date.now();
     const available = Math.max(40, size.columns);
+
+    // The preview is a box over the finished frame, whichever frame that is. Its
+    // title is written here, from the row as it stands now rather than as it
+    // stood when the box opened: the row goes on refreshing underneath, and the
+    // heading saying so is the hint that the patch itself wants an `r`.
+    const done = (lines) => {
+        if (state.mode !== 'preview' || !state.preview) return lines;
+        const repo = state.preview.repo;
+        const counts = diffCells(repo);
+        state.preview.title = [repo.name, repo.branch || '…', counts.long === '-' ? null : counts.long]
+            .filter(Boolean)
+            .join(' · ');
+        return overlay(lines, state.preview, palette, size);
+    };
 
     const rowCells = state.rows.map((repo) => {
         const diff = diffCells(repo);
@@ -224,7 +243,11 @@ function frame(state, palette, size) {
     } else if (state.interactive) {
         tail.push(
             palette.dim(
-                fit(['up/down move', 'space select', 'enter run', 'esc clear', 'r refresh', 'q quit'].join(' · ')),
+                fit(
+                    ['up/down move', 'space select', 'enter run', 'd preview', 'esc clear', 'r refresh', 'q quit'].join(
+                        ' · ',
+                    ),
+                ),
             ),
         );
     }
@@ -235,14 +258,19 @@ function frame(state, palette, size) {
     if (message) tail.push(palette.orange(fit(message)));
 
     if (state.rows.length === 0) {
-        return [...head, palette.dim(fit(`  no git repositories under ${shortenHome(state.root)}`)), ...tail];
+        return done([...head, palette.dim(fit(`  no git repositories under ${shortenHome(state.root)}`)), ...tail]);
     }
 
     // Whatever is left over after the fixed parts belongs to the rows, minus a
     // line for the "there is more" note when they do not all fit.
     const spare = Math.max(1, size.rows - 1 - head.length - tail.length);
     const budget = state.rows.length > spare ? Math.max(1, spare - 1) : spare;
-    const view = viewport(state.rows.length, state.mode === 'table' ? state.cursor : -1, state.scroll || 0, budget);
+
+    // The menu names the repositories it is about and takes the cursor bar with
+    // it; the preview names the one it is about in its title and leaves the bar
+    // where it is, on the row the box belongs to.
+    const pointing = state.mode !== 'menu';
+    const view = viewport(state.rows.length, pointing ? state.cursor : -1, state.scroll || 0, budget);
     state.scroll = view.start;
 
     // The repository picked first is the main project and wears no mark; the ones
@@ -252,7 +280,7 @@ function frame(state, palette, size) {
     const body = [];
     for (let index = view.start; index < view.end; index++) {
         const repo = state.rows[index];
-        const cursor = state.mode === 'table' && index === state.cursor;
+        const cursor = pointing && index === state.cursor;
         const selected = state.selected.has(repo.dir);
         const gutter = `${cursor ? '>' : ' '}${selected && repo.dir !== mainDir ? '+' : ' '}`;
         const text = fit(`${gutter}${joinRow(rowCells[index], widths)}`);
@@ -276,7 +304,7 @@ function frame(state, palette, size) {
         body.push(palette.dim(fit(`  … ${more.join(' · ')}`)));
     }
 
-    return [...head, ...body, ...tail];
+    return done([...head, ...body, ...tail]);
 }
 
 module.exports = { createPalette, frame, needsAttention };

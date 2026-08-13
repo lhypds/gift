@@ -9,9 +9,9 @@ A folder full of half-finished projects is hard to hold in your head. repo-maste
 finds every repository under it — nested checkouts and submodules included —
 and keeps one table up to date: which branch each one is on, whether the working
 tree has changes, and how many lines that is.
-Rows that want attention wear an orange bar. Pick them and press enter to go to
-one's folder, or to open them in VS Code, Claude Code or Codex — the first one
-picked is the main project, and the rest come along with it.
+Rows that want attention wear an orange bar. Press d to read what changed, and
+enter to go to one's folder, or to open them in VS Code, Claude Code or Codex —
+the first one picked is the main project, and the rest come along with it.
 
 ```
 Repo Master v0.0.1
@@ -22,7 +22,7 @@ Watching ~/projects · 12 repos · 3 changed · 2 open PRs
  +gcc3/gcc3-content    ./gcc3               master  no changes   -             -
     +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
 ---------------------------------------------------------------------------------------------------------
-up/down move · space select · enter run · esc clear · r refresh · q quit
+up/down move · space select · enter run · d preview · esc clear · r refresh · q quit
 ```
 
 
@@ -36,6 +36,7 @@ Files
 | `lib/git.js`    | Branch, working-tree changes, diff size and the time of the last change      |
 | `lib/watch.js`  | Hearing about edits, with a timer as the fallback                            |
 | `lib/table.js`  | The table itself, and which rows are orange                                  |
+| `lib/modal.js`  | The box the preview is drawn in, over the table                              |
 | `lib/screen.js` | The alternate screen and the keys                                            |
 | `lib/actions.js`| Opening the chosen repositories in VS Code, Claude Code or Codex             |
 | `config.schema.json` | The settings this function has, and their defaults — see `functions.repo-master` in config.json |
@@ -78,6 +79,7 @@ Keys
 | up / down, k / j| Move the cursor                                             |
 | space           | Add the row to the selection and step down — the first one added is the main project, the rest are marked `+` |
 | enter           | Open the command menu for the selection, or the row under the cursor |
+| d               | Preview what changed in the row under the cursor            |
 | esc             | Clear the selection, or close the menu                      |
 | r               | Rescan and refresh everything now                           |
 | q, Ctrl-C       | Quit                                                        |
@@ -121,6 +123,42 @@ one:
 | `codex_command`    | `codex`  | `open with codex`                              |
 | `claude_add_dir`   | `--add-dir` | How `claude` is told about the repositories added to the main one, once each. `false` opens the main project alone |
 | `codex_add_dir`    | `--add-dir` | The same for `codex`, for a version that spells the option differently |
+
+
+The preview
+-----------
+
+`d` opens a box over the table holding the row's changes: the patch against HEAD,
+and then the untracked files, which no patch mentions because git has never seen
+them. Nested repositories are left out of both, the way they are left out of the
+row — they have a row of their own, and a `d` of their own.
+
+```
+    +- lhypds/gift · main · +1203 lines -30 lines ----------------------------+
+    | diff --git a/cli.js b/cli.js                                            |
+    | @@ -1,4 +1,5 @@                                                         |
+    |  'use strict';                                                          |
+    | -const { run } = require('./functions.js');                             |
+    | +const { run, list } = require('./functions.js');                       |
+    +- 1-5 of 87 · up/down scroll · space page · r reload · esc close --------+
+```
+
+| Key             | Does                                                        |
+|-----------------|-------------------------------------------------------------|
+| up / down, k / j| Scroll a line                                               |
+| space           | Turn the page                                               |
+| g, G            | Jump to the top, or to the end                              |
+| r               | Read the changes again                                      |
+| esc, q, d       | Close the box                                               |
+
+The title carries the repository, its branch and the size of the diff, and keeps
+up with the table underneath. The patch does not: it is the one read when the box
+opened, because a page of text moving under somebody reading it is no kindness. A
+file saved while you read it moves the title and leaves the text alone — `r` then
+fetches the rest.
+
+A patch longer than 5000 lines is cut, with a note saying how much was left off.
+Binary files are named rather than printed, as git names them.
 
 
 Parameters

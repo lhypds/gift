@@ -4,8 +4,8 @@
 // It finds the repositories (nested checkouts and submodules included), watches
 // their working trees, and paints the lot as a table that keeps itself up to
 // date. Rows that want attention wear an orange bar. Pick rows with the arrow
-// keys, add more with space, and press enter to go to a repository's folder or
-// open it in VS Code, Claude Code or Codex.
+// keys, add more with space, press d to read what changed, and press enter to go
+// to a repository's folder or open it in VS Code, Claude Code or Codex.
 'use strict';
 
 const fs = require('node:fs');
@@ -48,9 +48,13 @@ Options:
   -h, --help           Show this help
 
 Keys:
-  up/down or k/j   move            space   add to the selection
-  enter            run a command   esc     clear the selection
-  r                refresh now     q       quit
+  up/down or k/j   move                 space   add to the selection
+  enter            run a command        d       preview what changed
+  esc              clear the selection  r       refresh now
+  q                quit
+
+The preview is a box over the table holding the row's diff: up/down or j/k scroll
+it, space turns the page, r reads it again and esc closes it.
 
 The first repository picked with space is the main project and wears no mark; the
 ones after it are marked +. Every command opens the main project, and claude and
@@ -144,6 +148,7 @@ async function main(argv) {
         mode: 'table',
         menuIndex: 0,
         menuTargets: [],
+        preview: null,
         actions: actionsLib.actions(process.env),
         notes: { watch: '' },
         message: '',
@@ -297,6 +302,90 @@ async function main(argv) {
         draw();
     };
 
+    // The preview: what a repository's diff column is actually made of, in a box
+    // over the table. The table behind it keeps refreshing; the patch does not,
+    // because a page of text moving under somebody reading it is no kindness.
+    // `r` asks for it again.
+    let previewToken = 0;
+    const loadPreview = (repo) => {
+        const token = ++previewToken;
+        state.preview.loading = true;
+        draw();
+
+        // Outside the limiter on purpose: this is one repository somebody is
+        // waiting on, and it should not queue behind a sweep of all the others.
+        gitLib
+            .diff(repo.dir, repo.nested)
+            .catch((failure) => ({ lines: [], error: failure.message || String(failure) }))
+            .then((result) => {
+                // A slower read of a repository already closed, or replaced by a
+                // newer one, has nothing to say.
+                if (token !== previewToken || state.preview?.repo !== repo) return;
+                state.preview.loading = false;
+                state.preview.lines = result.error
+                    ? [`error: ${result.error}`]
+                    : result.lines.length > 0
+                      ? result.lines
+                      : ['no changes'];
+                draw();
+            });
+    };
+
+    const openPreview = () => {
+        const repo = rows[state.cursor];
+        if (!repo) return;
+        state.mode = 'preview';
+        state.message = '';
+        // The title is the renderer's, and so are `scroll` and `view` once it has
+        // seen how tall the box came out.
+        state.preview = { repo, title: '', lines: [], scroll: 0, view: 1, loading: true };
+        loadPreview(repo);
+    };
+
+    const closePreview = () => {
+        state.mode = 'table';
+        state.preview = null;
+        draw();
+    };
+
+    const onPreviewKey = (key) => {
+        const panel = state.preview;
+        if (!panel || key === 'escape' || key === 'q' || key === 'd') {
+            closePreview();
+            return;
+        }
+        if (key === 'r') {
+            loadPreview(panel.repo);
+            return;
+        }
+
+        // Out-of-range scrolling is left to the renderer, which is the only part
+        // that knows how many lines the box is showing.
+        const page = Math.max(1, panel.view - 1);
+        switch (key) {
+            case 'up':
+            case 'k':
+                panel.scroll--;
+                break;
+            case 'down':
+            case 'j':
+                panel.scroll++;
+                break;
+            case 'space':
+                panel.scroll += page;
+                break;
+            case 'g':
+                panel.scroll = 0;
+                break;
+            case 'G':
+                panel.scroll = panel.lines.length;
+                break;
+            default:
+                return;
+        }
+        draw();
+    };
+
     const onMenuKey = (key) => {
         if (key === 'escape' || key === 'q') {
             state.mode = 'table';
@@ -339,6 +428,10 @@ async function main(argv) {
             onMenuKey(key);
             return;
         }
+        if (state.mode === 'preview') {
+            onPreviewKey(key);
+            return;
+        }
 
         switch (key) {
             case 'q':
@@ -360,6 +453,9 @@ async function main(argv) {
                 moveCursor(1); // space walks down the list, the way ticking boxes does
                 return;
             }
+            case 'd':
+                openPreview();
+                return;
             case 'enter': {
                 const chosen = targets();
                 if (chosen.length === 0) return;
