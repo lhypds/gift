@@ -278,8 +278,15 @@ down with it. The box stays up and fills in as they finish:
 ```
 
 Green is a repository that committed and pushed, grey one that had nothing to do,
-orange one that could not. Nothing else in repo-master answers while it runs;
-`esc` closes the box afterwards, and the table refreshes itself.
+orange one that could not. Nothing else in repo-master answers while it runs.
+
+When it is over, a box with nothing in it but work that went as asked has been
+read by the time it is drawn — the row says `pushed`, and that is the whole of it
+— so it takes itself away after three seconds and leaves what it came to under
+the table, where it is a line like any other and fades like one. A failure is the
+one thing in a box worth going back over, so a box with one in it stays until
+`esc`; so does one being scrolled, because that is somebody reading rather than
+somebody waiting. Either way the table refreshes itself afterwards.
 
 Nothing to commit is not a failure — a repository whose commits never left the
 machine is pushed anyway. One with neither is left alone rather than made to

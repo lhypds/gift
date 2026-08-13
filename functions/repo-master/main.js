@@ -539,11 +539,38 @@ async function main(argv) {
         draw();
     };
 
+    let reportTimer = null;
+
+    /** Take the box down, and leave under the table the one line it came to. */
+    const closeReport = () => {
+        const panel = state.report;
+        if (reportTimer) clearTimeout(reportTimer);
+        reportTimer = null;
+        state.mode = 'table';
+        state.report = null;
+        if (panel?.summary) say(panel.summary);
+        draw();
+    };
+
+    /** It was going to close itself; somebody started reading it. */
+    const holdReport = () => {
+        if (reportTimer) clearTimeout(reportTimer);
+        reportTimer = null;
+    };
+
     // Committing, fetching and pulling are the things the table does itself
     // rather than hand the terminal to somebody else for, so they say how they
     // are getting on: a line per repository in a box, rewritten as each one
-    // moves. The box stays up afterwards to be read; the summary goes under it,
-    // where it is a line like any other and fades like one — see say().
+    // moves.
+    //
+    // What the box does when the work is over depends on what came of it. One
+    // with nothing but good news in it has been read by the time it is drawn —
+    // the row says `fetched`, and that is the whole of it — so it takes itself
+    // away after the three seconds any other line about something that just
+    // happened gets, and leaves the summary under the table in its place. A
+    // failure is the one thing in a box worth going back over, so a box with one
+    // in it waits to be closed instead. So does one somebody is scrolling: that
+    // is reading rather than waiting, and reading is not to be interrupted.
     //
     // @param {string} title What the box is called.
     // @param {string} label What the summary line calls the work afterwards.
@@ -577,7 +604,10 @@ async function main(argv) {
             counted('skipped') > 0 ? `${counted('skipped')} ${words.skipped}` : null,
             counted('failed') > 0 ? `${counted('failed')} failed` : null,
         ].filter(Boolean);
-        say(`${label}: ${summary.join(' · ') || 'nothing to do'}`);
+        // The line the box comes to, said when it goes rather than now: while it
+        // is up it is already saying that and more, a repository at a time.
+        state.report.summary = `${label}: ${summary.join(' · ') || 'nothing to do'}`;
+        if (counted('failed') === 0) reportTimer = setTimeout(closeReport, MESSAGE_MS);
         draw();
 
         // Every one of those repositories may have just changed underneath the
@@ -1140,9 +1170,7 @@ async function main(argv) {
     const onReportKey = (key) => {
         const panel = state.report;
         if (!panel || key === 'escape' || key === 'q' || key === 'enter') {
-            state.mode = 'table';
-            state.report = null;
-            draw();
+            closeReport();
             return;
         }
 
@@ -1165,6 +1193,7 @@ async function main(argv) {
             default:
                 return;
         }
+        holdReport();
         draw();
     };
 
@@ -1424,6 +1453,7 @@ async function main(argv) {
     clearInterval(sweeper);
     if (renderTimer) clearTimeout(renderTimer);
     if (messageTimer) clearTimeout(messageTimer);
+    if (reportTimer) clearTimeout(reportTimer);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);
     watchers.close();
