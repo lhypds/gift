@@ -210,9 +210,10 @@ function promptPanel(state) {
     // The list is asked for the value as it stands, because for some questions
     // the answer is half of what is being listed: a branch being typed is a
     // folder appearing, letter by letter, under the line it is typed on.
-    const listed = labelled(
-        field.list ? field.list(field.value) : field.targets.map((repo) => ({ name: repo.name, text: changeCell(repo) })),
-    );
+    const entries = field.list
+        ? field.list(field.value)
+        : field.targets.map((repo) => ({ name: repo.name, text: changeCell(repo) }));
+    const listed = labelled(entries);
     const count = `${field.targets.length} ${field.targets.length === 1 ? 'repo' : 'repos'}`;
 
     return {
@@ -221,7 +222,10 @@ function promptPanel(state) {
         // The field counts its caret in characters, as editing does; the box
         // draws in columns, which is not the same thing in every language.
         caret: { line: 0, column: width(field.value.slice(0, field.column)) },
-        paint: (line, index) => (index >= 2 ? 'dim' : null),
+        // Grey unless the row asked for a colour of its own: a branch name none of
+        // this repository's branches match is the one thing in the box worth
+        // noticing before enter, and it says so by wearing the orange.
+        paint: (line, index) => (index < 2 ? null : entries[index - 2]?.tone || 'dim'),
         status: field.hint || count,
         footer: field.footer,
         width: PROMPT_WIDTH,
@@ -577,7 +581,7 @@ function frame(state, palette, size) {
                         'enter menu',
                         '/ search',
                         state.filter ? 'esc clear search' : 'esc clear',
-                        'r refresh',
+                        'R refresh',
                         'q quit',
                     ],
                     tableWidth,

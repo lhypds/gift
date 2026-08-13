@@ -12,9 +12,10 @@ and keeps one table up to date: which branch each one is on, whether the working
 tree has changes, and how many lines that is.
 Rows that want attention wear an orange bar. Press enter for the menu of what may
 be done to them — open one in an editor or an agent, read its diff, fetch, pull,
-push, branch a worktree off it, commit and push the lot, stash or discard what is
-uncommitted, delete a folder outright — or press the key the menu prints beside
-the command you wanted. `/` finds a repository in a folder too full to read.
+push, switch or make a branch, merge, rebase, branch a worktree off it, commit and
+push the lot, stash or discard what is uncommitted, delete a folder outright — or
+press the key the menu prints beside the command you wanted. `/` finds a
+repository in a folder too full to read.
 
 ```
 repo master v0.0.1
@@ -31,13 +32,21 @@ watching ~/projects · 12 repos · 3 changed · 2 open PRs
     +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
 ---------------------------------------------------------------------------------------------------------
 
-up/down move · space select · enter menu · / search · esc clear · r refresh · q quit
+up/down move · space select · enter menu · / search · esc clear · R refresh · q quit
 ```
 
 The foot is the table's own keys and nothing else. Every command's key is printed
 beside its row in the menu, which is where the list of them belongs: repeating
 them along the bottom filled the line up and then cut it short, saying less than
 the menu says in full.
+
+Under them, an orange line when there is something to say: what a command did, or
+what it would not do. It is there for three seconds and then it is not — what is
+said there is what has just happened, and a line about a push that finished a
+minute ago has stopped being that, leaving something to read past on the way to
+the table it sits under. A row that says `error` explains itself on the same line
+while the cursor is on it, which is not news but a fact about the row, and stays
+for as long as the cursor does.
 
 
 Files
@@ -47,7 +56,7 @@ Files
 |----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `main.js`            | Entry point — run through `gift repo-master`, or directly with `node`                                               |
 | `lib/repos.js`       | Finding the repositories, working out which sits inside which, and which of them a search leaves showing            |
-| `lib/git.js`         | Branch, working-tree changes, diff size, the last change, committing, pushing, stashing, discarding, worktrees      |
+| `lib/git.js`         | Branch, working-tree changes, diff size, the last change, and the git behind every command that runs one            |
 | `lib/watch.js`       | Hearing about edits, with a timer as the fallback                                                                   |
 | `lib/table.js`       | The table itself, which rows are orange, and what goes in each box                                                  |
 | `lib/modal.js`       | The box they are all drawn in, over the table                                                                       |
@@ -102,11 +111,15 @@ Keys
 | P                | Push what everything picked has already committed, after a box asking whether to                              |
 | s                | Stash the changes of everything picked, after a box asking whether to                                         |
 | u                | Discard the changes of everything picked, after a box asking in earnest                                       |
+| b                | Switch everything picked to a branch, after a box asking which                                                |
+| n                | Make a branch off what is checked out, in everything picked, after a box asking its name                      |
+| m                | Merge a branch into what is checked out, in everything picked, after a box asking which                       |
+| r                | Rebase what is checked out onto a branch, in everything picked, after a box asking which                      |
 | t then a         | Add a worktree to everything picked, after a box asking for the branch                                        |
 | D                | Delete the folders of everything picked, after a box asking in earnest                                        |
 | /                | Search: narrow the table to the repositories matching what you type                                           |
 | esc              | Clear the search, then the selection — or close whichever box is open                                         |
-| r                | Rescan and refresh everything now                                                                             |
+| R                | Rescan and refresh everything now                                                                             |
 | q, Ctrl-C        | Quit                                                                                                          |
 | mouse wheel      | Move the cursor through the table and the menu, and scroll the diff and the reports                           |
 | click            | Enter — except in the delete and discard boxes, which the keyboard alone answers                              |
@@ -153,10 +166,14 @@ row as well. The commands are:
 | push                  | `P`     | `git push` alone, in every picked repository — see below                             |
 | stash                 | `s`     | `git stash push -u` in every picked repository — see below                           |
 | discard changes       | `u`     | throws the same changes away instead — see below                                     |
+| switch branch         | `b`     | `git switch` in every picked repository — see below                                  |
+| new branch            | `n`     | `git switch -c` in every picked repository — see below                               |
+| merge                 | `m`     | `git merge --no-edit` in every picked repository — see below                         |
+| rebase                | `r`     | `git rebase` in every picked repository — see below                                  |
 | worktree add          | `t` `a` | `git worktree add` beside every picked repository — see below                        |
 | delete repo folder    | `D`     | removes the folder of every picked repository — see below                            |
 
-The number keys reach the first nine rows. The last five are past them on purpose:
+The number keys reach the first nine rows. The last nine are past them on purpose:
 every one of them carries a key of its own, while `commit & push` has no other way
 in. That is also what keeps `push` under `commit & push` rather than beside `pull`,
 where it belongs — and it reads well enough there: commit and push, or push what
@@ -192,8 +209,8 @@ to what should be in the list, and where you have set one it is left alone.
 
 `e` is the one command that asks nothing and takes no time: a window is only a
 window, and nothing it opens cannot be closed again. `f`, `p`, `P`, `s`, `u` and
-`D` all put a box between the keystroke and the work, and the rest of the menu is
-its own asking.
+`D` all put a box between the keystroke and the work; `b`, `n`, `m` and `r` put a
+box there to be typed in; and the rest of the menu is its own asking.
 
 `goto folder` is the same borrowing with a shell as the tool. No program can move
 the shell that started it, so the folder is reached by a shell of its own
@@ -384,6 +401,72 @@ What came of each is reported in the same kind of box committing uses:
     | gcc3/content-hub  stashing…                                      |
     +- 1 of 2 done · working… ----------------------------------------+
 ```
+
+
+Branches
+--------
+
+Four keys take a branch name, and all four ask for it in the same box: `b`
+switches to a branch, `n` makes one off whatever is checked out, `m` merges a
+branch into what is checked out, and `r` rebases what is checked out onto another.
+
+The box is the point of them. One name is typed once and run against every picked
+repository, and every picked repository is a different answer to it — so the list
+under the line says which branch each one is on, which way the work runs, and
+whether that repository has heard of the name at all:
+
+```
+    +- Switch branch --------------------------------------------------+
+    | feature-x_                                                       |
+    |                                                                  |
+    | lhypds/gift       main → feature-x  · here                       |
+    | gcc3/content-hub  main → feature-x  · on origin                  |
+    | lhypds/conf       master → feature-x  · no such branch           |
+    +- 3 repos · enter switch · esc back ------------------------------+
+```
+
+`here` is a branch that repository has; `on origin` is one only origin has, which
+`b` makes here and sets to follow — what anybody typing a colleague's branch name
+meant. `no such branch` is orange, and it is the row worth seeing before enter
+rather than in the report afterwards.
+
+A name is typed a letter at a time, and every letter of `feature-x` before the
+last is a name nothing has, so a name still on its way says how many branches it
+could still become — `main → fea  · 2 start with it` — and only a name that has
+left them all behind is marked as missing. With nothing typed at all, each row
+says how many branches there are to name.
+
+`m` and `r` mark the repositories with uncommitted changes as well, which is where
+either goes wrong, and both refuse the branch already checked out rather than
+merging or rebasing a branch onto itself.
+
+Then the same report box the rest of the table uses:
+
+```
+    +- merge · feature-x ----------------------------------------------+
+    | lhypds/gift       merged feature-x 3 commits                     |
+    | gcc3/content-hub  already has feature-x                          |
+    | lhypds/conf       conflicted · 2 files to resolve, or git merge --abort |
+    +- 1 merged · 1 already had it · 1 failed ------------------------+
+```
+
+A merge or a rebase that hits a conflict is **not** undone. It stops where git
+stopped it, with the tree half-merged and MERGE_HEAD or a rebase standing — which
+is git's normal way of asking for a hand — and the row says how many files are
+waiting and names the way back out. Unpicking that on your behalf would be the
+wrong answer: a merge you asked for is worth resolving, and a table is not the
+thing to decide otherwise. Resolve it in the repository, or `git merge --abort`
+and `git rebase --abort` there.
+
+Everything else is git's to refuse and passed on word for word: a branch name
+already taken, a merge into a tree too dirty to merge into, a rebase of a branch
+with uncommitted work under it. `n` in a repository with no commit yet makes the
+branch all the same — there is an unborn one for git to rename — and `b` there has
+nothing to switch to.
+
+`r` is rebase rather than refresh, which is `R`. Refreshing is the one of the two
+that can wait: the table sweeps itself every half minute and watches every working
+tree besides, so `R` only ever asks for the sweep sooner.
 
 
 The diff

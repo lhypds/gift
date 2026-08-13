@@ -713,15 +713,252 @@ async function discard(dir, nested = []) {
 }
 
 /**
+ * What a typed branch name means in this repository. The branch of that name if
+ * it has one; origin's if only origin has heard of it, which is what anybody
+ * typing a colleague's branch name meant; and null when neither has one.
+ *
+ * The four commands that take a branch name all ask this first, and say which
+ * answer they got — a name that is here and a name that is only on origin are
+ * two different pieces of work, and being told which is half of trusting it.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} name The branch name as it was typed.
+ * @returns {Promise<{ref: string, local: boolean}|null>}
+ */
+async function findBranch(dir, name) {
+    const here = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+    if (here.ok && here.stdout.trim()) return { ref: name, local: true };
+
+    const there = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${name}`]);
+    if (there.ok && there.stdout.trim()) return { ref: `origin/${name}`, local: false };
+
+    return null;
+}
+
+/**
+ * Every branch name a repository has, its own and origin's, for the box that asks
+ * which one is meant: it marks the repositories a typed name is in as it is
+ * typed, so `b` on a folder of them shows which will move before enter does
+ * anything.
+ *
+ * One process for both lists, and one per repository per box rather than per
+ * keystroke — a box may be about thirty repositories, and thirty is a whole
+ * sweep's worth of git already.
+ *
+ * Never throws, and a repository that will not answer has no branches rather than
+ * an error: this is what a box says while it waits, not work anybody asked for.
+ *
+ * @param {string} dir Repository root.
+ * @returns {Promise<{local: string[], remote: string[]}>}
+ */
+async function branches(dir) {
+    // The whole refname rather than the short one: shortened, `refs/heads/main`
+    // and `refs/remotes/origin/main` are both `main` — and `origin/HEAD`, which is
+    // a pointer at origin's default branch rather than a branch anybody named, is
+    // shortened to `origin` and reads exactly like a branch called origin.
+    const found = await git(dir, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes/origin']);
+    if (!found.ok) return { local: [], remote: [] };
+
+    const local = [];
+    const remote = [];
+    for (const line of found.stdout.split('\n')) {
+        const ref = line.trim();
+        if (ref.startsWith('refs/heads/')) local.push(ref.slice('refs/heads/'.length));
+        else if (ref.startsWith('refs/remotes/origin/')) {
+            const name = ref.slice('refs/remotes/origin/'.length);
+            if (name !== 'HEAD') remote.push(name);
+        }
+    }
+    return { local, remote };
+}
+
+/**
+ * Check a branch out. One that is here is switched to; one only origin has is
+ * made here first and set to follow it, which is `git switch --track`; a name
+ * neither has heard of is not a branch to switch to, and `new branch` is the
+ * command for that instead.
+ *
+ * What git does with the changes in the working tree is git's own business: it
+ * carries them across where it can and refuses where it cannot, and its refusal
+ * is passed on word for word.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} name The branch to check out.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function switchBranch(dir, name) {
+    const current = await currentBranch(dir);
+    if (current === name) return { ok: true, changed: false, text: `already on ${name}` };
+
+    const found = await findBranch(dir, name);
+    if (!found) return { ok: false, changed: false, text: `no branch ${name} here or on origin` };
+
+    const done = found.local
+        ? await git(dir, ['switch', name])
+        : await git(dir, ['switch', '--track', found.ref]);
+    if (!done.ok) return { ok: false, changed: false, text: firstLine(done.stderr) || 'switch failed' };
+
+    return {
+        ok: true,
+        changed: true,
+        text: `on ${name}${found.local ? '' : ` · new here, following ${found.ref}`}`,
+    };
+}
+
+/**
+ * Make a branch off whatever is checked out, and check it out. A name already
+ * taken is git's to refuse — that branch is somewhere, with commits on it, and
+ * repo-master is not the thing to decide what happens to them — and `switch
+ * branch` is the command for a branch that already exists.
+ *
+ * A repository with no commit yet has a branch all the same: the unborn one HEAD
+ * points at, which git renames rather than refusing.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} name The branch to make.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function createBranch(dir, name) {
+    const from = await currentBranch(dir);
+    const head = await git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+    const born = head.ok && Boolean(head.stdout.trim());
+
+    const made = await git(dir, ['switch', '-c', name]);
+    if (!made.ok) return { ok: false, changed: false, text: firstLine(made.stderr) || 'branch failed' };
+
+    // A branch off nothing is not "off main" however main is what HEAD said: there
+    // were no commits to branch from, and the new name is where the first will go.
+    return { ok: true, changed: true, text: born ? `on ${name} · new, off ${from}` : `on ${name} · new, nothing on it yet` };
+}
+
+/**
+ * How many commits `HEAD` moved on by, for the commands that move it. An empty
+ * string where it did not move at all, or where git will not count.
+ */
+async function moved(dir, before) {
+    if (!before) return '';
+    const count = await git(dir, ['rev-list', '--count', `${before}..HEAD`]);
+    const commits = Number.parseInt(count.stdout, 10);
+    return Number.isFinite(commits) && commits > 0 ? ` ${commits} ${commits === 1 ? 'commit' : 'commits'}` : '';
+}
+
+/**
+ * git's first word on why it would not do something, without the colon it leaves
+ * on the end of a line that had a list of files under it — the list is the rest of
+ * what git said, and there is one line in a row of a table to say it in.
+ */
+function refusal(result) {
+    return (firstLine(result.stderr) || firstLine(result.stdout) || '').replace(/:$/, '');
+}
+
+/** The files a merge or a rebase stopped on, which are the ones left to resolve. */
+async function conflicts(dir) {
+    const unmerged = await git(dir, ['diff', '--name-only', '--diff-filter=U']);
+    return unmerged.ok ? unmerged.stdout.split('\n').filter(Boolean).length : 0;
+}
+
+/**
+ * Merge a branch into the one that is checked out.
+ *
+ * `--no-edit` because there is no editor to open: the table has the terminal, and
+ * git waiting on a message nobody can see is a repository that hangs until the
+ * timeout. The default message is the one `git merge` writes anyway.
+ *
+ * A merge that hits conflicts is not undone. It stops with the tree half-merged,
+ * which is git's normal way of asking for a hand, and unpicking that on somebody's
+ * behalf is not repo-master's business — a merge somebody wanted is worth
+ * resolving, and throwing it away because a table ran it would be the wrong
+ * answer. The row says how many files are waiting and names the way out.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} name The branch to merge in.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function merge(dir, name) {
+    const fail = (text) => ({ ok: false, changed: false, text });
+
+    const current = await currentBranch(dir);
+    if (current === name) return fail(`${name} is the branch you are on`);
+
+    const found = await findBranch(dir, name);
+    if (!found) return fail(`no branch ${name} here or on origin`);
+
+    const before = await git(dir, ['rev-parse', 'HEAD']);
+    const done = await git(dir, ['merge', '--no-edit', found.ref], COMMIT_TIMEOUT_MS);
+    if (!done.ok) {
+        const waiting = await conflicts(dir);
+        if (waiting > 0) return fail(`conflicted · ${files(waiting)} to resolve, or git merge --abort`);
+        return fail(`merge failed: ${refusal(done)}`);
+    }
+
+    const after = await git(dir, ['rev-parse', 'HEAD']);
+    if (before.ok && after.ok && before.stdout.trim() === after.stdout.trim()) {
+        return { ok: true, changed: false, text: `already has ${found.ref}` };
+    }
+
+    return { ok: true, changed: true, text: `merged ${found.ref}${await moved(dir, before.ok ? before.stdout.trim() : '')}` };
+}
+
+/**
+ * Rebase the branch that is checked out onto another one.
+ *
+ * A rebase that stops on a conflict is left standing, as a merge is, and for the
+ * same reason: the repository is in the middle of one, git is waiting, and the
+ * row says so and names the way back out. This is the one command here that
+ * rewrites commits, and what it rewrites is the branch you are on — the box says
+ * which branch that is, in every repository it is about, before enter is pressed.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} name The branch to rebase onto.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function rebase(dir, name) {
+    const fail = (text) => ({ ok: false, changed: false, text });
+
+    const current = await currentBranch(dir);
+    if (current === name) return fail(`${name} is the branch you are on`);
+
+    const found = await findBranch(dir, name);
+    if (!found) return fail(`no branch ${name} here or on origin`);
+
+    const before = await git(dir, ['rev-parse', 'HEAD']);
+    const done = await git(dir, ['rebase', found.ref], COMMIT_TIMEOUT_MS);
+    if (!done.ok) {
+        const waiting = await conflicts(dir);
+        if (waiting > 0) return fail(`stopped · ${files(waiting)} to resolve, or git rebase --abort`);
+        // Stopped for some other reason — an empty commit, a hook — and still in
+        // the middle of a rebase, which is worth knowing before the next command.
+        const standing = await git(dir, ['rev-parse', '--verify', '--quiet', 'REBASE_HEAD']);
+        const said = refusal(done) || 'rebase failed';
+        return fail(standing.ok && standing.stdout.trim() ? `stopped mid-rebase · ${said}` : `rebase failed: ${said}`);
+    }
+
+    const after = await git(dir, ['rev-parse', 'HEAD']);
+    if (before.ok && after.ok && before.stdout.trim() === after.stdout.trim()) {
+        return { ok: true, changed: false, text: `already on top of ${found.ref}` };
+    }
+
+    return { ok: true, changed: true, text: `rebased onto ${found.ref}` };
+}
+
+/**
  * Add a linked worktree to a repository: another folder with another branch
  * checked out in it, sharing the one history.
  *
- * Which branch is meant is worked out rather than asked twice. A branch that
- * exists here is checked out; one that exists only on origin is created to
- * follow it, which is what anybody typing the name of a colleague's branch
- * meant; a name git has never heard of is a new branch off HEAD. Everything
- * after that is git's to refuse — a branch already checked out in another
- * worktree, a folder already there — and its refusal is passed on word for word.
+ * Which branch is meant is worked out rather than asked twice, the way it is for
+ * every other command that takes a branch name: a branch that exists here is
+ * checked out, one that exists only on origin is created to follow it, and a name
+ * git has never heard of is a new branch off HEAD. Everything after that is git's
+ * to refuse — a branch already checked out in another worktree, a folder already
+ * there — and its refusal is passed on word for word.
  *
  * Never throws: trouble comes back as ok: false and a line saying what.
  *
@@ -731,14 +968,9 @@ async function discard(dir, nested = []) {
  * @returns {Promise<{ok: boolean, added: boolean, text: string}>}
  */
 async function addWorktree(dir, branch, target) {
-    const here = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
-    const known = here.ok && here.stdout.trim();
-
-    let from = '';
-    if (!known) {
-        const remote = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`]);
-        if (remote.ok && remote.stdout.trim()) from = `origin/${branch}`;
-    }
+    const found = await findBranch(dir, branch);
+    const known = Boolean(found && found.local);
+    const from = found && !found.local ? found.ref : '';
 
     const args = known ? ['worktree', 'add', target, branch] : ['worktree', 'add', '-b', branch, target, from].filter(Boolean);
     const added = await git(dir, args);
@@ -748,4 +980,21 @@ async function addWorktree(dir, branch, target) {
     return { ok: true, added: true, text: `added ${path.basename(target)} · ${said}` };
 }
 
-module.exports = { git, identify, inspect, diff, parseRemote, commitAndPush, push, sync, stash, discard, addWorktree };
+module.exports = {
+    git,
+    identify,
+    inspect,
+    diff,
+    parseRemote,
+    commitAndPush,
+    push,
+    sync,
+    stash,
+    discard,
+    branches,
+    switchBranch,
+    createBranch,
+    merge,
+    rebase,
+    addWorktree,
+};

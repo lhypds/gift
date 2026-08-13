@@ -95,6 +95,47 @@ const BAT_VIEW = '--color=always --style=numbers --line-range :500';
 const FILE_PREVIEW = `bat ${BAT_VIEW} {} 2>/dev/null || batcat ${BAT_VIEW} {} 2>/dev/null || cat {}`;
 
 /**
+ * The four commands that take a branch name, behind the b, n, m and r keys. Each
+ * asks for the name in a box first, and the box lists what it would do to every
+ * picked repository as the name is typed — which is where a name that is in two
+ * of your three repositories is noticed, rather than in the report afterwards.
+ *
+ * Each one's `prompt` names the work in both directions, because a merge and a
+ * rebase are the same two branches in the opposite order and the title is where
+ * anybody checks which way round this one runs.
+ */
+const BRANCH = {
+    switch: {
+        key: 'b',
+        label: 'switch branch',
+        busy: 'switching…',
+        words: { done: 'switched', skipped: 'already there' },
+        prompt: { title: 'Switch branch', footer: 'enter switch · esc back', empty: 'a branch name first' },
+    },
+    create: {
+        key: 'n',
+        label: 'new branch',
+        busy: 'branching…',
+        words: { done: 'branched', skipped: 'left alone' },
+        prompt: { title: 'New branch, off the one checked out', footer: 'enter create · esc back', empty: 'a branch name first' },
+    },
+    merge: {
+        key: 'm',
+        label: 'merge',
+        busy: 'merging…',
+        words: { done: 'merged', skipped: 'already had it' },
+        prompt: { title: 'Merge a branch into the one checked out', footer: 'enter merge · esc back', empty: 'a branch name first' },
+    },
+    rebase: {
+        key: 'r',
+        label: 'rebase',
+        busy: 'rebasing…',
+        words: { done: 'rebased', skipped: 'already on top' },
+        prompt: { title: 'Rebase the branch checked out onto another', footer: 'enter rebase · esc back', empty: 'a branch name first' },
+    },
+};
+
+/**
  * Where a repository's new worktree goes: beside the repository itself, named
  * for it and the branch. A folder of projects is what repo-master watches, so a
  * worktree put there is a row of its own by the next scan — which is the point
@@ -245,6 +286,16 @@ function actions(env) {
             kind: 'clear',
             clear: 'discard',
         },
+        // The four that take a branch name. Each one's box is the same box, and
+        // what it says about each repository is written where the key is bound.
+        ...Object.entries(BRANCH).map(([id, entry]) => ({
+            id,
+            key: entry.key,
+            label: entry.label,
+            kind: 'branch',
+            branch: id,
+            prompt: entry.prompt,
+        })),
         {
             id: 'worktree',
             key: 't a',
@@ -503,6 +554,36 @@ async function commit(repos, message, onUpdate = () => {}) {
 }
 
 /**
+ * Do one of the four branch commands to every chosen repository, all of them with
+ * the one branch name.
+ *
+ * Each repository stands on its own, as it does for a commit: a branch belongs to
+ * a repository, and one repository's `feature-x` is nothing to another's. What the
+ * name turns out to mean is worked out repository by repository — here, on origin,
+ * or nowhere — and said in that repository's row.
+ *
+ * @param {object[]} repos Rows to work on.
+ * @param {'switch'|'create'|'merge'|'rebase'} kind
+ * @param {string} name The branch name, as it was typed.
+ * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
+ * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
+ */
+async function branch(repos, kind, name, onUpdate = () => {}) {
+    const work = {
+        switch: gitLib.switchBranch,
+        create: gitLib.createBranch,
+        merge: gitLib.merge,
+        rebase: gitLib.rebase,
+    }[kind];
+
+    return sweep(repos, onUpdate, async (repo, say) => {
+        say('working', BRANCH[kind].busy);
+        const result = await work(repo.dir, name);
+        return say(!result.ok ? 'failed' : result.changed ? 'done' : 'skipped', result.text);
+    });
+}
+
+/**
  * Add a worktree to every chosen repository, all of them on the one branch.
  *
  * Each repository stands on its own, as it does for a commit: a branch belongs
@@ -550,4 +631,18 @@ async function remove(repos, onUpdate = () => {}) {
     });
 }
 
-module.exports = { actions, run, commit, sync, clear, worktrees, worktreePath, remove, addDirArgs, SYNC, CLEAR };
+module.exports = {
+    actions,
+    run,
+    commit,
+    sync,
+    clear,
+    branch,
+    worktrees,
+    worktreePath,
+    remove,
+    addDirArgs,
+    SYNC,
+    CLEAR,
+    BRANCH,
+};

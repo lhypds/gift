@@ -6,9 +6,10 @@
 // date. Rows that want attention wear an orange bar. Pick rows with the arrow
 // keys or find them with /, add more with space, and press enter for the menu of
 // what may be done to them: open them in an editor or an agent, read what
-// changed, fetch, pull, push, branch a worktree off one, commit and push the lot,
-// stash or discard what is uncommitted, or delete a folder outright. The commands
-// worth reaching for carry a key of their own, and the menu prints it beside them.
+// changed, fetch, pull, push, switch or make a branch, merge, rebase, branch a
+// worktree off one, commit and push the lot, stash or discard what is
+// uncommitted, or delete a folder outright. The commands worth reaching for carry
+// a key of their own, and the menu prints it beside them.
 'use strict';
 
 const fs = require('node:fs');
@@ -33,6 +34,8 @@ const DEFAULTS = {
 const GIT_CONCURRENCY = 4;
 /** Redraws are coalesced this long, so a burst of edits paints once. */
 const RENDER_MS = 60;
+/** How long a line under the table is worth reading before it is in the way. */
+const MESSAGE_MS = 3000;
 /** The clock the "last updated" column is read against moves on its own. */
 const TICK_MS = 5000;
 
@@ -57,8 +60,10 @@ Keys:
   c                open with claude      d       read the diff
   f                fetch                 p       pull
   P                push                  s       stash the changes
-  u                discard the changes   D       delete the folder
-  t then a         add a worktree        r       refresh now
+  u                discard the changes   b       switch branch
+  n                new branch            m       merge a branch in
+  r                rebase onto a branch  D       delete the folder
+  t then a         add a worktree        R       refresh now
   esc              clear                 q       quit
 
 Every one of those keys runs a command the enter menu also holds a row for, on
@@ -90,6 +95,16 @@ changes away instead. A stash comes back with git stash pop; a discard does not
 come back at all, which is why its box is drawn the way the delete box is and
 answered by the keyboard alone. Neither one touches ignored files, and neither
 touches a repository nested inside another: those have rows of their own.
+
+b, n, m and r are the four that take a branch name, and all four ask for it in the
+one box: b checks a branch out, n makes one off whatever is checked out, m merges
+a branch into what is checked out, and r rebases what is checked out onto another.
+The box lists every picked repository under the line as the name is typed, saying
+which branch each is on and whether it has heard of the name — here, on origin, or
+nowhere — so a name that is in two of your three repositories is seen before enter
+rather than after it. A branch only origin has is made here and set to follow it.
+Nothing throws work away: a merge or a rebase that hits a conflict stops where git
+stopped, says how many files are waiting, and names the way back out.
 
 t then a adds a worktree: a box asks for a branch, and each picked repository
 gets a folder beside it named for the two of them — ~/projects/gift-feature-x for
@@ -235,6 +250,31 @@ async function main(argv) {
         }, RENDER_MS);
     };
 
+    /**
+     * Say something on the line under the table, and take it back three seconds
+     * later. What is said there is what has just happened — what a command did,
+     * what it would not do — and something that just happened stops being news:
+     * a line about a push that finished a minute ago is only in the way of the
+     * table it sits under, and of the next thing worth saying.
+     *
+     * `fades: false` is for the one kind of line that is not an outcome but a
+     * state — something is going on — where whoever put it up takes it down when
+     * the work is over, however long that turns out to be. Saying nothing takes
+     * back whatever was there, which is what the boxes do on their way open.
+     */
+    let messageTimer = null;
+    const say = (text, { fades = true } = {}) => {
+        if (messageTimer) clearTimeout(messageTimer);
+        messageTimer = null;
+        state.message = text || '';
+        if (!state.message || !fades) return;
+        messageTimer = setTimeout(() => {
+            messageTimer = null;
+            state.message = '';
+            draw();
+        }, MESSAGE_MS);
+    };
+
     // Nothing a single repository does — being deleted mid-read, refusing to
     // answer — is worth taking the table down for.
     const refresh = (repo) =>
@@ -370,7 +410,7 @@ async function main(argv) {
         state.menuTargets = chosen;
         state.menuIndex = 0;
         state.mode = 'menu';
-        state.message = '';
+        say('');
         draw();
     };
 
@@ -401,6 +441,9 @@ async function main(argv) {
             case 'delete':
                 askDelete(action, chosen, back);
                 return;
+            case 'branch':
+                askBranch(action, chosen, back);
+                return;
             case 'worktree':
                 // The folder is not asked for, it is shown: it follows from the
                 // branch, and watching it spell itself out under the line being
@@ -421,7 +464,7 @@ async function main(argv) {
     };
 
     /** A word first, in a box of its own, and then the work. */
-    const ask = (action, chosen, back, submit, list = null) => {
+    const ask = (action, chosen, back, submit, list = null, extra = {}) => {
         state.mode = 'input';
         state.input = {
             action,
@@ -436,8 +479,9 @@ async function main(argv) {
             // What to say about each repository under the line, given what has
             // been typed so far. Without one the box lists what changed in them.
             list,
+            ...extra,
         };
-        state.message = '';
+        say('');
         draw();
     };
 
@@ -453,7 +497,7 @@ async function main(argv) {
     const runAction = async (action, chosen) => {
         state.mode = 'table';
         state.busy = true;
-        state.message = '';
+        say('');
         draw();
 
         // Some commands are the last thing repo-master does. `goto folder` is
@@ -491,14 +535,15 @@ async function main(argv) {
         }
         if (!screen.running) screen.resume();
 
-        state.message = message || '';
+        say(message || '');
         draw();
     };
 
     // Committing, fetching and pulling are the things the table does itself
     // rather than hand the terminal to somebody else for, so they say how they
     // are getting on: a line per repository in a box, rewritten as each one
-    // moves. The box stays up afterwards to be read; the summary outlives it.
+    // moves. The box stays up afterwards to be read; the summary goes under it,
+    // where it is a line like any other and fades like one — see say().
     //
     // @param {string} title What the box is called.
     // @param {string} label What the summary line calls the work afterwards.
@@ -513,7 +558,7 @@ async function main(argv) {
         state.mode = 'report';
         state.report = { title, entries, words, running: true, scroll: 0, view: 1 };
         state.busy = true;
-        state.message = '';
+        say('');
         draw();
 
         const outcome = await start((update) => {
@@ -532,7 +577,7 @@ async function main(argv) {
             counted('skipped') > 0 ? `${counted('skipped')} ${words.skipped}` : null,
             counted('failed') > 0 ? `${counted('failed')} failed` : null,
         ].filter(Boolean);
-        state.message = `${label}: ${summary.join(' · ') || 'nothing to do'}`;
+        say(`${label}: ${summary.join(' · ') || 'nothing to do'}`);
         draw();
 
         // Every one of those repositories may have just changed underneath the
@@ -581,6 +626,18 @@ async function main(argv) {
             (onUpdate) => actionsLib.clear(repos, kind, onUpdate),
         );
 
+    // Switching, branching, merging and rebasing all move a repository without
+    // moving a folder: the branch column changes, or what is on that branch does,
+    // and refreshing the rows is the whole of what has to be put right.
+    const runBranch = (kind, repos, name) =>
+        runReport(
+            `${actionsLib.BRANCH[kind].label} · ${name}`,
+            actionsLib.BRANCH[kind].label,
+            repos,
+            actionsLib.BRANCH[kind].words,
+            (onUpdate) => actionsLib.branch(repos, kind, name, onUpdate),
+        );
+
     // A worktree is a folder that was not there before, and a folder under the
     // watched root is a row: the rescan is what turns the one into the other,
     // rather than leaving it to the next sweep half a minute later.
@@ -612,7 +669,7 @@ async function main(argv) {
     const askSync = (action, chosen, back) => {
         state.mode = 'confirm';
         state.confirm = { kind: action.sync, action, targets: chosen, back, scroll: 0, view: 1 };
-        state.message = '';
+        say('');
         draw();
     };
 
@@ -628,17 +685,125 @@ async function main(argv) {
     const askClear = (action, chosen, back) => {
         if (chosen.every((repo) => repo.loaded && !repo.hasChanges)) {
             state.mode = 'table';
-            state.message = `${action.label}: nothing changed in ${
-                chosen.length === 1 ? chosen[0].name : counting(chosen)
-            }`;
+            say(`${action.label}: nothing changed in ${chosen.length === 1 ? chosen[0].name : counting(chosen)}`);
             draw();
             return;
         }
 
         state.mode = 'confirm';
         state.confirm = { kind: action.clear, action, targets: chosen, back, scroll: 0, view: 1 };
-        state.message = '';
+        say('');
         draw();
+    };
+
+    // The branch names the box needs to mark the repositories it is about. They
+    // are read once when the box opens rather than once per keystroke — a name is
+    // typed a letter at a time and git is a process a time — and put back into the
+    // box as each answer arrives, so the marks fill in under the line being typed.
+    // A box closed and opened again reads afresh: branches come and go.
+    let branchToken = 0;
+    const loadBranches = (field, chosen) => {
+        const token = ++branchToken;
+        for (const repo of chosen) {
+            gate(() => gitLib.branches(repo.dir))
+                .then((found) => {
+                    // A slower read of a box already closed, or of an older one,
+                    // has nothing to say.
+                    if (token !== branchToken || state.input !== field) return;
+                    field.branches.set(repo.dir, found);
+                    requestRender();
+                })
+                .catch(() => {});
+        }
+    };
+
+    /**
+     * What each picked repository would make of the name being typed: which branch
+     * it is on now, which way the work runs, and whether it has heard of the name
+     * at all — here, on origin, or nowhere.
+     *
+     * The mark is the point of the box. `feature-x` is in two of your three
+     * repositories more often than it is in all three, and the row that says `no
+     * such branch` before enter is pressed is worth more than the report that says
+     * it afterwards. Until the branches are read there is no mark: saying nothing
+     * about a name beats saying something wrong about it.
+     */
+    const branchLines = (kind, chosen, typed) => {
+        const name = typed.trim();
+
+        return chosen.map((repo) => {
+            const here = repo.branch || '…';
+            const found = state.input?.branches?.get(repo.dir);
+
+            // Nothing typed yet: how many branches there are to type the name of.
+            if (!name) {
+                const count = found ? `  · ${found.local.length} ${found.local.length === 1 ? 'branch' : 'branches'}` : '';
+                return { name: repo.name, text: `${here}${count}` };
+            }
+
+            // The name of the branch already checked out means something
+            // different to each of the four, and all four say it here rather than
+            // leave it to the report: switching there is being there already, and
+            // merging or rebasing a branch into itself is not work at all.
+            if (name === repo.branch) {
+                const itself = kind === 'merge' || kind === 'rebase';
+                return {
+                    name: repo.name,
+                    text: `${here}  · ${itself ? 'the branch it is on' : kind === 'create' ? 'here already' : 'already there'}`,
+                    tone: itself || kind === 'create' ? 'warn' : undefined,
+                };
+            }
+
+            // What the name is so far, which is not the same question as what it
+            // is. A name is typed a letter at a time, and every letter of
+            // `feature-x` before the last is a name no repository has: marking
+            // those in orange would be an alarm going off through the whole of
+            // typing. So a name still on its way to one of this repository's
+            // branches counts them instead, and only a name that has left them all
+            // behind is the warning it looks like.
+            const exact = !found ? '' : found.local.includes(name) ? 'here' : found.remote.includes(name) ? 'on origin' : '';
+            const ahead = !found || exact ? [] : [...new Set([...found.local, ...found.remote])].filter((branch) => branch.startsWith(name));
+
+            const missing = kind === 'create' ? Boolean(exact) : Boolean(found) && !exact && ahead.length === 0;
+            const mark = kind === 'create'
+                ? exact && 'here already'
+                : exact || (!found ? '' : ahead.length > 0 ? `${ahead.length} start with it` : 'no such branch');
+            // A merge and a rebase both run into the working tree, so what is
+            // uncommitted in it is worth naming — that is where either goes wrong.
+            const dirty = (kind === 'merge' || kind === 'rebase') && repo.hasChanges ? '  · uncommitted' : '';
+
+            const work =
+                kind === 'merge' ? `${name} → ${here}` : kind === 'rebase' ? `${here} onto ${name}` : `${here} → ${name}`;
+            return {
+                name: repo.name,
+                text: `${work}${mark ? `  · ${mark}` : ''}${dirty}`,
+                tone: missing ? 'warn' : undefined,
+            };
+        });
+    };
+
+    /**
+     * The four commands that take a branch name ask for it in the one box, the way
+     * `commit & push` asks for a message: type it, watch what each repository
+     * would do with it appear underneath, and press enter.
+     *
+     * There is no second box asking whether it was meant. The list under the line
+     * is that question, asked while the answer is still being typed — and none of
+     * the four throws work away: a switch git cannot make it refuses, a merge and
+     * a rebase that hit a conflict stop and say so, and a branch name already
+     * taken is git's to turn down.
+     */
+    const askBranch = (action, chosen, back) => {
+        const kind = action.branch;
+        ask(
+            action,
+            chosen,
+            back,
+            (name) => runBranch(kind, chosen, name),
+            (typed) => branchLines(kind, chosen, typed),
+            { branches: new Map() },
+        );
+        loadBranches(state.input, chosen);
     };
 
     /**
@@ -654,7 +819,7 @@ async function main(argv) {
         const safe = chosen.filter((repo) => repo.dir !== root);
         if (safe.length === 0) {
             state.mode = 'table';
-            state.message = `${action.label}: ${shortenHome(root)} is the folder being watched`;
+            say(`${action.label}: ${shortenHome(root)} is the folder being watched`);
             draw();
             return;
         }
@@ -679,7 +844,7 @@ async function main(argv) {
             scroll: 0,
             view: 1,
         };
-        state.message = '';
+        say('');
         draw();
     };
 
@@ -762,7 +927,7 @@ async function main(argv) {
     const openPreview = (repo) => {
         if (!repo) return;
         state.mode = 'preview';
-        state.message = '';
+        say('');
         // The title is the renderer's, and so are `scroll` and `view` once it has
         // seen how tall the box came out.
         state.preview = { repo, title: '', lines: [], scroll: 0, view: 1, loading: true };
@@ -899,7 +1064,7 @@ async function main(argv) {
     const openSearch = () => {
         state.mode = 'search';
         state.search = { value: state.filter, column: state.filter.length };
-        state.message = '';
+        say('');
         draw();
     };
 
@@ -1148,6 +1313,20 @@ async function main(argv) {
             case 'u':
                 startAction(command('discard'), targets(), 'table');
                 return;
+            // The four that take a branch name. Each one opens the same box and
+            // asks for it; what the name then means is the command's own business.
+            case 'b':
+                startAction(command('switch'), targets(), 'table');
+                return;
+            case 'n':
+                startAction(command('create'), targets(), 'table');
+                return;
+            case 'm':
+                startAction(command('merge'), targets(), 'table');
+                return;
+            case 'r':
+                startAction(command('rebase'), targets(), 'table');
+                return;
             case 'D':
                 startAction(command('delete'), targets(), 'table');
                 return;
@@ -1156,7 +1335,7 @@ async function main(argv) {
                 if (chosen.length === 0) return;
                 state.menuTargets = chosen; // the box says which repositories it is about
                 state.mode = 'worktree';
-                state.message = '';
+                say('');
                 draw();
                 return;
             }
@@ -1180,17 +1359,23 @@ async function main(argv) {
                 // one hiding rows. A second esc clears what was picked.
                 if (state.filter) setFilter('');
                 else state.selected.clear();
-                state.message = '';
+                say('');
                 draw();
                 return;
-            case 'r':
-                state.message = 'refreshing…';
+            // Refreshing wears the capital because rebasing wanted the small
+            // letter, and between the two it is refreshing that can be waited for:
+            // the table sweeps itself every half minute and watches every working
+            // tree besides, so this is only ever asking for the sweep sooner.
+            case 'R':
+                // Not an outcome but a state: the sweep it stands for is what
+                // takes it back down, however long the folder takes to read.
+                say('refreshing…', { fades: false });
                 draw();
                 rescan()
                     .then(refreshAll)
                     .catch(() => {})
                     .then(() => {
-                        state.message = '';
+                        say('');
                         draw();
                     });
                 return;
@@ -1238,6 +1423,7 @@ async function main(argv) {
     clearInterval(ticker);
     clearInterval(sweeper);
     if (renderTimer) clearTimeout(renderTimer);
+    if (messageTimer) clearTimeout(messageTimer);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);
     watchers.close();
