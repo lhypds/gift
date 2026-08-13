@@ -35,9 +35,13 @@ export default function Delivery({ delivery, onSelect }) {
     onSelect(delivery);
   };
 
+  const relativeTime = formatRelativeTime(delivery.timestamp);
+  // Highlighted only while it reads "just now" — the next poll clears it.
+  const fresh = relativeTime === "just now";
+
   return (
     <div
-      className={`${styles.item} ${styles.clickable}`}
+      className={`${styles.item} ${styles.clickable}${fresh ? ` ${styles.fresh}` : ""}`}
       role="button"
       tabIndex={0}
       onClick={() => onSelect(delivery)}
@@ -46,9 +50,7 @@ export default function Delivery({ delivery, onSelect }) {
       <div className={styles.itemTop}>
         <span className={styles.timestamp}>
           {formatTimestamp(delivery.timestamp)}
-          {formatRelativeTime(delivery.timestamp) && (
-            <span className={styles.relativeTime}> ({formatRelativeTime(delivery.timestamp)})</span>
-          )}
+          {relativeTime && <span className={styles.relativeTime}> ({relativeTime})</span>}
         </span>
         <span className={`${styles.deliveryState} ${styles[delivery.tone]}`}>{delivery.outcome}</span>
       </div>

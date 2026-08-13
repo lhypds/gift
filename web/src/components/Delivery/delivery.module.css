@@ -5,6 +5,7 @@
   padding: 10px 14px;
   border: 1px solid var(--line);
 }
+.fresh { background: rgba(255, 255, 51, 0.4); }
 .clickable { cursor: pointer; }
 .clickable:hover { border-color: var(--ink); }
 .clickable:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
