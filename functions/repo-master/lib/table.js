@@ -7,7 +7,7 @@
 'use strict';
 
 const { width, pad, truncate, formatRelative, shortenHome } = require('./util.js');
-const { overlay } = require('./modal.js');
+const { overlay, patchTone } = require('./modal.js');
 
 /** Each colour as a truecolor triple and as its nearest xterm-256 shade. */
 const ORANGE = { rgb: [217, 119, 87], xterm: 173 }; // Claude's orange
@@ -43,6 +43,9 @@ function createPalette(stream) {
         attentionBar: wrap(barCode(ORANGE)),
         cursorBar: wrap(barCode(CURSOR_GREY)),
         selectedBar: wrap(barCode(SELECTED_GREY)),
+        // The terminal's own cursor is hidden while the table is up, so a box
+        // being typed into draws its own out of reversed video.
+        caret: wrap('\x1b[7m'),
     };
 }
 
@@ -79,6 +82,139 @@ function diffCells(repo) {
 /** Whether a row is one of the ones the user is meant to notice. */
 function needsAttention(repo) {
     return Boolean(repo.hasChanges);
+}
+
+// The boxes drawn over the table. Each mode builds one panel for modal.js to
+// draw — what is in it, how it is coloured, and what the footer says. The table
+// itself is drawn either way and goes on refreshing underneath.
+
+/** How wide each box would like to be; the modal narrows them all to fit. */
+const MENU_WIDTH = 64;
+const PROMPT_WIDTH = 88;
+const REPORT_WIDTH = 96;
+/** Room a repository's name is given inside a box before it is cut. */
+const NAME_WIDTH = 28;
+
+/** `name    what about it`, the names lined up under one another. */
+function labelled(entries) {
+    const column = Math.min(NAME_WIDTH, Math.max(...entries.map((entry) => width(entry.name)), 0));
+    return entries.map((entry) => `${pad(truncate(entry.name, column), column)}  ${entry.text}`);
+}
+
+/** A repository's changes in a few words, for the boxes that list them. */
+function changeCell(repo) {
+    if (!repo.hasChanges) return 'no changes';
+    const counts = diffCells(repo);
+    return counts.long === '-' ? 'has changes' : counts.long;
+}
+
+/**
+ * The preview: a repository's diff. Its title is written from the row as it
+ * stands now rather than as it stood when the box opened — the row goes on
+ * refreshing underneath, and the heading saying so is the hint that the patch
+ * itself wants an `r`.
+ */
+function previewPanel(state) {
+    const panel = state.preview;
+    if (!panel) return null;
+
+    const repo = panel.repo;
+    const counts = diffCells(repo);
+    return Object.assign(panel, {
+        title: [repo.name, repo.branch || '…', counts.long === '-' ? null : counts.long].filter(Boolean).join(' · '),
+        paint: patchTone,
+        count: !panel.loading, // nothing to count yet, and one placeholder line to miscount
+        status: panel.loading ? 'reading…' : '',
+        footer: 'up/down scroll · space page · r reload · esc close',
+    });
+}
+
+/** The menu enter opens: what may be run on the repositories that were picked. */
+function menuPanel(state) {
+    const [main, ...added] = state.menuTargets;
+    const on = main ? main.name : `${state.menuTargets.length} repos`;
+
+    return {
+        title: `Run on ${on}${added.length > 0 ? ` + ${added.length} more` : ''}`,
+        lines: state.actions.map(
+            (action, index) => `${index === state.menuIndex ? '>' : ' '} ${index + 1}  ${action.label}`,
+        ),
+        paint: (line, index) => (index === state.menuIndex ? 'bold' : null),
+        footer: `1-${state.actions.length} pick · up/down move · enter run · esc cancel`,
+        // Only of any use in a window too short for the whole menu, where it
+        // keeps the line being pointed at on screen; the modal clamps it.
+        scroll: state.menuIndex,
+        width: MENU_WIDTH,
+    };
+}
+
+/**
+ * The box a commit message is typed into, with the repositories it is about
+ * listed under it — nobody should have to remember what they picked while
+ * writing the message for it.
+ */
+function promptPanel(state) {
+    const field = state.input;
+    if (!field) return null;
+
+    const listed = labelled(field.targets.map((repo) => ({ name: repo.name, text: changeCell(repo) })));
+    const count = `${field.targets.length} ${field.targets.length === 1 ? 'repo' : 'repos'}`;
+
+    return {
+        title: field.title,
+        lines: [field.value, '', ...listed],
+        // The field counts its caret in characters, as editing does; the box
+        // draws in columns, which is not the same thing in every language.
+        caret: { line: 0, column: width(field.value.slice(0, field.column)) },
+        paint: (line, index) => (index >= 2 ? 'dim' : null),
+        status: field.hint || count,
+        footer: field.footer,
+        width: PROMPT_WIDTH,
+    };
+}
+
+/** What became of each repository the commit was run on, told as it happens. */
+function reportPanel(state) {
+    const report = state.report;
+    if (!report) return null;
+
+    const tones = { pending: 'dim', working: null, done: 'add', skipped: 'dim', failed: 'warn' };
+    const counted = (name) => report.entries.filter((entry) => entry.state === name).length;
+    const waiting = report.entries.filter((entry) => entry.state === 'working' || entry.state === 'pending').length;
+
+    const summary = [
+        counted('done') > 0 ? `${counted('done')} pushed` : null,
+        counted('skipped') > 0 ? `${counted('skipped')} unchanged` : null,
+        counted('failed') > 0 ? `${counted('failed')} failed` : null,
+    ]
+        .filter(Boolean)
+        .join(' · ');
+
+    return Object.assign(report, {
+        lines: labelled(report.entries.map((entry) => ({ name: entry.repo.name, text: entry.text }))),
+        paint: (line, index) => tones[report.entries[index]?.state] ?? null,
+        status: report.running
+            ? `${report.entries.length - waiting} of ${report.entries.length} done · working…`
+            : summary || 'nothing to do',
+        footer: report.running ? '' : 'up/down scroll · esc close',
+        width: REPORT_WIDTH,
+    });
+}
+
+/** The box belonging to whatever the table is in the middle of, if any. */
+function panelFor(state) {
+    switch (state.mode) {
+        case 'preview':
+            return previewPanel(state);
+        case 'menu':
+            return menuPanel(state);
+        case 'input':
+            return promptPanel(state);
+        case 'report':
+            return reportPanel(state);
+        default:
+            return null;
+    }
 }
 
 /**
@@ -160,18 +296,12 @@ function frame(state, palette, size) {
     const now = Date.now();
     const available = Math.max(40, size.columns);
 
-    // The preview is a box over the finished frame, whichever frame that is. Its
-    // title is written here, from the row as it stands now rather than as it
-    // stood when the box opened: the row goes on refreshing underneath, and the
-    // heading saying so is the hint that the patch itself wants an `r`.
+    // Whatever the table is in the middle of is a box over the finished frame,
+    // whichever frame that is: the menu, a message being typed, a preview, a
+    // report. The table is drawn first either way, and keeps refreshing behind.
     const done = (lines) => {
-        if (state.mode !== 'preview' || !state.preview) return lines;
-        const repo = state.preview.repo;
-        const counts = diffCells(repo);
-        state.preview.title = [repo.name, repo.branch || '…', counts.long === '-' ? null : counts.long]
-            .filter(Boolean)
-            .join(' · ');
-        return overlay(lines, state.preview, palette, size);
+        const panel = panelFor(state);
+        return panel ? overlay(lines, panel, palette, size) : lines;
     };
 
     const rowCells = state.rows.map((repo) => {
@@ -229,18 +359,7 @@ function frame(state, palette, size) {
 
     const tail = [palette.dim(rule)];
 
-    if (state.mode === 'menu') {
-        const [target, ...added] = state.menuTargets;
-        const on = target ? target.name : `${state.menuTargets.length} repos`;
-        tail.push(fit(`Run on ${on}${added.length > 0 ? ` + ${added.length} more` : ''}:`));
-        state.actions.forEach((action, index) => {
-            const label = fit(`${index === state.menuIndex ? '>' : ' '} ${index + 1}  ${action.label}`);
-            tail.push(index === state.menuIndex ? palette.bold(label) : label);
-        });
-        tail.push(
-            palette.dim(fit(`1-${state.actions.length} pick · up/down or j/k move · enter run · esc cancel`)),
-        );
-    } else if (state.interactive) {
+    if (state.interactive) {
         tail.push(
             palette.dim(
                 fit(
@@ -266,11 +385,9 @@ function frame(state, palette, size) {
     const spare = Math.max(1, size.rows - 1 - head.length - tail.length);
     const budget = state.rows.length > spare ? Math.max(1, spare - 1) : spare;
 
-    // The menu names the repositories it is about and takes the cursor bar with
-    // it; the preview names the one it is about in its title and leaves the bar
-    // where it is, on the row the box belongs to.
-    const pointing = state.mode !== 'menu';
-    const view = viewport(state.rows.length, pointing ? state.cursor : -1, state.scroll || 0, budget);
+    // Every box names the repositories it is about, and none of them takes the
+    // cursor bar with it: the table behind goes on saying where you were.
+    const view = viewport(state.rows.length, state.cursor, state.scroll || 0, budget);
     state.scroll = view.start;
 
     // The repository picked first is the main project and wears no mark; the ones
@@ -280,7 +397,7 @@ function frame(state, palette, size) {
     const body = [];
     for (let index = view.start; index < view.end; index++) {
         const repo = state.rows[index];
-        const cursor = pointing && index === state.cursor;
+        const cursor = index === state.cursor;
         const selected = state.selected.has(repo.dir);
         const gutter = `${cursor ? '>' : ' '}${selected && repo.dir !== mainDir ? '+' : ' '}`;
         const text = fit(`${gutter}${joinRow(rowCells[index], widths)}`);

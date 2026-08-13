@@ -19,6 +19,14 @@ const MAX_STAT_FILES = 200;
 /** How many lines of a patch the preview keeps; the rest is a note. */
 const MAX_DIFF_LINES = 5000;
 
+/** A commit runs the repository's own hooks, which are nobody's business but its. */
+const COMMIT_TIMEOUT_MS = 60000;
+/** A push waits on a network, and sometimes on a large repository. */
+const PUSH_TIMEOUT_MS = 120000;
+
+/** What git says when there was nothing there to commit. None of it is an error. */
+const NOTHING_TO_COMMIT = /nothing to commit|nothing added to commit|no changes added to commit/i;
+
 const MAX_BUFFER = 32 * 1024 * 1024;
 
 /** Run git in a directory. Never rejects — failures come back as ok: false. */
@@ -266,4 +274,95 @@ async function diff(dir, exclude = []) {
     return { lines, error: null };
 }
 
-module.exports = { git, identify, inspect, diff, parseRemote };
+/** The first line worth reading of whatever git had to say. */
+function firstLine(text) {
+    return String(text || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .find(Boolean) || '';
+}
+
+/** The short hash out of `[main (root-commit) 8ac1f2e] a message`. */
+function commitHash(output) {
+    const match = firstLine(output).match(/^\[([^\]]+)\]/);
+    if (!match) return '';
+    const last = match[1].trim().split(/\s+/).pop();
+    return /^[0-9a-f]{7,}$/i.test(last) ? last : '';
+}
+
+/**
+ * Pathspecs that keep the repositories nested inside this one out of its commit.
+ * They have rows of their own, and a commit of their own; staging one from here
+ * would write it into its parent as a gitlink nobody asked for.
+ */
+function withoutNested(dir, nested) {
+    return nested
+        .map((child) => path.relative(dir, child).split(path.sep).join('/'))
+        .filter((relative) => relative && !relative.startsWith('..'))
+        .map((relative) => `:(exclude)${relative}`);
+}
+
+/**
+ * Commit one repository's working tree and push it.
+ *
+ * "The working tree" is what the row counts: tracked changes and untracked files
+ * alike, minus anything belonging to a repository nested inside this one.
+ *
+ * Nothing to commit is not a failure — a repository whose commits never left the
+ * machine is still worth pushing. One with neither is left alone rather than
+ * made to reach across a network to be told it is up to date, and a branch that
+ * has never been pushed is only given an upstream when there is a commit to
+ * carry there.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} message The commit message.
+ * @param {string[]} [nested] Absolute paths of repositories inside this one.
+ * @param {(step: string) => void} [onStep] Told 'staging', 'committing', 'pushing'.
+ * @returns {Promise<{ok: boolean, committed: boolean, pushed: boolean, text: string}>}
+ */
+async function commitAndPush(dir, message, nested = [], onStep = () => {}) {
+    const fail = (text) => ({ ok: false, committed: false, pushed: false, text });
+
+    const branch = await currentBranch(dir);
+    if (branch === '-' || branch.startsWith('(')) return fail('detached HEAD — check out a branch first');
+
+    onStep('staging');
+    const staged = await git(dir, ['add', '-A', '--', '.', ...withoutNested(dir, nested)]);
+    if (!staged.ok) return fail(`add failed: ${firstLine(staged.stderr)}`);
+
+    onStep('committing');
+    const commit = await git(dir, ['commit', '-m', message], COMMIT_TIMEOUT_MS);
+    const committed = commit.ok;
+    if (!committed && !NOTHING_TO_COMMIT.test(`${commit.stdout}\n${commit.stderr}`)) {
+        return fail(`commit failed: ${firstLine(commit.stderr) || firstLine(commit.stdout)}`);
+    }
+
+    if (!committed) {
+        const ahead = await git(dir, ['rev-list', '--count', '@{upstream}..HEAD']);
+        // An upstream git cannot name is a branch that has never been pushed.
+        if (!ahead.ok || Number.parseInt(ahead.stdout.trim(), 10) === 0) {
+            return { ok: true, committed: false, pushed: false, text: 'nothing to commit' };
+        }
+    }
+
+    onStep('pushing');
+    let push = await git(dir, ['push'], PUSH_TIMEOUT_MS);
+    let upstream = false;
+    // A branch pushed for the first time has nowhere to push to; git says so and
+    // names the command that fixes it, which is the one below.
+    if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
+        push = await git(dir, ['push', '--set-upstream', 'origin', branch], PUSH_TIMEOUT_MS);
+        upstream = push.ok;
+    }
+
+    const hash = committed ? commitHash(commit.stdout) : '';
+    const said = committed ? `committed${hash ? ` ${hash}` : ''}` : 'nothing new';
+    if (!push.ok) {
+        return { ok: false, committed, pushed: false, text: `${said} · push failed: ${firstLine(push.stderr)}` };
+    }
+    return { ok: true, committed, pushed: true, text: `${said} · pushed${upstream ? ` to origin/${branch}` : ''}` };
+}
+
+module.exports = { git, identify, inspect, diff, parseRemote, commitAndPush };

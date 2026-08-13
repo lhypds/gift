@@ -10,8 +10,9 @@ finds every repository under it — nested checkouts and submodules included —
 and keeps one table up to date: which branch each one is on, whether the working
 tree has changes, and how many lines that is.
 Rows that want attention wear an orange bar. Press d to read what changed, and
-enter to go to one's folder, or to open them in VS Code, Claude Code or Codex —
-the first one picked is the main project, and the rest come along with it.
+enter to go to one's folder, to open them in VS Code, Claude Code or Codex — the
+first one picked is the main project, and the rest come along with it — or to
+commit and push every repository you picked with one message.
 
 ```
 Repo Master v0.0.1
@@ -33,12 +34,12 @@ Files
 |-----------------|------------------------------------------------------------------------------|
 | `main.js`       | Entry point — run through `gift repo-master`, or directly with `node`        |
 | `lib/repos.js`  | Finding the repositories and working out which sits inside which             |
-| `lib/git.js`    | Branch, working-tree changes, diff size and the time of the last change      |
+| `lib/git.js`    | Branch, working-tree changes, diff size, the time of the last change, and committing and pushing |
 | `lib/watch.js`  | Hearing about edits, with a timer as the fallback                            |
-| `lib/table.js`  | The table itself, and which rows are orange                                  |
-| `lib/modal.js`  | The box the preview is drawn in, over the table                              |
+| `lib/table.js`  | The table itself, which rows are orange, and what goes in each box           |
+| `lib/modal.js`  | The box they are all drawn in, over the table                                |
 | `lib/screen.js` | The alternate screen and the keys                                            |
-| `lib/actions.js`| Opening the chosen repositories in VS Code, Claude Code or Codex             |
+| `lib/actions.js`| Opening the chosen repositories in VS Code, Claude Code or Codex, and committing them |
 | `config.schema.json` | The settings this function has, and their defaults — see `functions.repo-master` in config.json |
 
 
@@ -80,12 +81,13 @@ Keys
 | space           | Add the row to the selection and step down — the first one added is the main project, the rest are marked `+` |
 | enter           | Open the command menu for the selection, or the row under the cursor |
 | d               | Preview what changed in the row under the cursor            |
-| esc             | Clear the selection, or close the menu                      |
+| esc             | Clear the selection, or close whichever box is open          |
 | r               | Rescan and refresh everything now                           |
 | q, Ctrl-C       | Quit                                                        |
 
-In the menu, the number keys run a command straight away; up/down or j/k and then
-enter do the same thing more slowly. The commands are:
+The menu is a box over the table, as the preview is, and as everything else that
+interrupts the table is. In it the number keys run a command straight away;
+up/down or j/k and then enter do the same thing more slowly. The commands are:
 
 | Command               | Runs                                                          |
 |-----------------------|----------------------------------------------------------------|
@@ -93,6 +95,7 @@ enter do the same thing more slowly. The commands are:
 | open with vscode      | `code <main project>`                                          |
 | open with claude code | `claude` in the main project, with `--add-dir` for each added repository |
 | open with codex       | `codex` in the main project, the same way                      |
+| commit & push         | `git add -A`, `git commit` and `git push` in **every** picked repository — see below |
 
 A selection has a shape. The repository picked first is the **main project** and
 wears no mark; the ones picked after it are marked `+`. VS Code opens the main
@@ -123,6 +126,55 @@ one:
 | `codex_command`    | `codex`  | `open with codex`                              |
 | `claude_add_dir`   | `--add-dir` | How `claude` is told about the repositories added to the main one, once each. `false` opens the main project alone |
 | `codex_add_dir`    | `--add-dir` | The same for `codex`, for a version that spells the option differently |
+
+
+Committing and pushing
+----------------------
+
+`commit & push` is the one command that treats every picked repository as a
+project of its own: there is no main project to make of the others, because a
+commit belongs to one repository and nothing else. It asks for a message first,
+in a box listing what it is about to commit:
+
+```
+    +- Commit message -----------------------------------------------+
+    | fix: 修复表格宽度_                                              |
+    |                                                                |
+    | lhypds/gift       +1203 lines -30 lines                        |
+    | gcc3/content-hub  +3 lines                                     |
+    +- 3 repos · enter commit & push · esc back ---------------------+
+```
+
+Type the message and press enter; esc goes back to the menu, and an empty message
+is refused. Backspace and the left/right arrows work as they do anywhere, and so
+do Ctrl-U to clear the line, Ctrl-A and Ctrl-E to reach its ends. Every other key
+is a character here — `q` types a q rather than quitting.
+
+Each repository then has everything in its working tree staged, tracked changes
+and untracked files alike — the same changes the row counts, and nothing
+belonging to a repository nested inside it — committed with your message, and
+pushed. A few are worked on at once, and one that fails takes none of the others
+down with it. The box stays up and fills in as they finish:
+
+```
+    +- commit & push · "fix: 修复表格宽度" ---------------------------+
+    | lhypds/gift       committed 8ac1f2e · pushed                   |
+    | gcc3/content-hub  pushing…                                     |
+    | lhypds/conf       waiting…                                     |
+    +- 1 of 3 done · working… ---------------------------------------+
+```
+
+Green is a repository that committed and pushed, grey one that had nothing to do,
+orange one that could not. Nothing else in repo-master answers while it runs;
+`esc` closes the box afterwards, and the table refreshes itself.
+
+Nothing to commit is not a failure — a repository whose commits never left the
+machine is pushed anyway. One with neither is left alone rather than made to
+reach across a network to be told it is up to date. A branch that has never been
+pushed is given `origin` as its upstream when there is a commit to carry there,
+which is the `git push --set-upstream origin <branch>` git itself suggests. A
+repository with a detached HEAD is not touched at all: it says so and stays as it
+was.
 
 
 The preview

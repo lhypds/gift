@@ -1,5 +1,5 @@
-// What pressing enter does: go to the chosen repository's folder, or open it in
-// an editor or an agent.
+// What pressing enter does: go to the chosen repository's folder, open it in an
+// editor or an agent, or commit and push the lot.
 //
 // A selection has a shape. The repository picked first is the main project, and
 // the ones picked after it come along with it. VS Code opens the main project —
@@ -11,9 +11,21 @@
 // `goto folder` is the same borrowing, with a shell as the tool: no process can
 // move the shell that started it, so the folder is reached by a shell of its own
 // standing in it. Leaving that shell brings the table back.
+//
+// `commit & push` is the exception to all of it: every chosen repository is a
+// project of its own there, each committed with the same message and pushed,
+// and nothing borrows the terminal — git is asked directly, and the table stays
+// up to report on it. It runs through commit() below rather than run(), because
+// it wants a message first.
 'use strict';
 
 const { spawn } = require('node:child_process');
+
+const gitLib = require('./git.js');
+const { limiter } = require('./util.js');
+
+/** How many repositories are committed and pushed at once. */
+const COMMIT_CONCURRENCY = 4;
 
 /** The commands, and how each one wants to be started. */
 function actions(env) {
@@ -45,6 +57,17 @@ function actions(env) {
             command: env.GIFT_REPO_MASTER_CODEX || 'codex',
             kind: 'terminal',
             addDir: env.GIFT_REPO_MASTER_CODEX_ADD_DIR ?? '--add-dir',
+        },
+        {
+            id: 'commit',
+            label: 'commit & push',
+            kind: 'commit',
+            // Nothing is committed until there is something to call it: the
+            // message is asked for in a box of its own first.
+            prompt: {
+                title: 'Commit message',
+                footer: 'enter commit & push · esc back',
+            },
         },
     ];
 }
@@ -97,6 +120,7 @@ function runHere(command, args, cwd) {
 async function run(action, repos, { suspend, resume }) {
     const [main, ...extra] = repos;
     if (!main) return null;
+    if (action.kind === 'commit') return 'commit & push is run with a message — see commit()';
 
     if (action.kind === 'windowed') {
         const error = await launch(action.command, [main.dir], main.dir);
@@ -116,4 +140,49 @@ async function run(action, repos, { suspend, resume }) {
     }
 }
 
-module.exports = { actions, run, addDirArgs };
+/**
+ * Commit and push every chosen repository, with the one message between them.
+ *
+ * Each repository stands on its own here, rather than one leading and the rest
+ * following: a commit belongs to a repository, and there is no main project to
+ * make of the others. They are worked on a few at a time, because a push is
+ * mostly waiting on a network, and a repository that fails takes none of the
+ * rest down with it.
+ *
+ * @param {object[]} repos Rows to commit.
+ * @param {string} message The commit message.
+ * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
+ *   Called as each repository moves — 'working', then 'done', 'skipped' or 'failed'.
+ * @returns {Promise<Array<{repo: object, state: string, text: string}>>} The last
+ *   word on each repository, in the order they were given.
+ */
+async function commit(repos, message, onUpdate = () => {}) {
+    const gate = limiter(COMMIT_CONCURRENCY);
+
+    return Promise.all(
+        repos.map((repo) =>
+            gate(async () => {
+                const say = (state, text) => {
+                    const update = { repo, state, text };
+                    onUpdate(update);
+                    return update;
+                };
+
+                say('working', 'starting…');
+                let result;
+                try {
+                    result = await gitLib.commitAndPush(repo.dir, message, repo.nested, (step) =>
+                        say('working', `${step}…`),
+                    );
+                } catch (failure) {
+                    result = { ok: false, committed: false, text: failure.message || String(failure) };
+                }
+
+                const state = !result.ok ? 'failed' : result.committed ? 'done' : 'skipped';
+                return say(state, result.text);
+            }),
+        ),
+    );
+}
+
+module.exports = { actions, run, commit, addDirArgs };

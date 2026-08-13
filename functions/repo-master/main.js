@@ -5,7 +5,8 @@
 // their working trees, and paints the lot as a table that keeps itself up to
 // date. Rows that want attention wear an orange bar. Pick rows with the arrow
 // keys, add more with space, press d to read what changed, and press enter to go
-// to a repository's folder or open it in VS Code, Claude Code or Codex.
+// to a repository's folder, open it in VS Code, Claude Code or Codex, or commit
+// and push every repository picked with one message.
 'use strict';
 
 const fs = require('node:fs');
@@ -53,12 +54,18 @@ Keys:
   esc              clear the selection  r       refresh now
   q                quit
 
-The preview is a box over the table holding the row's diff: up/down or j/k scroll
-it, space turns the page, r reads it again and esc closes it.
+Enter opens the commands in a box over the table. The preview is another such
+box, holding the row's diff: up/down or j/k scroll it, space turns the page, r
+reads it again and esc closes it.
 
 The first repository picked with space is the main project and wears no mark; the
-ones after it are marked +. Every command opens the main project, and claude and
-codex are handed the marked ones as directories they may also work in.`);
+ones after it are marked +. The commands that open something open the main
+project, and claude and codex are handed the marked ones as directories they may
+also work in.
+
+commit & push is the exception: it asks for a message in a box, then commits and
+pushes every picked repository with it — each one on its own, and none of them
+the main project of the others.`);
 }
 
 function parseArgs(argv, env) {
@@ -149,6 +156,8 @@ async function main(argv) {
         menuIndex: 0,
         menuTargets: [],
         preview: null,
+        input: null,
+        report: null,
         actions: actionsLib.actions(process.env),
         notes: { watch: '' },
         message: '',
@@ -275,6 +284,28 @@ async function main(argv) {
         return [...state.selected].map((dir) => byDir.get(dir)).filter(Boolean);
     };
 
+    // A command either runs on what was picked or wants a word first. The ones
+    // that want a word ask for it in a box of their own, and run from there.
+    const startAction = (action) => {
+        if (!action) return;
+        if (action.prompt) {
+            state.mode = 'input';
+            state.input = {
+                action,
+                targets: state.menuTargets,
+                title: action.prompt.title,
+                footer: action.prompt.footer,
+                value: '',
+                column: 0,
+                hint: '',
+            };
+            state.message = '';
+            draw();
+            return;
+        }
+        runAction(action);
+    };
+
     const runAction = async (action) => {
         const chosen = state.menuTargets;
         state.mode = 'table';
@@ -300,6 +331,47 @@ async function main(argv) {
         state.selected.clear();
         state.message = message || '';
         draw();
+    };
+
+    // Committing is the one command the table does itself rather than hand the
+    // terminal to somebody else for, so it says how it is getting on: a line per
+    // repository in a box, rewritten as each one stages, commits and pushes. The
+    // box stays up afterwards to be read; the summary outlives it.
+    const runCommit = async (action, repos, message) => {
+        const entries = repos.map((repo) => ({ repo, state: 'pending', text: 'waiting…' }));
+        state.mode = 'report';
+        state.report = {
+            title: `${action.label} · "${message}"`,
+            entries,
+            running: true,
+            scroll: 0,
+            view: 1,
+        };
+        state.busy = true;
+        state.message = '';
+        draw();
+
+        const outcome = await actionsLib.commit(repos, message, (update) => {
+            const entry = entries.find((row) => row.repo === update.repo);
+            if (entry) Object.assign(entry, { state: update.state, text: update.text });
+            requestRender();
+        });
+
+        state.report.running = false;
+        state.busy = false;
+        state.selected.clear();
+
+        const counted = (name) => outcome.filter((result) => result.state === name).length;
+        const summary = [
+            counted('done') > 0 ? `${counted('done')} pushed` : null,
+            counted('skipped') > 0 ? `${counted('skipped')} unchanged` : null,
+            counted('failed') > 0 ? `${counted('failed')} failed` : null,
+        ].filter(Boolean);
+        state.message = `${action.label}: ${summary.join(' · ') || 'nothing to do'}`;
+        draw();
+
+        // Every one of those repositories just changed underneath the table.
+        refreshAll();
     };
 
     // The preview: what a repository's diff column is actually made of, in a box
@@ -386,6 +458,105 @@ async function main(argv) {
         draw();
     };
 
+    // Typing into the box: printable characters go in at the caret, backspace
+    // takes one out, ctrl-u empties the line, and the arrows move along it. Every
+    // other key the table would answer — j, k, q, d — is a character here and
+    // nothing more, which is why this has a handler of its own.
+    const onInputKey = (key) => {
+        const field = state.input;
+        if (!field) {
+            state.mode = 'table';
+            draw();
+            return;
+        }
+
+        const edit = (value, column) => {
+            field.value = value;
+            field.column = Math.max(0, Math.min(column, value.length));
+            field.hint = '';
+            draw();
+        };
+        const insert = (text) =>
+            edit(field.value.slice(0, field.column) + text + field.value.slice(field.column), field.column + text.length);
+
+        switch (key) {
+            case 'escape': // back to the menu it was opened from
+                state.mode = 'menu';
+                state.input = null;
+                draw();
+                return;
+            case 'enter': {
+                const message = field.value.trim();
+                if (!message) {
+                    field.hint = 'a message first';
+                    draw();
+                    return;
+                }
+                const { action, targets } = field;
+                state.input = null;
+                runCommit(action, targets, message);
+                return;
+            }
+            case 'left':
+                edit(field.value, field.column - 1);
+                return;
+            case 'right':
+                edit(field.value, field.column + 1);
+                return;
+            case 'space':
+                insert(' ');
+                return;
+            case '\x7f': // backspace, and what most terminals send for it
+            case '\b':
+                if (field.column === 0) return;
+                edit(field.value.slice(0, field.column - 1) + field.value.slice(field.column), field.column - 1);
+                return;
+            case '\x15': // ctrl-u
+                edit('', 0);
+                return;
+            case '\x01': // ctrl-a
+                edit(field.value, 0);
+                return;
+            case '\x05': // ctrl-e
+                edit(field.value, field.value.length);
+                return;
+            default:
+                // Anything printable, including a surrogate half of a character
+                // that arrived in two pieces — put together in order, they still
+                // spell what was typed.
+                if (key.length === 1 && key >= ' ') insert(key);
+        }
+    };
+
+    const onReportKey = (key) => {
+        const panel = state.report;
+        if (!panel || key === 'escape' || key === 'q' || key === 'enter') {
+            state.mode = 'table';
+            state.report = null;
+            draw();
+            return;
+        }
+
+        // Out of range is the renderer's business, as in the preview.
+        const page = Math.max(1, panel.view - 1);
+        switch (key) {
+            case 'up':
+            case 'k':
+                panel.scroll--;
+                break;
+            case 'down':
+            case 'j':
+                panel.scroll++;
+                break;
+            case 'space':
+                panel.scroll += page;
+                break;
+            default:
+                return;
+        }
+        draw();
+    };
+
     const onMenuKey = (key) => {
         if (key === 'escape' || key === 'q') {
             state.mode = 'table';
@@ -405,14 +576,14 @@ async function main(argv) {
             return;
         }
         if (key === 'enter') {
-            runAction(state.actions[state.menuIndex]);
+            startAction(state.actions[state.menuIndex]);
             return;
         }
         if (/^[1-9]$/.test(key)) {
             const action = state.actions[Number(key) - 1];
             if (action) {
                 state.menuIndex = Number(key) - 1;
-                runAction(action);
+                startAction(action);
             }
         }
     };
@@ -426,6 +597,14 @@ async function main(argv) {
 
         if (state.mode === 'menu') {
             onMenuKey(key);
+            return;
+        }
+        if (state.mode === 'input') {
+            onInputKey(key);
+            return;
+        }
+        if (state.mode === 'report') {
+            onReportKey(key);
             return;
         }
         if (state.mode === 'preview') {

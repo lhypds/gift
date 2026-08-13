@@ -49,9 +49,30 @@ function shortenHome(value) {
     return value;
 }
 
-/** Visible width in columns, counting a surrogate pair as one character. */
+/**
+ * Characters a terminal draws two columns wide — the CJK blocks, Hangul, the
+ * fullwidth forms and the emoji — and the ones it draws none for, which hang off
+ * the character before them. Everything else is one column.
+ *
+ * A commit message or a repository name written in Chinese is the usual reason
+ * this matters: counted as one column each, a line of it runs through the
+ * right-hand border of whatever box it is in and wraps the frame.
+ */
+const WIDE =
+    /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]|[\u{17000}-\u{18aff}]|[\u{1f300}-\u{1f9ff}]|[\u{20000}-\u{3fffd}]/u;
+const ZERO = /[̀-ͯ҃-҉᪰-᫿⃐-⃰︀-️​-‏]/u;
+
+/** How many columns one character takes. */
+function charWidth(character) {
+    if (ZERO.test(character)) return 0;
+    return WIDE.test(character) ? 2 : 1;
+}
+
+/** Visible width in columns. */
 function width(text) {
-    return [...String(text)].length;
+    let columns = 0;
+    for (const character of String(text)) columns += charWidth(character);
+    return columns;
 }
 
 function pad(text, columns) {
@@ -60,10 +81,22 @@ function pad(text, columns) {
 
 /** Cut to `columns`, marking what was dropped with an ellipsis. */
 function truncate(text, columns) {
-    const characters = [...String(text)];
-    if (characters.length <= columns) return String(text);
-    if (columns <= 1) return characters.slice(0, Math.max(0, columns)).join('');
-    return `${characters.slice(0, columns - 1).join('')}…`;
+    const value = String(text);
+    if (width(value) <= columns) return value;
+    if (columns <= 0) return '';
+
+    // The ellipsis takes a column of its own, unless there is only the one — a
+    // box that narrow has nothing to say either way.
+    const room = columns > 1 ? columns - 1 : columns;
+    let out = '';
+    let used = 0;
+    for (const character of value) {
+        const size = charWidth(character);
+        if (used + size > room) break;
+        out += character;
+        used += size;
+    }
+    return columns > 1 ? `${out}…` : out;
 }
 
 /**
@@ -85,4 +118,4 @@ function formatRelative(time, now = Date.now()) {
     return `${Math.round(hours / 24)}d ago`;
 }
 
-module.exports = { limiter, expandHome, shortenHome, width, pad, truncate, formatRelative };
+module.exports = { limiter, expandHome, shortenHome, width, charWidth, pad, truncate, formatRelative };
