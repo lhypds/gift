@@ -21,8 +21,8 @@ const MAX_DIFF_LINES = 5000;
 
 /** A commit runs the repository's own hooks, which are nobody's business but its. */
 const COMMIT_TIMEOUT_MS = 60000;
-/** A push waits on a network, and sometimes on a large repository. */
-const PUSH_TIMEOUT_MS = 120000;
+/** Reaching a remote waits on a network, and sometimes on a large repository. */
+const NETWORK_TIMEOUT_MS = 120000;
 
 /** What git says when there was nothing there to commit. None of it is an error. */
 const NOTHING_TO_COMMIT = /nothing to commit|nothing added to commit|no changes added to commit/i;
@@ -437,12 +437,12 @@ async function commitAndPush(dir, message, nested = [], onStep = () => {}) {
     }
 
     onStep('pushing');
-    let push = await git(dir, ['push'], PUSH_TIMEOUT_MS);
+    let push = await git(dir, ['push'], NETWORK_TIMEOUT_MS);
     let upstream = false;
     // A branch pushed for the first time has nowhere to push to; git says so and
     // names the command that fixes it, which is the one below.
     if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
-        push = await git(dir, ['push', '--set-upstream', 'origin', branch], PUSH_TIMEOUT_MS);
+        push = await git(dir, ['push', '--set-upstream', 'origin', branch], NETWORK_TIMEOUT_MS);
         upstream = push.ok;
     }
 
@@ -454,4 +454,97 @@ async function commitAndPush(dir, message, nested = [], onStep = () => {}) {
     return { ok: true, committed, pushed: true, text: `${said} · pushed${upstream ? ` to origin/${branch}` : ''}` };
 }
 
-module.exports = { git, identify, inspect, diff, parseRemote, commitAndPush };
+/**
+ * Bring one repository up to date with its remote. Fetching hears what is there
+ * and touches nothing else; pulling takes it, and is the only thing in
+ * repo-master besides a commit that writes to a working tree.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what. A pull
+ * that will not go through — a tree too dirty to merge into, branches that have
+ * diverged with no rule for reconciling them — is git's to refuse, and its
+ * refusal is passed on word for word rather than worked around.
+ *
+ * @param {string} dir Repository root.
+ * @param {boolean} pull Take the commits, rather than only hear about them.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>} `changed` is
+ *   a pull that moved HEAD, or a fetch that found something to move it to.
+ */
+async function sync(dir, pull) {
+    const fail = (text) => ({ ok: false, changed: false, text });
+
+    // Nothing to reach is not worth a network timeout to discover.
+    const remotes = await git(dir, ['remote']);
+    if (!remotes.ok) return fail(firstLine(remotes.stderr) || 'cannot read remotes');
+    if (!remotes.stdout.trim()) return fail('no remote to reach');
+
+    const before = await git(dir, ['rev-parse', 'HEAD']);
+    const result = pull
+        ? await git(dir, ['pull'], NETWORK_TIMEOUT_MS)
+        : await git(dir, ['fetch', '--all'], NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+        return fail(`${pull ? 'pull' : 'fetch'} failed: ${firstLine(result.stderr) || firstLine(result.stdout)}`);
+    }
+
+    if (pull) {
+        const after = await git(dir, ['rev-parse', 'HEAD']);
+        if (!before.ok || !after.ok) return { ok: true, changed: true, text: 'pulled' };
+        if (before.stdout.trim() === after.stdout.trim()) {
+            return { ok: true, changed: false, text: 'already up to date' };
+        }
+
+        const count = await git(dir, ['rev-list', '--count', `${before.stdout.trim()}..HEAD`]);
+        const commits = Number.parseInt(count.stdout, 10);
+        const said = Number.isFinite(commits) && commits > 0 ? `${commits} ${commits === 1 ? 'commit' : 'commits'}` : '';
+        return { ok: true, changed: true, text: `pulled${said ? ` ${said}` : ''}` };
+    }
+
+    // A fetch moves nothing here, so what it is worth is how far the branch
+    // stands from what it was just fetched against.
+    const gap = await git(dir, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']);
+    if (!gap.ok) return { ok: true, changed: false, text: 'fetched · no upstream to compare' };
+
+    const [ahead, behind] = gap.stdout
+        .trim()
+        .split(/\s+/)
+        .map((value) => Number.parseInt(value, 10) || 0);
+    const said = [behind > 0 ? `${behind} behind` : null, ahead > 0 ? `${ahead} ahead` : null].filter(Boolean);
+    return { ok: true, changed: behind > 0, text: `fetched · ${said.join(' · ') || 'up to date'}` };
+}
+
+/**
+ * Add a linked worktree to a repository: another folder with another branch
+ * checked out in it, sharing the one history.
+ *
+ * Which branch is meant is worked out rather than asked twice. A branch that
+ * exists here is checked out; one that exists only on origin is created to
+ * follow it, which is what anybody typing the name of a colleague's branch
+ * meant; a name git has never heard of is a new branch off HEAD. Everything
+ * after that is git's to refuse — a branch already checked out in another
+ * worktree, a folder already there — and its refusal is passed on word for word.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} branch Branch to check out in the new worktree.
+ * @param {string} target Folder to make, which must not exist yet.
+ * @returns {Promise<{ok: boolean, added: boolean, text: string}>}
+ */
+async function addWorktree(dir, branch, target) {
+    const here = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+    const known = here.ok && here.stdout.trim();
+
+    let from = '';
+    if (!known) {
+        const remote = await git(dir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`]);
+        if (remote.ok && remote.stdout.trim()) from = `origin/${branch}`;
+    }
+
+    const args = known ? ['worktree', 'add', target, branch] : ['worktree', 'add', '-b', branch, target, from].filter(Boolean);
+    const added = await git(dir, args);
+    if (!added.ok) return { ok: false, added: false, text: firstLine(added.stderr) || 'worktree add failed' };
+
+    const said = known ? 'checked out' : from ? `new branch, following ${from}` : 'new branch';
+    return { ok: true, added: true, text: `added ${path.basename(target)} · ${said}` };
+}
+
+module.exports = { git, identify, inspect, diff, parseRemote, commitAndPush, sync, addWorktree };

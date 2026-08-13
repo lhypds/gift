@@ -111,4 +111,25 @@ function arrange(root, dirs) {
     return rows;
 }
 
-module.exports = { discover, arrange };
+/**
+ * The rows a search leaves showing: the ones whose name, path or branch holds
+ * the query, upper and lower case alike. A folder of fifty repositories is a
+ * list nobody reads, and a few letters is the quickest way back to the three
+ * that were meant.
+ *
+ * An empty query is not a search, and gives back the same array rather than a
+ * copy of it.
+ *
+ * @param {object[]} rows
+ * @param {string} query
+ */
+function filter(rows, query) {
+    const text = String(query || '').trim().toLowerCase();
+    if (!text) return rows;
+
+    return rows.filter((row) =>
+        [row.name, row.relPath, row.branch].some((field) => String(field || '').toLowerCase().includes(text)),
+    );
+}
+
+module.exports = { discover, arrange, filter };

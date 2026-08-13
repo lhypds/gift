@@ -4,9 +4,11 @@
 // It finds the repositories (nested checkouts and submodules included), watches
 // their working trees, and paints the lot as a table that keeps itself up to
 // date. Rows that want attention wear an orange bar. Pick rows with the arrow
-// keys, add more with space, press d to read what changed, and press enter to go
-// to a repository's folder, open it in VS Code, Claude Code or Codex, or commit
-// and push every repository picked with one message.
+// keys or find them with /, add more with space, and press enter for the menu of
+// what may be done to them: open them in an editor or an agent, read what
+// changed, fetch, pull, branch a worktree off one, commit and push the lot, or
+// delete a folder outright. The commands worth reaching for carry a key of their
+// own, and the menu prints it beside them.
 'use strict';
 
 const fs = require('node:fs');
@@ -16,9 +18,9 @@ const gitLib = require('./lib/git.js');
 const reposLib = require('./lib/repos.js');
 const actionsLib = require('./lib/actions.js');
 const { watchAll } = require('./lib/watch.js');
-const { createScreen } = require('./lib/screen.js');
+const { createScreen, RESET } = require('./lib/screen.js');
 const { createPalette, frame } = require('./lib/table.js');
-const { limiter, expandHome } = require('./lib/util.js');
+const { limiter, expandHome, shortenHome } = require('./lib/util.js');
 
 const VERSION = '0.0.1';
 
@@ -49,23 +51,48 @@ Options:
   -h, --help           Show this help
 
 Keys:
-  up/down or k/j   move                 space   add to the selection
-  enter            run a command        d       preview what changed
-  esc              clear the selection  r       refresh now
+  up/down or k/j   move                  space   add to the selection
+  enter            the command menu      /       search the table
+  e                open with code        d       read the diff
+  f                fetch                 p       pull
+  t then a         add a worktree        D       delete the folder
+  esc              clear                 r       refresh now
   q                quit
 
-Enter opens the commands in a box over the table. The preview is another such
-box, holding the row's diff: up/down or j/k scroll it, space turns the page, r
-reads it again and esc closes it.
+Every one of those keys runs a command the enter menu also holds a row for, on
+the repositories picked with space — or the row under the cursor when none are.
+The menu prints each command's key beside it, so nothing has to be learned twice.
 
-The first repository picked with space is the main project and wears no mark; the
-ones after it are marked +. The commands that open something open the main
-project, and claude and codex are handed the marked ones as directories they may
-also work in.
+The ones that open something open the main project — the first repository picked
+— and claude and codex are handed the rest as directories they may also work in.
+The ones that reach a remote, and the one that deletes a folder, are asked for
+first in a box naming every repository they are about: enter runs it, esc backs
+out. Pulling marks the ones with uncommitted changes, which is where a pull goes
+wrong; deleting marks all of them, and says what else is inside the folders. What
+came of each is reported in a box of its own.
 
-commit & push is the exception: it asks for a message in a box, then commits and
-pushes every picked repository with it — each one on its own, and none of them
-the main project of the others.`);
+t then a adds a worktree: a box asks for a branch, and each picked repository
+gets a folder beside it named for the two of them — ~/projects/gift-feature-x for
+feature-x in ~/projects/gift — which is a row of its own as soon as it exists. A
+branch that is already here is checked out, one that is only on origin is
+followed, and a new name is a new branch off HEAD.
+
+/ narrows the table to the repositories whose name, path or branch holds what is
+typed. The list narrows as it is typed; enter keeps it and gives the keys back,
+esc undoes it. Everything else goes on as before behind it — rows are watched and
+counted whether or not the search is showing them.
+
+The mouse does the whole of a run on its own: the wheel moves through the table
+and through the menu, and a click is the enter key — it opens the menu on the
+row the wheel left the cursor on, and runs the command the wheel left the menu
+pointing at. Where the pointer is lying makes no difference to either. The wheel
+scrolls the diff and the reports as well. A delete is the one thing a click will
+not answer for. Selecting text with the mouse needs a modifier held down while
+the table is up — option in iTerm2, shift most other places.
+
+commit & push treats every picked repository as a project of its own: it asks for
+a message in a box, then commits and pushes each of them with it, none the main
+project of the others.`);
 }
 
 function parseArgs(argv, env) {
@@ -157,7 +184,13 @@ async function main(argv) {
         menuTargets: [],
         preview: null,
         input: null,
+        confirm: null,
         report: null,
+        // What the search left showing. The rows themselves are all still here —
+        // watched, refreshed, counted in the header — and `filter` is only which
+        // of them the table draws and the cursor may reach.
+        filter: '',
+        search: null,
         actions: actionsLib.actions(process.env),
         notes: { watch: '' },
         message: '',
@@ -207,6 +240,15 @@ async function main(argv) {
 
     const refreshAll = () => Promise.all(rows.map(refresh));
 
+    // The rows the search left showing, which is every row until somebody
+    // presses `/`. Everything the user points at is counted in this list rather
+    // than in `rows` — the cursor, the window, the row a key acts on — so a
+    // filtered table behaves like a table of exactly those repositories. It is
+    // worked out afresh each time rather than kept: a row whose branch just
+    // changed may have walked into or out of the search, and a list held on to
+    // would go on showing what was true a moment ago.
+    const shown = () => reposLib.filter(rows, state.filter);
+
     // Repositories come and go — that is rather the point of a folder nobody
     // tidies. Rescanning keeps the rows honest without losing what is already
     // known about the ones that stayed: `rows` is edited in place, so the
@@ -224,7 +266,7 @@ async function main(argv) {
                 return false;
             }
 
-            const under = rows[state.cursor]?.dir;
+            const under = shown()[state.cursor]?.dir;
             const next = [];
             const fresh = [];
             for (const entry of discovered) {
@@ -242,8 +284,10 @@ async function main(argv) {
             rows.push(...next);
 
             for (const dir of [...state.selected]) if (!rows.some((row) => row.dir === dir)) state.selected.delete(dir);
-            const moved = rows.findIndex((row) => row.dir === under);
-            state.cursor = Math.max(0, Math.min(moved === -1 ? state.cursor : moved, rows.length - 1));
+            // The cursor counts the rows a search left showing, not all of them.
+            const visible = shown();
+            const moved = visible.findIndex((row) => row.dir === under);
+            state.cursor = Math.max(0, Math.min(moved === -1 ? state.cursor : moved, visible.length - 1));
 
             onRowsChanged();
             fresh.forEach(refresh);
@@ -269,45 +313,121 @@ async function main(argv) {
         finish = resolve;
     });
 
-    const moveCursor = (delta) => {
-        if (rows.length === 0) return;
-        state.cursor = (state.cursor + delta + rows.length) % rows.length;
+    // The keys wrap, because a list you can walk off the bottom of and come back
+    // round the top of is quicker to get about. A wheel does not: it is a
+    // physical thing that stops, and a flick too many that jumped from the last
+    // repository to the first would be nobody's idea of scrolling.
+    const moveCursor = (delta, wrap = true) => {
+        const visible = shown();
+        if (visible.length === 0) return;
+        const next = state.cursor + delta;
+        state.cursor = wrap
+            ? (next + visible.length) % visible.length
+            : Math.max(0, Math.min(next, visible.length - 1));
         draw();
     };
 
     // The selection is ordered, not just a set of rows: whichever repository was
     // picked first is the main project, and the rest come along behind it. With
     // nothing picked, the row under the cursor is the main project on its own.
+    //
+    // A search hides rows; it does not unpick them. Something picked and then
+    // searched past is still picked, and still worked on — the box every command
+    // opens names every repository it is about, which is where that is noticed.
     const targets = () => {
-        if (state.selected.size === 0) return rows.slice(state.cursor, state.cursor + 1);
+        const visible = shown();
+        if (state.selected.size === 0) return visible.slice(state.cursor, state.cursor + 1);
         const byDir = new Map(rows.map((row) => [row.dir, row]));
         return [...state.selected].map((dir) => byDir.get(dir)).filter(Boolean);
     };
 
-    // A command either runs on what was picked or wants a word first. The ones
-    // that want a word ask for it in a box of their own, and run from there.
-    const startAction = (action) => {
-        if (!action) return;
-        if (action.prompt) {
-            state.mode = 'input';
-            state.input = {
-                action,
-                targets: state.menuTargets,
-                title: action.prompt.title,
-                footer: action.prompt.footer,
-                value: '',
-                column: 0,
-                hint: '',
-            };
-            state.message = '';
-            draw();
-            return;
-        }
-        runAction(action);
+    /** A command by name, for the keys that start one without the menu. */
+    const command = (id) => state.actions.find((entry) => entry.id === id);
+
+    const openMenu = () => {
+        const chosen = targets();
+        if (chosen.length === 0) return;
+        state.menuTargets = chosen;
+        state.menuIndex = 0;
+        state.mode = 'menu';
+        state.message = '';
+        draw();
     };
 
-    const runAction = async (action) => {
-        const chosen = state.menuTargets;
+    // What a command wants before it can run, and where the answer comes from.
+    // Some run on what was picked and nothing else; some want a word typed
+    // first; two of them want to be asked whether they were meant at all. Every
+    // one of them can be started from the menu or from its own key, and this is
+    // the one place that knows what starting it involves — so both go through
+    // here and the two cannot drift apart.
+    //
+    // `back` is where esc returns to, which is the menu when the menu opened it
+    // and the table when a key did.
+    const startAction = (action, chosen, back = 'menu') => {
+        if (!action || chosen.length === 0) return;
+
+        switch (action.kind) {
+            case 'diff':
+                // The main project is the one with a diff to read; the rest were
+                // picked to be worked on together, which reading is not.
+                openPreview(chosen[0]);
+                return;
+            case 'sync':
+                askSync(action, chosen, back);
+                return;
+            case 'delete':
+                askDelete(action, chosen, back);
+                return;
+            case 'worktree':
+                // The folder is not asked for, it is shown: it follows from the
+                // branch, and watching it spell itself out under the line being
+                // typed is worth more than a second question would be.
+                ask(action, chosen, back, (branch) => runWorktree(action, chosen, branch), (branch) =>
+                    chosen.map((repo) => ({
+                        name: repo.name,
+                        text: branch.trim() ? relativeToRoot(actionsLib.worktreePath(repo.dir, branch.trim())) : '…',
+                    })),
+                );
+                return;
+            case 'commit':
+                ask(action, chosen, back, (message) => runCommit(action, chosen, message));
+                return;
+            default:
+                runAction(action, chosen);
+        }
+    };
+
+    /** A word first, in a box of its own, and then the work. */
+    const ask = (action, chosen, back, submit, list = null) => {
+        state.mode = 'input';
+        state.input = {
+            action,
+            targets: chosen,
+            title: action.prompt.title,
+            footer: action.prompt.footer,
+            value: '',
+            column: 0,
+            hint: '',
+            back,
+            submit,
+            // What to say about each repository under the line, given what has
+            // been typed so far. Without one the box lists what changed in them.
+            list,
+        };
+        state.message = '';
+        draw();
+    };
+
+    /** A path as the table writes them: `./gcc3/public/notes`, or `~/elsewhere`. */
+    const relativeToRoot = (target) => {
+        const relative = path.relative(root, target);
+        return !relative || relative.startsWith('..') ? shortenHome(target) : `./${relative}`;
+    };
+
+    // What is run and what it is run on arrive together, because the menu is not
+    // the only thing that starts a command: a key starts one from the table, on
+    // what the cursor and the selection say without a box in between.
+    const runAction = async (action, chosen) => {
         state.mode = 'table';
         state.busy = true;
         state.message = '';
@@ -352,25 +472,28 @@ async function main(argv) {
         draw();
     };
 
-    // Committing is the one command the table does itself rather than hand the
-    // terminal to somebody else for, so it says how it is getting on: a line per
-    // repository in a box, rewritten as each one stages, commits and pushes. The
-    // box stays up afterwards to be read; the summary outlives it.
-    const runCommit = async (action, repos, message) => {
+    // Committing, fetching and pulling are the things the table does itself
+    // rather than hand the terminal to somebody else for, so they say how they
+    // are getting on: a line per repository in a box, rewritten as each one
+    // moves. The box stays up afterwards to be read; the summary outlives it.
+    //
+    // @param {string} title What the box is called.
+    // @param {string} label What the summary line calls the work afterwards.
+    // @param {object[]} repos
+    // @param {{done: string, skipped: string}} words How to count the outcomes up.
+    // @param {(onUpdate: Function) => Promise<object[]>} start Kicks the work off.
+    // @param {() => void} [after] What to put right afterwards. Refreshing the
+    //   rows is enough for work done inside them; work that makes or unmakes a
+    //   folder has to go looking for rows as well.
+    const runReport = async (title, label, repos, words, start, after = refreshAll) => {
         const entries = repos.map((repo) => ({ repo, state: 'pending', text: 'waiting…' }));
         state.mode = 'report';
-        state.report = {
-            title: `${action.label} · "${message}"`,
-            entries,
-            running: true,
-            scroll: 0,
-            view: 1,
-        };
+        state.report = { title, entries, words, running: true, scroll: 0, view: 1 };
         state.busy = true;
         state.message = '';
         draw();
 
-        const outcome = await actionsLib.commit(repos, message, (update) => {
+        const outcome = await start((update) => {
             const entry = entries.find((row) => row.repo === update.repo);
             if (entry) Object.assign(entry, { state: update.state, text: update.text });
             requestRender();
@@ -382,15 +505,162 @@ async function main(argv) {
 
         const counted = (name) => outcome.filter((result) => result.state === name).length;
         const summary = [
-            counted('done') > 0 ? `${counted('done')} pushed` : null,
-            counted('skipped') > 0 ? `${counted('skipped')} unchanged` : null,
+            counted('done') > 0 ? `${counted('done')} ${words.done}` : null,
+            counted('skipped') > 0 ? `${counted('skipped')} ${words.skipped}` : null,
             counted('failed') > 0 ? `${counted('failed')} failed` : null,
         ].filter(Boolean);
-        state.message = `${action.label}: ${summary.join(' · ') || 'nothing to do'}`;
+        state.message = `${label}: ${summary.join(' · ') || 'nothing to do'}`;
         draw();
 
-        // Every one of those repositories just changed underneath the table.
-        refreshAll();
+        // Every one of those repositories may have just changed underneath the
+        // table — a pull moves the working tree, and a fetch moves the count of
+        // what is waiting in it.
+        after();
+    };
+
+    /** A rescan and then a refresh: rows have come or gone, not merely moved. */
+    const rescanAfter = () => {
+        rescan()
+            .then(refreshAll)
+            .catch(() => {});
+    };
+
+    const runCommit = (action, repos, message) =>
+        runReport(
+            `${action.label} · "${message}"`,
+            action.label,
+            repos,
+            { done: 'pushed', skipped: 'unchanged' },
+            (onUpdate) => actionsLib.commit(repos, message, onUpdate),
+        );
+
+    const runSync = (kind, repos) =>
+        runReport(
+            `${actionsLib.SYNC[kind].label} · ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}`,
+            actionsLib.SYNC[kind].label,
+            repos,
+            kind === 'pull'
+                ? { done: 'updated', skipped: 'already up to date' }
+                : { done: 'with new commits', skipped: 'up to date' },
+            (onUpdate) => actionsLib.sync(repos, kind, onUpdate),
+        );
+
+    // A worktree is a folder that was not there before, and a folder under the
+    // watched root is a row: the rescan is what turns the one into the other,
+    // rather than leaving it to the next sweep half a minute later.
+    const runWorktree = (action, repos, branch) =>
+        runReport(
+            `${action.label} · ${branch}`,
+            action.label,
+            repos,
+            { done: 'added', skipped: 'left alone' },
+            (onUpdate) => actionsLib.worktrees(repos, branch, onUpdate),
+            rescanAfter,
+        );
+
+    const runDelete = (action, repos) =>
+        runReport(
+            `${action.label} · ${repos.length} ${repos.length === 1 ? 'folder' : 'folders'}`,
+            action.label,
+            repos,
+            { done: 'deleted', skipped: 'gone already' },
+            (onUpdate) => actionsLib.remove(repos, onUpdate),
+            rescanAfter,
+        );
+
+    // Fetching and pulling are asked for before they are done, because they reach
+    // a remote and a pull writes into a working tree. The box is what goes
+    // between: it names every repository about to be reached for, and pulling
+    // marks the ones with uncommitted changes, which is where a pull goes wrong.
+    const askSync = (action, chosen, back) => {
+        state.mode = 'confirm';
+        state.confirm = { kind: action.sync, action, targets: chosen, back, scroll: 0, view: 1 };
+        state.message = '';
+        draw();
+    };
+
+    /**
+     * Deleting is asked for in the same box, and for better reason: there is
+     * nothing to undo it. What it removes is a folder, so a repository nested
+     * inside one being deleted goes with it, and the box says so rather than
+     * leaving it to be discovered afterwards.
+     *
+     * The watched root is not on offer. It is the folder the table is a table of,
+     * and deleting it is not a thing anybody meant by pointing at a row in it.
+     */
+    const askDelete = (action, chosen, back) => {
+        const safe = chosen.filter((repo) => repo.dir !== root);
+        if (safe.length === 0) {
+            state.mode = 'table';
+            state.message = `${action.label}: ${shortenHome(root)} is the folder being watched`;
+            draw();
+            return;
+        }
+
+        const doomed = new Set(safe.map((repo) => repo.dir));
+        state.mode = 'confirm';
+        state.confirm = {
+            kind: 'delete',
+            action,
+            targets: safe,
+            // Rows that are not being deleted but will be gone all the same:
+            // they live inside a folder that is.
+            alsoGone: rows.filter(
+                (row) =>
+                    !doomed.has(row.dir) &&
+                    [...doomed].some((dir) => {
+                        const relative = path.relative(dir, row.dir);
+                        return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+                    }),
+            ),
+            back,
+            scroll: 0,
+            view: 1,
+        };
+        state.message = '';
+        draw();
+    };
+
+    const onConfirmKey = (key) => {
+        const panel = state.confirm;
+        if (!panel || key === 'escape' || key === 'q') {
+            state.mode = panel?.back === 'menu' ? 'menu' : 'table';
+            state.confirm = null;
+            draw();
+            return;
+        }
+        // A click answers for enter everywhere else in repo-master. Not here, and
+        // only for the one command: a folder is not to be deleted by a mouse that
+        // was somewhere near the box, and the keyboard is where the answer to a
+        // question this final should come from.
+        if (key === 'enter' || (key === 'click' && panel.kind !== 'delete')) {
+            const { kind, action, targets: chosen } = panel;
+            state.confirm = null;
+            if (kind === 'delete') runDelete(action, chosen);
+            else runSync(kind, chosen);
+            return;
+        }
+
+        // Out of range is the renderer's business, as in the preview.
+        const page = Math.max(1, panel.view - 1);
+        switch (key) {
+            case 'up':
+            case 'k':
+            case 'wheel-up':
+                panel.scroll--;
+                break;
+            case 'down':
+            case 'j':
+            case 'wheel-down':
+                panel.scroll++;
+                break;
+            case 'space':
+                panel.scroll += page;
+                break;
+            default:
+                return;
+        }
+        draw();
     };
 
     // The preview: what a repository's diff column is actually made of, in a box
@@ -422,8 +692,7 @@ async function main(argv) {
             });
     };
 
-    const openPreview = () => {
-        const repo = rows[state.cursor];
+    const openPreview = (repo) => {
         if (!repo) return;
         state.mode = 'preview';
         state.message = '';
@@ -456,10 +725,12 @@ async function main(argv) {
         switch (key) {
             case 'up':
             case 'k':
+            case 'wheel-up':
                 panel.scroll--;
                 break;
             case 'down':
             case 'j':
+            case 'wheel-down':
                 panel.scroll++;
                 break;
             case 'space':
@@ -477,10 +748,47 @@ async function main(argv) {
         draw();
     };
 
-    // Typing into the box: printable characters go in at the caret, backspace
-    // takes one out, ctrl-u empties the line, and the arrows move along it. Every
-    // other key the table would answer — j, k, q, d — is a character here and
-    // nothing more, which is why this has a handler of its own.
+    // Typing a line: printable characters go in at the caret, backspace takes one
+    // out, ctrl-u empties it, and the arrows move along it. Every other key the
+    // table would answer — j, k, q, d — is a character while a line is being
+    // typed and nothing more, which is why typing has handlers of its own.
+    //
+    // A commit message and a search are the same editing, so it is written once.
+    // Returns whether the key belonged to the line at all.
+    const typed = (field, key) => {
+        const set = (value, column) => {
+            field.value = value;
+            field.column = Math.max(0, Math.min(column, value.length));
+            return true;
+        };
+        const insert = (text) =>
+            set(field.value.slice(0, field.column) + text + field.value.slice(field.column), field.column + text.length);
+
+        switch (key) {
+            case 'left':
+                return set(field.value, field.column - 1);
+            case 'right':
+                return set(field.value, field.column + 1);
+            case 'space':
+                return insert(' ');
+            case '\x7f': // backspace, and what most terminals send for it
+            case '\b':
+                if (field.column === 0) return true;
+                return set(field.value.slice(0, field.column - 1) + field.value.slice(field.column), field.column - 1);
+            case '\x15': // ctrl-u
+                return set('', 0);
+            case '\x01': // ctrl-a
+                return set(field.value, 0);
+            case '\x05': // ctrl-e
+                return set(field.value, field.value.length);
+            default:
+                // Anything printable, including a surrogate half of a character
+                // that arrived in two pieces — put together in order, they still
+                // spell what was typed.
+                return key.length === 1 && key >= ' ' ? insert(key) : false;
+        }
+    };
+
     const onInputKey = (key) => {
         const field = state.input;
         if (!field) {
@@ -489,62 +797,112 @@ async function main(argv) {
             return;
         }
 
-        const edit = (value, column) => {
-            field.value = value;
-            field.column = Math.max(0, Math.min(column, value.length));
-            field.hint = '';
-            draw();
-        };
-        const insert = (text) =>
-            edit(field.value.slice(0, field.column) + text + field.value.slice(field.column), field.column + text.length);
-
         switch (key) {
-            case 'escape': // back to the menu it was opened from
-                state.mode = 'menu';
+            case 'escape': // back to wherever the command was started from
+                state.mode = field.back === 'menu' ? 'menu' : 'table';
                 state.input = null;
                 draw();
                 return;
             case 'enter': {
-                const message = field.value.trim();
-                if (!message) {
-                    field.hint = 'a message first';
+                const value = field.value.trim();
+                if (!value) {
+                    field.hint = field.action.prompt.empty || 'a word first';
                     draw();
                     return;
                 }
-                const { action, targets } = field;
+                const { submit } = field;
                 state.input = null;
-                runCommit(action, targets, message);
+                submit(value);
                 return;
             }
-            case 'left':
-                edit(field.value, field.column - 1);
-                return;
-            case 'right':
-                edit(field.value, field.column + 1);
-                return;
-            case 'space':
-                insert(' ');
-                return;
-            case '\x7f': // backspace, and what most terminals send for it
-            case '\b':
-                if (field.column === 0) return;
-                edit(field.value.slice(0, field.column - 1) + field.value.slice(field.column), field.column - 1);
-                return;
-            case '\x15': // ctrl-u
-                edit('', 0);
-                return;
-            case '\x01': // ctrl-a
-                edit(field.value, 0);
-                return;
-            case '\x05': // ctrl-e
-                edit(field.value, field.value.length);
-                return;
             default:
-                // Anything printable, including a surrogate half of a character
-                // that arrived in two pieces — put together in order, they still
-                // spell what was typed.
-                if (key.length === 1 && key >= ' ') insert(key);
+                if (typed(field, key)) {
+                    field.hint = '';
+                    draw();
+                }
         }
+    };
+
+    /**
+     * The search line, which is not a box. Watching the list shrink to what was
+     * meant is the whole point of typing into it, and a box in the middle of the
+     * screen would cover the rows being narrowed down — so it is drawn along the
+     * bottom, where the keys usually are, and the table stays whole above it.
+     */
+    const openSearch = () => {
+        state.mode = 'search';
+        state.search = { value: state.filter, column: state.filter.length };
+        state.message = '';
+        draw();
+    };
+
+    /**
+     * A filter changing moves the ground under the cursor: the row it was on may
+     * not be in the list any more. It follows that row for as long as the row is
+     * still showing, and otherwise starts again at the top.
+     */
+    const setFilter = (value) => {
+        const under = shown()[state.cursor];
+        state.filter = value;
+        const moved = under ? shown().findIndex((row) => row.dir === under.dir) : -1;
+        state.cursor = moved === -1 ? 0 : moved;
+    };
+
+    const onSearchKey = (key) => {
+        const field = state.search;
+        if (!field) {
+            state.mode = 'table';
+            draw();
+            return;
+        }
+
+        // Enter keeps what is showing and hands the keys back to the table; esc
+        // undoes the search, which is what somebody who has thought better of one
+        // wants — the list they had before, not the list they were typing towards.
+        if (key === 'enter' || key === 'click') {
+            state.mode = 'table';
+            state.search = null;
+            draw();
+            return;
+        }
+        if (key === 'escape') {
+            state.mode = 'table';
+            state.search = null;
+            setFilter('');
+            draw();
+            return;
+        }
+        // The cursor still moves while the search is being typed, so a row can be
+        // reached without the keys changing hands. Only by arrow and wheel: j and
+        // k are letters here, as they are in any other line being typed.
+        if (key === 'up' || key === 'wheel-up') {
+            moveCursor(-1, false);
+            return;
+        }
+        if (key === 'down' || key === 'wheel-down') {
+            moveCursor(1, false);
+            return;
+        }
+
+        if (typed(field, key)) {
+            setFilter(field.value);
+            draw();
+        }
+    };
+
+    /**
+     * `t` is not a command but the way to the ones about worktrees: press it and
+     * a box says which letter does what. There is one of them today, and the box
+     * is where the next will go.
+     */
+    const onWorktreeKey = (key) => {
+        const chosen = state.menuTargets;
+        state.mode = 'table';
+        if (key !== 'a' || chosen.length === 0) {
+            draw();
+            return;
+        }
+        startAction(command('worktree'), chosen, 'table');
     };
 
     const onReportKey = (key) => {
@@ -561,10 +919,12 @@ async function main(argv) {
         switch (key) {
             case 'up':
             case 'k':
+            case 'wheel-up':
                 panel.scroll--;
                 break;
             case 'down':
             case 'j':
+            case 'wheel-down':
                 panel.scroll++;
                 break;
             case 'space':
@@ -583,26 +943,36 @@ async function main(argv) {
             return;
         }
         // k and j move here too, the same as they do in the table: a menu is no
-        // reason to put a hand back on the arrow keys.
-        if (key === 'up' || key === 'k') {
-            state.menuIndex = (state.menuIndex - 1 + state.actions.length) % state.actions.length;
+        // reason to put a hand back on the arrow keys. So does the wheel, and it
+        // stops at the ends the way it does in the table, so the whole of a run
+        // — pick a repository, open this, pick a command, run it — can be done
+        // without touching the keyboard at all.
+        const move = (delta, wrap) => {
+            const count = state.actions.length;
+            const next = state.menuIndex + delta;
+            state.menuIndex = wrap ? (next + count) % count : Math.max(0, Math.min(next, count - 1));
             draw();
+        };
+        if (key === 'up' || key === 'k') return move(-1, true);
+        if (key === 'down' || key === 'j') return move(1, true);
+        if (key === 'wheel-up') return move(-1, false);
+        if (key === 'wheel-down') return move(1, false);
+
+        // A click runs whatever the wheel left the menu pointing at, and never
+        // what the pointer is lying over: the box is a few lines in the middle
+        // of the screen, and picking by aim is not what it is for.
+        if (key === 'enter' || key === 'click') {
+            startAction(state.actions[state.menuIndex], state.menuTargets);
             return;
         }
-        if (key === 'down' || key === 'j') {
-            state.menuIndex = (state.menuIndex + 1) % state.actions.length;
-            draw();
-            return;
-        }
-        if (key === 'enter') {
-            startAction(state.actions[state.menuIndex]);
-            return;
-        }
+        // The number keys reach the first nine rows. A tenth command is one more
+        // than there are digits, and it is reached the way anything else is —
+        // with the arrows, or with the key it carries in the table.
         if (/^[1-9]$/.test(key)) {
             const action = state.actions[Number(key) - 1];
             if (action) {
                 state.menuIndex = Number(key) - 1;
-                startAction(action);
+                startAction(action, state.menuTargets);
             }
         }
     };
@@ -622,12 +992,24 @@ async function main(argv) {
             onInputKey(key);
             return;
         }
+        if (state.mode === 'confirm') {
+            onConfirmKey(key);
+            return;
+        }
         if (state.mode === 'report') {
             onReportKey(key);
             return;
         }
         if (state.mode === 'preview') {
             onPreviewKey(key);
+            return;
+        }
+        if (state.mode === 'search') {
+            onSearchKey(key);
+            return;
+        }
+        if (state.mode === 'worktree') {
+            onWorktreeKey(key);
             return;
         }
 
@@ -643,29 +1025,76 @@ async function main(argv) {
             case 'j':
                 moveCursor(1);
                 return;
+            // The wheel moves the cursor rather than the window under it: the
+            // row the cursor is on is the row enter and d act on, and a table
+            // that scrolled away from it would leave the two pointing apart.
+            // The window follows along, which is the scrolling anyone wanted.
+            case 'wheel-up':
+                moveCursor(-1, false);
+                return;
+            case 'wheel-down':
+                moveCursor(1, false);
+                return;
             case 'space': {
-                const repo = rows[state.cursor];
+                const repo = shown()[state.cursor];
                 if (!repo) return;
                 if (state.selected.has(repo.dir)) state.selected.delete(repo.dir);
                 else state.selected.add(repo.dir);
                 moveCursor(1); // space walks down the list, the way ticking boxes does
                 return;
             }
-            case 'd':
-                openPreview();
+            // The keys that start a command start the same command the menu holds
+            // a row for, on the same repositories — the ones picked, or the row
+            // under the cursor when none are. What each one then does about being
+            // asked first is the command's own business and written into it: the
+            // editor opens, fetch and pull ask, delete asks in earnest.
+            case 'e':
+                startAction(command('code'), targets(), 'table');
                 return;
-            case 'enter': {
+            case 'd':
+                // The one command that reads a row rather than acting on a
+                // selection, so the row under the cursor is what it reads —
+                // whatever else may be picked for the commands that do act.
+                startAction(command('diff'), shown().slice(state.cursor, state.cursor + 1), 'table');
+                return;
+            case 'f':
+                startAction(command('fetch'), targets(), 'table');
+                return;
+            case 'p':
+                startAction(command('pull'), targets(), 'table');
+                return;
+            case 'D':
+                startAction(command('delete'), targets(), 'table');
+                return;
+            case 't': {
                 const chosen = targets();
                 if (chosen.length === 0) return;
-                state.menuTargets = chosen;
-                state.menuIndex = 0;
-                state.mode = 'menu';
+                state.menuTargets = chosen; // the box says which repositories it is about
+                state.mode = 'worktree';
                 state.message = '';
                 draw();
                 return;
             }
+            case '/':
+                openSearch();
+                return;
+            case 'enter':
+                openMenu();
+                return;
+            case 'click':
+                // A click is the enter key and nothing besides. The wheel is
+                // what picks a row; a click that picked one too would act on
+                // whatever the pointer happened to be lying over rather than on
+                // the row you had chosen, and the pointer is not where you were
+                // looking.
+                openMenu();
+                return;
             case 'escape':
-                state.selected.clear();
+                // One thing at a time, the newest first: a search is undone
+                // before a selection is, because it is the one just made and the
+                // one hiding rows. A second esc clears what was picked.
+                if (state.filter) setFilter('');
+                else state.selected.clear();
                 state.message = '';
                 draw();
                 return;
@@ -752,7 +1181,9 @@ if (require.main === module) {
             process.exitCode = code;
         })
         .catch((error) => {
-            process.stdout.write('\x1b[?25h\x1b[?1049l');
+            // Whatever went wrong, the terminal is not to be left holding the
+            // alternate screen, a hidden cursor or a mouse it reports on.
+            process.stdout.write(RESET);
             console.error(`repo-master: ${error && error.message ? error.message : error}`);
             process.exit(1);
         });

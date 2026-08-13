@@ -8,6 +8,7 @@
 
 const { width, pad, truncate, formatRelative, shortenHome } = require('./util.js');
 const { overlay, patchTone } = require('./modal.js');
+const reposLib = require('./repos.js');
 
 /** Each colour as a truecolor triple and as its nearest xterm-256 shade. */
 const ORANGE = { rgb: [217, 119, 87], xterm: 173 }; // Claude's orange
@@ -129,18 +130,28 @@ function previewPanel(state) {
     });
 }
 
-/** The menu enter opens: what may be run on the repositories that were picked. */
+/**
+ * The menu enter opens: what may be run on the repositories that were picked.
+ *
+ * Every command that also has a key of its own says so, in a column down the
+ * right — this is the one place the whole list is written down, and somebody
+ * reading it to find a command is exactly the person who would rather press one
+ * key next time.
+ */
 function menuPanel(state) {
     const [main, ...added] = state.menuTargets;
     const on = main ? main.name : `${state.menuTargets.length} repos`;
+    const digits = String(state.actions.length).length;
+    const column = Math.max(...state.actions.map((action) => width(action.label)));
 
     return {
         title: `Run on ${on}${added.length > 0 ? ` + ${added.length} more` : ''}`,
-        lines: state.actions.map(
-            (action, index) => `${index === state.menuIndex ? '>' : ' '} ${index + 1}  ${action.label}`,
-        ),
+        lines: state.actions.map((action, index) => {
+            const row = `${index === state.menuIndex ? '>' : ' '} ${String(index + 1).padStart(digits)}  `;
+            return `${row}${action.key ? `${pad(action.label, column)}   ${action.key}` : action.label}`;
+        }),
         paint: (line, index) => (index === state.menuIndex ? 'bold' : null),
-        footer: `1-${state.actions.length} pick · up/down move · enter run · esc cancel`,
+        footer: `1-${Math.min(9, state.actions.length)} pick · up/down move · enter run · esc cancel`,
         // Only of any use in a window too short for the whole menu, where it
         // keeps the line being pointed at on screen; the modal clamps it.
         scroll: state.menuIndex,
@@ -149,15 +160,40 @@ function menuPanel(state) {
 }
 
 /**
- * The box a commit message is typed into, with the repositories it is about
- * listed under it — nobody should have to remember what they picked while
- * writing the message for it.
+ * What `t` opens: the worktree commands and the letter each answers to. One
+ * command is a thin box, but a chord nobody can see the far half of is worse,
+ * and this is where the next one goes.
+ */
+function worktreePanel(state) {
+    const [main, ...added] = state.menuTargets;
+    const on = main ? main.name : 'nothing';
+
+    return {
+        title: `Worktree · ${on}${added.length > 0 ? ` + ${added.length} more` : ''}`,
+        lines: ['  a  add — a branch in a folder of its own, beside this one'],
+        paint: () => 'dim',
+        footer: 'a add · esc cancel',
+        width: MENU_WIDTH,
+    };
+}
+
+/**
+ * The box a word is typed into — a commit message, a branch name — with the
+ * repositories it is about listed under it. Nobody should have to remember what
+ * they picked while writing the message for it, and what is worth saying about
+ * each one depends on what is being asked: a commit is about what changed, a
+ * worktree about the folder that is going to appear.
  */
 function promptPanel(state) {
     const field = state.input;
     if (!field) return null;
 
-    const listed = labelled(field.targets.map((repo) => ({ name: repo.name, text: changeCell(repo) })));
+    // The list is asked for the value as it stands, because for some questions
+    // the answer is half of what is being listed: a branch being typed is a
+    // folder appearing, letter by letter, under the line it is typed on.
+    const listed = labelled(
+        field.list ? field.list(field.value) : field.targets.map((repo) => ({ name: repo.name, text: changeCell(repo) })),
+    );
     const count = `${field.targets.length} ${field.targets.length === 1 ? 'repo' : 'repos'}`;
 
     return {
@@ -173,7 +209,75 @@ function promptPanel(state) {
     };
 }
 
-/** What became of each repository the commit was run on, told as it happens. */
+/**
+ * What is about to be done, and to what.
+ *
+ * The list is the point of it: `p` on a folder of thirty repositories is not a
+ * keystroke anybody should be able to make without seeing which thirty. A pull
+ * merges into a working tree, so the ones with something uncommitted in them are
+ * marked, and named again in the footer.
+ */
+function syncPanel(ask) {
+    const { kind, targets } = ask;
+    const dirty = kind === 'pull' ? targets.filter((repo) => repo.hasChanges) : [];
+
+    return Object.assign(ask, {
+        title: `${kind === 'pull' ? 'Pull' : 'Fetch'} ${targets.length} ${targets.length === 1 ? 'repository' : 'repositories'}`,
+        lines: labelled(
+            targets.map((repo) => ({
+                name: repo.name,
+                text: `${repo.branch || '…'}${repo.hasChanges ? `  · ${changeCell(repo)} uncommitted` : ''}`,
+            })),
+        ),
+        paint: (line, index) => (kind === 'pull' && targets[index] && targets[index].hasChanges ? 'warn' : 'dim'),
+        status: dirty.length > 0 ? `${dirty.length} with uncommitted changes` : '',
+        footer: `enter ${kind} · esc cancel`,
+        width: REPORT_WIDTH,
+    });
+}
+
+/**
+ * The same box, asked in earnest. Every other question in repo-master is asked
+ * about something that can be done again; this one cannot be, so it is drawn to
+ * be read rather than answered: every folder named with its path, the whole of
+ * it orange, what is uncommitted in each said plainly, and the repositories that
+ * are not being deleted but will be gone all the same — the ones living inside a
+ * folder that is — named underneath.
+ */
+function deletePanel(ask) {
+    const { targets, alsoGone } = ask;
+    const lines = labelled([
+        ...targets.map((repo) => ({
+            name: repo.name,
+            text: `${repo.relPath}${repo.hasChanges ? `  · ${changeCell(repo)} uncommitted` : ''}`,
+        })),
+        ...alsoGone.map((repo) => ({ name: repo.name, text: `${repo.relPath}  · inside one of them` })),
+    ]);
+
+    const dirty = targets.filter((repo) => repo.hasChanges).length;
+    const said = [
+        dirty > 0 ? `${dirty} with uncommitted changes` : '',
+        alsoGone.length > 0 ? `${alsoGone.length} more inside them` : '',
+        'nothing undoes this',
+    ].filter(Boolean);
+
+    return Object.assign(ask, {
+        title: `Delete ${targets.length} ${targets.length === 1 ? 'folder' : 'folders'}`,
+        lines,
+        paint: (line, index) => (index < targets.length ? 'warn' : 'dim'),
+        status: said.join(' · '),
+        footer: 'enter delete · esc cancel',
+        width: REPORT_WIDTH,
+    });
+}
+
+function confirmPanel(state) {
+    const ask = state.confirm;
+    if (!ask) return null;
+    return ask.kind === 'delete' ? deletePanel(ask) : syncPanel(ask);
+}
+
+/** What became of each repository the work was run on, told as it happens. */
 function reportPanel(state) {
     const report = state.report;
     if (!report) return null;
@@ -182,9 +286,12 @@ function reportPanel(state) {
     const counted = (name) => report.entries.filter((entry) => entry.state === name).length;
     const waiting = report.entries.filter((entry) => entry.state === 'working' || entry.state === 'pending').length;
 
+    // What "done" and "skipped" are worth calling depends on what was run: a
+    // commit pushes or leaves unchanged, a fetch finds something or does not.
+    const words = report.words;
     const summary = [
-        counted('done') > 0 ? `${counted('done')} pushed` : null,
-        counted('skipped') > 0 ? `${counted('skipped')} unchanged` : null,
+        counted('done') > 0 ? `${counted('done')} ${words.done}` : null,
+        counted('skipped') > 0 ? `${counted('skipped')} ${words.skipped}` : null,
         counted('failed') > 0 ? `${counted('failed')} failed` : null,
     ]
         .filter(Boolean)
@@ -208,8 +315,12 @@ function panelFor(state) {
             return previewPanel(state);
         case 'menu':
             return menuPanel(state);
+        case 'worktree':
+            return worktreePanel(state);
         case 'input':
             return promptPanel(state);
+        case 'confirm':
+            return confirmPanel(state);
         case 'report':
             return reportPanel(state);
         default:
@@ -304,7 +415,18 @@ function frame(state, palette, size) {
         return panel ? overlay(lines, panel, palette, size) : lines;
     };
 
-    const rowCells = state.rows.map((repo) => {
+    // A search does not throw rows away — they are still watched, still counted
+    // in the header — it only decides which of them this frame is of. The cursor
+    // and the window count these, and so does everything the keys act on.
+    const rows = reposLib.filter(state.rows, state.filter);
+
+    // Only the renderer finds out that the list is shorter than the cursor
+    // thought: a row whose branch changed may have walked out of the search
+    // between one key and the next. `scroll` is written back for the same
+    // reason, a few lines further down.
+    if (state.cursor >= rows.length) state.cursor = rows.length - 1;
+
+    const rowCells = rows.map((repo) => {
         const diff = diffCells(repo);
         return {
             repo: `${treePrefix(repo.depth)}${repo.name}`,
@@ -348,6 +470,10 @@ function frame(state, palette, size) {
         `${state.rows.length} ${state.rows.length === 1 ? 'repo' : 'repos'}`,
         `${changed} changed`,
     ];
+    // The header counts every repository whatever is showing, and then says how
+    // much of that this is: a filtered table that only counted itself would let
+    // somebody read "2 repos · 0 changed" off a folder of thirty.
+    if (state.filter) summary.push(`“${state.filter}” · ${rows.length} showing`);
     summary.push(...Object.values(state.notes).filter(Boolean));
 
     const head = [
@@ -359,35 +485,87 @@ function frame(state, palette, size) {
 
     const tail = [palette.dim(rule)];
 
-    if (state.interactive) {
+    // The search is typed on the line the keys are usually written on. It is not
+    // a box, because the list narrowing under it is the whole point of typing,
+    // and a box in the middle of the screen would cover the rows being looked
+    // for. What is left of the keys goes after it.
+    if (state.mode === 'search' && state.search) {
+        const field = state.search;
+        const before = `/${field.value.slice(0, field.column)}`;
+        const rest = field.value.slice(field.column);
+        // The terminal's own cursor is hidden while the table is up, so the
+        // character the caret stands on wears reversed video, as it does in a box.
+        const caret = palette.enabled ? palette.caret(rest[0] || ' ') : rest[0] || '_';
+        tail.push(fit(`${before}${caret}${rest.slice(1)}${palette.dim('   enter keep · esc clear')}`));
+    } else if (state.interactive) {
         tail.push(
             palette.dim(
                 fit(
-                    ['up/down move', 'space select', 'enter run', 'd preview', 'esc clear', 'r refresh', 'q quit'].join(
-                        ' · ',
-                    ),
+                    [
+                        'up/down move',
+                        'space select',
+                        'enter run',
+                        'e code',
+                        'd diff',
+                        'f fetch',
+                        'p pull',
+                        't worktree',
+                        'D delete',
+                        '/ search',
+                        state.filter ? 'esc clear search' : 'esc clear',
+                        'r refresh',
+                        'q quit',
+                    ].join(' · '),
                 ),
             ),
         );
     }
 
     // A row that says "error" owes an explanation; the cursor asks for it.
-    const under = state.rows[state.cursor];
+    const under = rows[state.cursor];
     const message = state.message || (under && under.error ? `${under.name}: ${under.error}` : '');
     if (message) tail.push(palette.orange(fit(message)));
 
-    if (state.rows.length === 0) {
-        return done([...head, palette.dim(fit(`  no git repositories under ${shortenHome(state.root)}`)), ...tail]);
+    /**
+     * The finished frame, with the closing rule and the keys pushed down to the
+     * foot of the window.
+     *
+     * They belong to the window rather than to the table: a folder of three
+     * repositories would otherwise leave them a third of the way down the
+     * screen with nothing underneath, and they would jump about as repositories
+     * came and went or a search narrowed the list. Blank rows make up the
+     * difference, so the one place to look for them is the bottom.
+     *
+     * On paper there is no window to reach the foot of, and trailing blank lines
+     * down a pipe are somebody else's problem — so this is only done for a
+     * terminal.
+     */
+    const settle = (body) => {
+        const lines = [...head, ...body, ...tail];
+        if (!state.interactive) return done(lines);
+
+        // The height screen.draw() paints into: one line short of the window,
+        // which is the line it keeps free.
+        const height = Math.max(1, size.rows - 1);
+        const gap = Math.max(0, height - lines.length);
+        return done([...head, ...body, ...Array(gap).fill(''), ...tail]);
+    };
+
+    if (rows.length === 0) {
+        const empty = state.filter
+            ? `  nothing matching “${state.filter}” — esc clears it`
+            : `  no git repositories under ${shortenHome(state.root)}`;
+        return settle([palette.dim(fit(empty))]);
     }
 
     // Whatever is left over after the fixed parts belongs to the rows, minus a
     // line for the "there is more" note when they do not all fit.
     const spare = Math.max(1, size.rows - 1 - head.length - tail.length);
-    const budget = state.rows.length > spare ? Math.max(1, spare - 1) : spare;
+    const budget = rows.length > spare ? Math.max(1, spare - 1) : spare;
 
     // Every box names the repositories it is about, and none of them takes the
     // cursor bar with it: the table behind goes on saying where you were.
-    const view = viewport(state.rows.length, state.cursor, state.scroll || 0, budget);
+    const view = viewport(rows.length, state.cursor, state.scroll || 0, budget);
     state.scroll = view.start;
 
     // The repository picked first is the main project and wears no mark; the ones
@@ -396,7 +574,7 @@ function frame(state, palette, size) {
 
     const body = [];
     for (let index = view.start; index < view.end; index++) {
-        const repo = state.rows[index];
+        const repo = rows[index];
         const cursor = index === state.cursor;
         const selected = state.selected.has(repo.dir);
         const gutter = `${cursor ? '>' : ' '}${selected && repo.dir !== mainDir ? '+' : ' '}`;
@@ -413,7 +591,7 @@ function frame(state, palette, size) {
     }
 
     const above = view.start;
-    const below = state.rows.length - view.end;
+    const below = rows.length - view.end;
     if (above > 0 || below > 0) {
         const more = [];
         if (above > 0) more.push(`${above} above`);
@@ -421,7 +599,7 @@ function frame(state, palette, size) {
         body.push(palette.dim(fit(`  … ${more.join(' · ')}`)));
     }
 
-    return done([...head, ...body, ...tail]);
+    return settle(body);
 }
 
 module.exports = { createPalette, frame, needsAttention };

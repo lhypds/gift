@@ -31,11 +31,11 @@
             "advanced": true
         },
         {
-            "key": "vscode_command",
-            "env": "GIFT_REPO_MASTER_VSCODE",
+            "key": "code_command",
+            "env": "GIFT_REPO_MASTER_CODE",
             "type": "string",
             "default": "code",
-            "description": "Command behind `open with vscode` — `cursor` and `windsurf` take the same argument.",
+            "description": "Command behind `open with code` and the `e` key — `cursor` and `windsurf` take a folder the same way.",
             "advanced": true
         },
         {
