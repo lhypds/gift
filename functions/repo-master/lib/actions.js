@@ -10,9 +10,15 @@
 // A selection has a shape. The repository picked first is the main project, and
 // the ones picked after it come along with it. The editor opens the main project
 // — a window is a window, and the extra repositories were not asked for.
-// `claude` and `codex` are terminals themselves, so they borrow this one — the
-// table steps aside and comes back when the tool exits — and the repositories
-// after the first are handed to them as directories they may also work in.
+// `vim`, `claude` and `codex` are terminals themselves, so they borrow this one —
+// the table steps aside and comes back when the tool exits — and the repositories
+// after the first are handed to `claude` and `codex` as directories they may also
+// work in.
+//
+// `vim` is handed a file instead, and the file is asked for: a repository opened
+// in vim is a file in it being opened, and fzf names one in the borrowed terminal
+// before vim starts. Nothing picked opens nothing, and no fzf to pick with opens
+// the folder.
 //
 // `goto folder` is the same borrowing, with a shell as the tool: no process can
 // move the shell that started it, so the folder is reached by a shell of its own
@@ -20,13 +26,13 @@
 // the last thing repo-master does: leaving the shell leaves the table too,
 // rather than putting it back up in front of somebody on their way out.
 //
-// The rest borrow nothing. Fetching, pulling, committing, adding a worktree and
-// deleting a folder are all the table's own work, done to every repository
-// picked with git or the filesystem asked directly, and reported on in a box
-// while the table stays up. Each is a repository of its own there rather than
-// one leading and the rest following — a commit belongs to a repository, and so
-// does a branch — which is why they run through the sweeps below rather than
-// through run().
+// The rest borrow nothing. Fetching, pulling, pushing, committing, stashing,
+// discarding, adding a worktree and deleting a folder are all the table's own
+// work, done to every repository picked with git or the filesystem asked
+// directly, and reported on in a box while the table stays up. Each is a
+// repository of its own there rather than one leading and the rest following — a
+// commit belongs to a repository, and so does a branch — which is why they run
+// through the sweeps below rather than through run().
 'use strict';
 
 const fsp = require('node:fs/promises');
@@ -39,11 +45,54 @@ const { limiter } = require('./util.js');
 /** How many repositories are worked on at once, where the work waits on a network. */
 const REMOTE_CONCURRENCY = 4;
 
-/** The two ways of reaching a remote, behind the f and p keys. */
+/**
+ * The three ways of reaching a remote, behind the f, p and P keys, and how each
+ * one's outcome is counted up afterwards.
+ */
 const SYNC = {
-    fetch: { label: 'fetch', busy: 'fetching…' },
-    pull: { label: 'pull', busy: 'pulling…' },
+    fetch: { label: 'fetch', busy: 'fetching…', words: { done: 'with new commits', skipped: 'up to date' } },
+    pull: { label: 'pull', busy: 'pulling…', words: { done: 'updated', skipped: 'already up to date' } },
+    push: { label: 'push', busy: 'pushing…', words: { done: 'pushed', skipped: 'nothing to push' } },
 };
+
+/**
+ * The two ways of emptying a working tree, behind the s and u keys. They are the
+ * same command in every way but the one that matters: a stash keeps what it takes
+ * and a discard does not, which is why the box asking about the second is drawn
+ * the way the delete box is.
+ */
+const CLEAR = {
+    stash: { label: 'stash', busy: 'stashing…', words: { done: 'stashed', skipped: 'nothing to stash' } },
+    discard: {
+        label: 'discard changes',
+        busy: 'discarding…',
+        words: { done: 'discarded', skipped: 'nothing to discard' },
+    },
+};
+
+/**
+ * What the file picker offers, and what it shows of whatever the cursor is on.
+ * Both are shell lines rather than programs, because both are a first choice with
+ * something behind it: `sh` runs them, so `||` reaches the next answer when the
+ * one in front is not installed. `fdfind` and `batcat` are the same two programs
+ * under the names Debian gives them, and are tried before giving up on them.
+ *
+ * fd is asked for the list because it reads `.gitignore` on the way down: what
+ * comes back is the repository's own files, without node_modules or a build
+ * folder in front of them. Hidden files are asked for — a repository's `.github`
+ * and `.gitignore` are files somebody opens — and `.git` itself is not, having
+ * nothing in it anybody edits. Where fd is missing, git is asked instead: it
+ * knows the same list, minus what nobody has added yet, and it is already here.
+ *
+ * bat is the preview because a file worth opening is worth recognising first: the
+ * colours it would have in an editor, and numbered lines to say where you are.
+ * Where it is missing, cat still answers the question a preview asks — is this
+ * the file — which is most of what the window is for.
+ */
+const FD_LIST = '--type f --hidden --exclude .git';
+const FILE_LIST = `fd ${FD_LIST} 2>/dev/null || fdfind ${FD_LIST} 2>/dev/null || git ls-files --cached --others --exclude-standard`;
+const BAT_VIEW = '--color=always --style=numbers --line-range :500';
+const FILE_PREVIEW = `bat ${BAT_VIEW} {} 2>/dev/null || batcat ${BAT_VIEW} {} 2>/dev/null || cat {}`;
 
 /**
  * Where a repository's new worktree goes: beside the repository itself, named
@@ -58,6 +107,10 @@ function worktreePath(dir, branch) {
 
 /** The commands, and how each one wants to be started. */
 function actions(env) {
+    // Named once, because the picker in front of it wears the name too: the line
+    // you type the filename on says which tool is about to open it.
+    const vim = env.GIFT_REPO_MASTER_VIM || 'vim';
+
     return [
         {
             id: 'folder',
@@ -86,12 +139,36 @@ function actions(env) {
             id: 'vim',
             key: 'v',
             label: 'open with vim',
-            command: env.GIFT_REPO_MASTER_VIM || 'vim',
+            command: vim,
             kind: 'terminal',
-            // A folder rather than nothing: vim started in a repository with no
-            // arguments opens an empty buffer, and what was asked for was the
-            // repository. `.` is the folder it is already standing in, which vim
-            // opens as a list of what is in it.
+            // What somebody opening a repository in vim is after is a file in it,
+            // so which file is asked before vim starts rather than looked for
+            // afterwards: fzf takes the terminal first, and vim opens what it
+            // prints. Backing out of the question opens nothing — the file was
+            // the command, and there is no file.
+            pick: {
+                command: env.GIFT_REPO_MASTER_FZF || 'fzf',
+                args: [
+                    // The prompt says which tool the name being typed is for, so a
+                    // list of files arriving over the table reads as the beginning
+                    // of opening one rather than as something of its own.
+                    '--prompt',
+                    `${vim} `,
+                    // And the file itself beside the list, so a name half typed can
+                    // be checked against what it turned out to mean before it is
+                    // opened. See FILE_PREVIEW.
+                    '--preview',
+                    FILE_PREVIEW,
+                ],
+                // What there is to pick from, for whoever has not already said:
+                // FZF_DEFAULT_COMMAND is somebody's own answer to the same question
+                // and is left alone where they have given one. See FILE_LIST.
+                env: { FZF_DEFAULT_COMMAND: env.FZF_DEFAULT_COMMAND || FILE_LIST },
+            },
+            // Where there is no picker to ask, the folder is the answer vim can
+            // still be handed: it opens as a list of what is in it, which is the
+            // same question asked the slow way. Vim with no argument at all would
+            // open an empty buffer, and the repository is what was asked for.
             args: ['.'],
         },
         {
@@ -142,8 +219,32 @@ function actions(env) {
             },
         },
         // The number keys in the menu reach nine rows, and these are the last
-        // two: both carry a key of their own, so being past the ninth costs them
-        // nothing, while `commit & push` above has no other way in.
+        // five: every one of them carries a key of its own, so being past the
+        // ninth costs them nothing, while `commit & push` above has no other way
+        // in. That is what keeps `push` below it rather than beside `pull`, where
+        // it belongs — and it reads well enough there: commit and push, or push
+        // what was committed elsewhere.
+        {
+            id: 'push',
+            key: 'P',
+            label: 'push',
+            kind: 'sync',
+            sync: 'push',
+        },
+        {
+            id: 'stash',
+            key: 's',
+            label: 'stash',
+            kind: 'clear',
+            clear: 'stash',
+        },
+        {
+            id: 'discard',
+            key: 'u',
+            label: 'discard changes',
+            kind: 'clear',
+            clear: 'discard',
+        },
         {
             id: 'worktree',
             key: 't a',
@@ -190,6 +291,55 @@ function launch(command, args, cwd) {
     });
 }
 
+/**
+ * Ask which file, in the terminal the table has just stepped out of, and hand
+ * back what was picked.
+ *
+ * The picker draws on the terminal and prints its answer, so the terminal is
+ * given to it for reading keys and drawing with while its output is kept here to
+ * be read — the shape `vim $(fzf)` has in a shell, and the reason fzf puts its
+ * interface on /dev/tty when what it prints is going somewhere other than the
+ * screen.
+ *
+ * Nothing printed means nothing was picked: esc, ctrl-c, or a list narrowed down
+ * to no matches. That is an answer and not a failure, which is why it is told
+ * apart from the picker not being installed at all — the command has something to
+ * fall back on for the second and nothing to open for the first.
+ *
+ * @param {{command: string, args?: string[], env?: object}} picker
+ * @param {string} cwd The main project's folder — what the list is a list of.
+ * @returns {Promise<{paths: string[], error: string|null}>}
+ */
+function choose(picker, cwd) {
+    return new Promise((resolve) => {
+        const child = spawn(picker.command, picker.args || [], {
+            cwd,
+            stdio: ['inherit', 'pipe', 'inherit'],
+            env: { ...process.env, ...picker.env },
+        });
+
+        let printed = '';
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => {
+            printed += chunk;
+        });
+        child.on('error', (error) =>
+            resolve({
+                paths: [],
+                error:
+                    error.code === 'ENOENT'
+                        ? `${picker.command}: not found in PATH`
+                        : `${picker.command}: ${error.message}`,
+            }),
+        );
+        // A line each, and every line a path as the picker was given it — relative
+        // to the folder the tool is about to be started in, which is the same
+        // folder the list was made in. More than one line is a picker told it may
+        // pick more than one thing, and the tool is handed all of them.
+        child.on('close', () => resolve({ paths: printed.split(/\r?\n/).filter(Boolean), error: null }));
+    });
+}
+
 /** Run in this terminal and wait for it to finish. The caller hides the table first. */
 function runHere(command, args, cwd) {
     return new Promise((resolve) => {
@@ -229,7 +379,25 @@ async function run(action, repos, { suspend, resume }) {
 
     suspend();
     try {
-        return await runHere(action.command, [...(action.args || []), ...addDirArgs(action, extra)], main.dir);
+        // A command that asks something first asks it here, with the table already
+        // out of the way: the picker and the tool want the same terminal, one
+        // after the other, and the table would be redrawn between them for nobody
+        // to look at.
+        let args = action.args || [];
+        let picked = null;
+        if (action.pick) {
+            picked = await choose(action.pick, main.dir);
+            if (!picked.error) {
+                if (picked.paths.length === 0) return null;
+                args = picked.paths;
+            }
+        }
+
+        const failure = await runHere(action.command, [...args, ...addDirArgs(action, extra)], main.dir);
+        // A missing picker is said once, when the tool it was asked for closes and
+        // there is a table to say it on: what opened was the folder rather than the
+        // file, and the difference is worth a line.
+        return failure || picked?.error || null;
     } finally {
         resume();
     }
@@ -270,17 +438,43 @@ function sweep(repos, onUpdate, work) {
 }
 
 /**
- * Fetch every chosen repository, or pull every one of them.
+ * Reach every chosen repository's remote: hear what is there, take it, or hand
+ * over what this machine has been keeping.
  *
- * @param {object[]} repos Rows to bring up to date.
- * @param {'fetch'|'pull'} kind
+ * @param {object[]} repos Rows to reach a remote for.
+ * @param {'fetch'|'pull'|'push'} kind
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
  */
 async function sync(repos, kind, onUpdate = () => {}) {
     return sweep(repos, onUpdate, async (repo, say) => {
         say('working', SYNC[kind].busy);
-        const result = await gitLib.sync(repo.dir, kind === 'pull');
+        // Fetching and pulling are one call with a flag between them; pushing is
+        // the other direction and a function of its own.
+        const result = kind === 'push' ? await gitLib.push(repo.dir) : await gitLib.sync(repo.dir, kind === 'pull');
+        return say(!result.ok ? 'failed' : result.changed ? 'done' : 'skipped', result.text);
+    });
+}
+
+/**
+ * Empty every chosen repository's working tree: put the changes aside where they
+ * can be had back, or throw them away where they cannot.
+ *
+ * Each repository stands on its own, as it does for a commit — what changed in
+ * one is nothing to another — and a repository with nothing in it to clear is
+ * skipped rather than failed.
+ *
+ * @param {object[]} repos Rows to clear.
+ * @param {'stash'|'discard'} kind Which of the two, and the only difference: one
+ *   keeps what it takes.
+ * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
+ * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
+ */
+async function clear(repos, kind, onUpdate = () => {}) {
+    return sweep(repos, onUpdate, async (repo, say) => {
+        say('working', CLEAR[kind].busy);
+        const result =
+            kind === 'stash' ? await gitLib.stash(repo.dir, repo.nested) : await gitLib.discard(repo.dir, repo.nested);
         return say(!result.ok ? 'failed' : result.changed ? 'done' : 'skipped', result.text);
     });
 }
@@ -356,4 +550,4 @@ async function remove(repos, onUpdate = () => {}) {
     });
 }
 
-module.exports = { actions, run, commit, sync, worktrees, worktreePath, remove, addDirArgs, SYNC };
+module.exports = { actions, run, commit, sync, clear, worktrees, worktreePath, remove, addDirArgs, SYNC, CLEAR };

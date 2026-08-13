@@ -86,13 +86,15 @@ function needsAttention(repo) {
 }
 
 /**
- * The keys along the foot of the window, cut at a whole one rather than through
- * the middle of a word when there are more of them than the window is wide. What
- * was dropped is not lost: the menu is the list of everything, and the ellipsis
- * is there to say there is more of this than fits.
+ * The keys along the foot of the window: the table's own — moving, picking,
+ * searching, refreshing, leaving — and not one command among them. Every command
+ * has a row in the menu with its key printed beside it, and the foot was long
+ * enough to be cut short by repeating them, which is the worst of both: a line
+ * ending in an ellipsis, saying less than the menu says in full.
  *
- * They are written in the order they are worth reading, so a narrow window keeps
- * the ones nobody could work without.
+ * They are written in the order they are worth reading, and cut at a whole one
+ * rather than through the middle of a word, for a window narrow enough to need
+ * it — where the ellipsis says there is more of this than fits.
  */
 function keyLine(entries, columns) {
     if (width(entries.join(' · ')) <= columns) return entries.join(' · ');
@@ -226,20 +228,31 @@ function promptPanel(state) {
     };
 }
 
+/** `3 repositories`, the way the boxes head themselves. */
+function counting(targets) {
+    return `${targets.length} ${targets.length === 1 ? 'repository' : 'repositories'}`;
+}
+
+/** A command's label where a sentence starts, which is the head of a box. */
+function capitalise(text) {
+    return text ? `${text[0].toUpperCase()}${text.slice(1)}` : text;
+}
+
 /**
  * What is about to be done, and to what.
  *
  * The list is the point of it: `p` on a folder of thirty repositories is not a
  * keystroke anybody should be able to make without seeing which thirty. A pull
  * merges into a working tree, so the ones with something uncommitted in them are
- * marked, and named again in the footer.
+ * marked, and named again in the footer. A push writes to somewhere other people
+ * read, which is the same argument for being asked.
  */
 function syncPanel(ask) {
     const { kind, targets } = ask;
     const dirty = kind === 'pull' ? targets.filter((repo) => repo.hasChanges) : [];
 
     return Object.assign(ask, {
-        title: `${kind === 'pull' ? 'Pull' : 'Fetch'} ${targets.length} ${targets.length === 1 ? 'repository' : 'repositories'}`,
+        title: `${capitalise(ask.action.label)} ${counting(targets)}`,
         lines: labelled(
             targets.map((repo) => ({
                 name: repo.name,
@@ -248,6 +261,37 @@ function syncPanel(ask) {
         ),
         paint: (line, index) => (kind === 'pull' && targets[index] && targets[index].hasChanges ? 'warn' : 'dim'),
         status: dirty.length > 0 ? `${dirty.length} with uncommitted changes` : '',
+        footer: `enter ${kind} · esc cancel`,
+        width: REPORT_WIDTH,
+    });
+}
+
+/**
+ * The same box for the two commands that empty a working tree, and what each row
+ * stands to lose from it: what changed there, which is exactly what is about to be
+ * put aside or thrown away.
+ *
+ * A stash is drawn quietly, because `git stash pop` is the whole of the undo. A
+ * discard is drawn the way the delete box is — the rows orange, the footer saying
+ * so — because there is no undoing it and nobody should find that out afterwards.
+ */
+function clearPanel(ask) {
+    const { kind, targets } = ask;
+    const dirty = targets.filter((repo) => repo.hasChanges);
+
+    return Object.assign(ask, {
+        title: `${kind === 'stash' ? 'Stash' : 'Discard the changes of'} ${counting(targets)}`,
+        lines: labelled(
+            targets.map((repo) => ({
+                name: repo.name,
+                text: `${repo.branch || '…'}  · ${changeCell(repo)}`,
+            })),
+        ),
+        paint: (line, index) => (kind === 'discard' && targets[index]?.hasChanges ? 'warn' : 'dim'),
+        status: [
+            `${dirty.length} with changes`,
+            kind === 'discard' ? 'nothing undoes this' : 'git stash pop brings them back',
+        ].join(' · '),
         footer: `enter ${kind} · esc cancel`,
         width: REPORT_WIDTH,
     });
@@ -288,10 +332,19 @@ function deletePanel(ask) {
     });
 }
 
+/** Which box a question is asked in follows from what kind of command asked it. */
 function confirmPanel(state) {
     const ask = state.confirm;
     if (!ask) return null;
-    return ask.kind === 'delete' ? deletePanel(ask) : syncPanel(ask);
+
+    switch (ask.action.kind) {
+        case 'delete':
+            return deletePanel(ask);
+        case 'clear':
+            return clearPanel(ask);
+        default:
+            return syncPanel(ask);
+    }
 }
 
 /** What became of each repository the work was run on, told as it happens. */
@@ -483,7 +536,7 @@ function frame(state, palette, size) {
     const changed = state.rows.filter((repo) => repo.hasChanges).length;
 
     const summary = [
-        `Watching ${shortenHome(state.root)}`,
+        `watching ${shortenHome(state.root)}`,
         `${state.rows.length} ${state.rows.length === 1 ? 'repo' : 'repos'}`,
         `${changed} changed`,
     ];
@@ -494,7 +547,7 @@ function frame(state, palette, size) {
     summary.push(...Object.values(state.notes).filter(Boolean));
 
     const head = [
-        palette.bold(fit(`Repo Master v${state.version}`)),
+        palette.bold(fit(`repo master v${state.version}`)),
         palette.dim(fit(summary.join(' · '))),
         palette.dim(rule),
         palette.dim(fit(`${' '.repeat(GUTTER)}${joinRow(header, widths)}`)),
@@ -523,14 +576,6 @@ function frame(state, palette, size) {
                         'space select',
                         'enter menu',
                         '/ search',
-                        'e code',
-                        'v vim',
-                        'c claude',
-                        'd diff',
-                        'f fetch',
-                        'p pull',
-                        't worktree',
-                        'D delete',
                         state.filter ? 'esc clear search' : 'esc clear',
                         'r refresh',
                         'q quit',

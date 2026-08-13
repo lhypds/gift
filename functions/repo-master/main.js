@@ -6,9 +6,9 @@
 // date. Rows that want attention wear an orange bar. Pick rows with the arrow
 // keys or find them with /, add more with space, and press enter for the menu of
 // what may be done to them: open them in an editor or an agent, read what
-// changed, fetch, pull, branch a worktree off one, commit and push the lot, or
-// delete a folder outright. The commands worth reaching for carry a key of their
-// own, and the menu prints it beside them.
+// changed, fetch, pull, push, branch a worktree off one, commit and push the lot,
+// stash or discard what is uncommitted, or delete a folder outright. The commands
+// worth reaching for carry a key of their own, and the menu prints it beside them.
 'use strict';
 
 const fs = require('node:fs');
@@ -53,12 +53,13 @@ Options:
 Keys:
   up/down or k/j   move                  space   add to the selection
   enter            the command menu      /       search the table
-  e                open with code        v       open with vim
+  e                open with code        v       pick a file, open with vim
   c                open with claude      d       read the diff
   f                fetch                 p       pull
-  t then a         add a worktree        D       delete the folder
-  esc              clear                 r       refresh now
-  q                quit
+  P                push                  s       stash the changes
+  u                discard the changes   D       delete the folder
+  t then a         add a worktree        r       refresh now
+  esc              clear                 q       quit
 
 Every one of those keys runs a command the enter menu also holds a row for, on
 the repositories picked with space — or the row under the cursor when none are.
@@ -67,12 +68,28 @@ The menu prints each command's key beside it, so nothing has to be learned twice
 The ones that open something open the main project — the first repository picked
 — and claude and codex are handed the rest as directories they may also work in.
 vim, claude and codex want a terminal of their own and borrow this one: the table
-steps aside and comes back when they exit.
-The ones that reach a remote, and the one that deletes a folder, are asked for
-first in a box naming every repository they are about: enter runs it, esc backs
-out. Pulling marks the ones with uncommitted changes, which is where a pull goes
-wrong; deleting marks all of them, and says what else is inside the folders. What
-came of each is reported in a box of its own.
+steps aside and comes back when they exit. vim is opened on a file rather than the
+folder, and fzf asks which one in the borrowed terminal first: fd lists the files
+.gitignore does not rule out, bat shows whichever one the cursor is on, and your
+own $FZF_DEFAULT_COMMAND is the list instead where you have set one. Picking
+nothing opens nothing.
+The ones that reach a remote, the ones that empty a working tree, and the one that
+deletes a folder are asked for first in a box naming every repository they are
+about: enter runs it, esc backs out. Pulling marks the ones with uncommitted
+changes, which is where a pull goes wrong; discarding and deleting mark all of
+them, because nothing undoes either, and the delete box says what else is inside
+the folders. What came of each is reported in a box of its own.
+
+P pushes what is already committed and commits nothing, for the commits that were
+made in an editor or an agent and never left the machine. A branch level with its
+upstream is left alone; one that has never been pushed is given an upstream.
+
+s puts the changes of everything picked aside — git stash push -u, so untracked
+files go with them and the working tree comes out clean — and u throws the same
+changes away instead. A stash comes back with git stash pop; a discard does not
+come back at all, which is why its box is drawn the way the delete box is and
+answered by the keyboard alone. Neither one touches ignored files, and neither
+touches a repository nested inside another: those have rows of their own.
 
 t then a adds a worktree: a box asks for a branch, and each picked repository
 gets a folder beside it named for the two of them — ~/projects/gift-feature-x for
@@ -89,9 +106,9 @@ The mouse does the whole of a run on its own: the wheel moves through the table
 and through the menu, and a click is the enter key — it opens the menu on the
 row the wheel left the cursor on, and runs the command the wheel left the menu
 pointing at. Where the pointer is lying makes no difference to either. The wheel
-scrolls the diff and the reports as well. A delete is the one thing a click will
-not answer for. Selecting text with the mouse needs a modifier held down while
-the table is up — option in iTerm2, shift most other places.
+scrolls the diff and the reports as well. A delete and a discard are the two
+things a click will not answer for. Selecting text with the mouse needs a modifier
+held down while the table is up — option in iTerm2, shift most other places.
 
 commit & push treats every picked repository as a project of its own: it asks for
 a message in a box, then commits and pushes each of them with it, none the main
@@ -378,6 +395,9 @@ async function main(argv) {
             case 'sync':
                 askSync(action, chosen, back);
                 return;
+            case 'clear':
+                askClear(action, chosen, back);
+                return;
             case 'delete':
                 askDelete(action, chosen, back);
                 return;
@@ -537,15 +557,28 @@ async function main(argv) {
             (onUpdate) => actionsLib.commit(repos, message, onUpdate),
         );
 
+    /** `3 repositories`, for the boxes that head themselves with how many. */
+    const counting = (repos) => `${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}`;
+
     const runSync = (kind, repos) =>
         runReport(
-            `${actionsLib.SYNC[kind].label} · ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}`,
+            `${actionsLib.SYNC[kind].label} · ${counting(repos)}`,
             actionsLib.SYNC[kind].label,
             repos,
-            kind === 'pull'
-                ? { done: 'updated', skipped: 'already up to date' }
-                : { done: 'with new commits', skipped: 'up to date' },
+            actionsLib.SYNC[kind].words,
             (onUpdate) => actionsLib.sync(repos, kind, onUpdate),
+        );
+
+    // Stashing and discarding both leave a working tree emptier than they found
+    // it, which is what the rows count, so a refresh afterwards is the whole of
+    // what has to be put right: no folder came or went.
+    const runClear = (kind, repos) =>
+        runReport(
+            `${actionsLib.CLEAR[kind].label} · ${counting(repos)}`,
+            actionsLib.CLEAR[kind].label,
+            repos,
+            actionsLib.CLEAR[kind].words,
+            (onUpdate) => actionsLib.clear(repos, kind, onUpdate),
         );
 
     // A worktree is a folder that was not there before, and a folder under the
@@ -571,13 +604,39 @@ async function main(argv) {
             rescanAfter,
         );
 
-    // Fetching and pulling are asked for before they are done, because they reach
-    // a remote and a pull writes into a working tree. The box is what goes
-    // between: it names every repository about to be reached for, and pulling
-    // marks the ones with uncommitted changes, which is where a pull goes wrong.
+    // Fetching, pulling and pushing are asked for before they are done, because
+    // they reach a remote, a pull writes into a working tree and a push writes to
+    // somewhere other people read. The box is what goes between: it names every
+    // repository about to be reached for, and pulling marks the ones with
+    // uncommitted changes, which is where a pull goes wrong.
     const askSync = (action, chosen, back) => {
         state.mode = 'confirm';
         state.confirm = { kind: action.sync, action, targets: chosen, back, scroll: 0, view: 1 };
+        state.message = '';
+        draw();
+    };
+
+    /**
+     * Stashing and discarding are asked for in the same box, because both empty a
+     * working tree — and the second one is asked for in earnest, the way deleting
+     * is, because a discard is the one of the two with nothing to undo it.
+     *
+     * Nothing to clear is not worth a box asking whether to clear it: a keystroke
+     * on a folder of repositories with nothing in them says so on the message line
+     * and leaves the table where it was.
+     */
+    const askClear = (action, chosen, back) => {
+        if (chosen.every((repo) => repo.loaded && !repo.hasChanges)) {
+            state.mode = 'table';
+            state.message = `${action.label}: nothing changed in ${
+                chosen.length === 1 ? chosen[0].name : counting(chosen)
+            }`;
+            draw();
+            return;
+        }
+
+        state.mode = 'confirm';
+        state.confirm = { kind: action.clear, action, targets: chosen, back, scroll: 0, view: 1 };
         state.message = '';
         draw();
     };
@@ -633,13 +692,18 @@ async function main(argv) {
             return;
         }
         // A click answers for enter everywhere else in repo-master. Not here, and
-        // only for the one command: a folder is not to be deleted by a mouse that
-        // was somewhere near the box, and the keyboard is where the answer to a
-        // question this final should come from.
-        if (key === 'enter' || (key === 'click' && panel.kind !== 'delete')) {
+        // only for the two commands nothing undoes: neither a folder nor a day's
+        // uncommitted work is to be thrown away by a mouse that was somewhere near
+        // the box, and the keyboard is where the answer to a question that final
+        // should come from. A stash is not one of them — it keeps what it takes.
+        const final = panel.kind === 'delete' || panel.kind === 'discard';
+        if (key === 'enter' || (key === 'click' && !final)) {
             const { kind, action, targets: chosen } = panel;
             state.confirm = null;
-            if (kind === 'delete') runDelete(action, chosen);
+            // Which work was asked about follows from the kind of command, as the
+            // box it was asked in did; `kind` is which of that command's pair.
+            if (action.kind === 'delete') runDelete(action, chosen);
+            else if (action.kind === 'clear') runClear(kind, chosen);
             else runSync(kind, chosen);
             return;
         }
@@ -1050,7 +1114,8 @@ async function main(argv) {
             // a row for, on the same repositories — the ones picked, or the row
             // under the cursor when none are. What each one then does about being
             // asked first is the command's own business and written into it: the
-            // editor opens, fetch and pull ask, delete asks in earnest.
+            // editor opens, the ones that reach a remote or empty a working tree
+            // ask, delete and discard ask in earnest.
             case 'e':
                 startAction(command('code'), targets(), 'table');
                 return;
@@ -1071,6 +1136,17 @@ async function main(argv) {
                 return;
             case 'p':
                 startAction(command('pull'), targets(), 'table');
+                return;
+            // The same letter in both cases for the two halves of the same
+            // errand: take what is there, hand over what is here.
+            case 'P':
+                startAction(command('push'), targets(), 'table');
+                return;
+            case 's':
+                startAction(command('stash'), targets(), 'table');
+                return;
+            case 'u':
+                startAction(command('discard'), targets(), 'table');
                 return;
             case 'D':
                 startAction(command('delete'), targets(), 'table');

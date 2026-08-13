@@ -225,6 +225,22 @@ function isInside(parent, child) {
 }
 
 /**
+ * Which status entries belong to this repository rather than to one nested
+ * inside it. The nested ones have rows of their own — counted there, read there,
+ * stashed and discarded there — and a parent that counted them too would say
+ * twice over what changed once.
+ *
+ * @param {string} dir Repository root.
+ * @param {string[]} exclude Absolute paths of repositories nested inside it.
+ */
+function ownEntry(dir, exclude) {
+    return (entry) => {
+        const absolute = path.join(dir, entry.path.replace(/\/$/, ''));
+        return !exclude.some((nested) => isInside(nested, absolute));
+    };
+}
+
+/**
  * Read the working-tree state of one repository.
  *
  * @param {string} dir Repository root.
@@ -250,10 +266,7 @@ async function inspect(dir, exclude = []) {
     // repository in a hundred that is in it can afford to be asked twice.
     const branch = branchFromHeader(header) ?? (await detachedHead(dir));
 
-    const entries = parsePorcelain(status.stdout).filter((entry) => {
-        const absolute = path.join(dir, entry.path.replace(/\/$/, ''));
-        return !exclude.some((nested) => isInside(nested, absolute));
-    });
+    const entries = parsePorcelain(status.stdout).filter(ownEntry(dir, exclude));
 
     let counts = { adds: 0, dels: 0 };
     if (entries.some((entry) => !entry.untracked)) {
@@ -335,12 +348,11 @@ async function diff(dir, exclude = []) {
     // untracked files below stand in for the whole of what changed.
     if (!patch.ok) lines.push(`error: ${patch.stderr.split('\n')[0] || 'git diff failed'}`);
 
+    const own = ownEntry(dir, exclude);
     const untracked = status.ok
-        ? parsePorcelain(status.stdout).filter((entry) => {
-              if (!entry.untracked || entry.path.endsWith('/')) return false;
-              const absolute = path.join(dir, entry.path);
-              return !exclude.some((nested) => isInside(nested, absolute));
-          })
+        ? parsePorcelain(status.stdout).filter(
+              (entry) => entry.untracked && !entry.path.endsWith('/') && own(entry),
+          )
         : [];
 
     if (untracked.length > 0) {
@@ -391,6 +403,54 @@ function withoutNested(dir, nested) {
         .map((relative) => `:(exclude)${relative}`);
 }
 
+/** `3 files`, or `1 file`, for the lines that count what was moved or thrown away. */
+function files(count) {
+    return `${count} ${count === 1 ? 'file' : 'files'}`;
+}
+
+/**
+ * Why a push was refused, in the one line worth reading. git's first line only
+ * says where it was pushing to, which nobody needed; the reason is the
+ * `! [rejected] main -> main (fetch first)` line under it, and where there is no
+ * ref-by-ref report to read it is the error. The hints after either are a
+ * paragraph about what to do next, and there is no room for a paragraph in a row
+ * of a table.
+ */
+function pushReason(stderr) {
+    const lines = String(stderr || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    const rejected = lines.find((line) => line.startsWith('!'));
+    if (rejected) return rejected.replace(/^!\s*/, '').replace(/\s+/g, ' ');
+    return lines.find((line) => /^(error|fatal):/.test(line)) || lines[0] || '';
+}
+
+/**
+ * Push the branch that is checked out, and give it an upstream if it has never
+ * been pushed at all: git refuses a branch with nowhere to push to, says so, and
+ * names the command that fixes it, which is the second one tried here.
+ *
+ * Both the commit-and-push and the plain push go through this, so a first push
+ * behaves the same however it was asked for.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} branch The branch to set an upstream for, if one is wanted.
+ * @returns {Promise<{ok: boolean, upstream: boolean, reason: string}>} `upstream`
+ *   is whether this push is what set the branch to follow origin; `reason` is why
+ *   it did not go through, where it did not.
+ */
+async function pushBranch(dir, branch) {
+    const first = await git(dir, ['push'], NETWORK_TIMEOUT_MS);
+    if (first.ok || !/no upstream branch|--set-upstream/i.test(first.stderr)) {
+        return { ok: first.ok, upstream: false, reason: first.ok ? '' : pushReason(first.stderr) };
+    }
+
+    const again = await git(dir, ['push', '--set-upstream', 'origin', branch], NETWORK_TIMEOUT_MS);
+    return { ok: again.ok, upstream: again.ok, reason: again.ok ? '' : pushReason(again.stderr) };
+}
+
 /**
  * Commit one repository's working tree and push it.
  *
@@ -437,21 +497,63 @@ async function commitAndPush(dir, message, nested = [], onStep = () => {}) {
     }
 
     onStep('pushing');
-    let push = await git(dir, ['push'], NETWORK_TIMEOUT_MS);
-    let upstream = false;
-    // A branch pushed for the first time has nowhere to push to; git says so and
-    // names the command that fixes it, which is the one below.
-    if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
-        push = await git(dir, ['push', '--set-upstream', 'origin', branch], NETWORK_TIMEOUT_MS);
-        upstream = push.ok;
-    }
+    const pushed = await pushBranch(dir, branch);
 
     const hash = committed ? commitHash(commit.stdout) : '';
     const said = committed ? `committed${hash ? ` ${hash}` : ''}` : 'nothing new';
-    if (!push.ok) {
-        return { ok: false, committed, pushed: false, text: `${said} · push failed: ${firstLine(push.stderr)}` };
+    if (!pushed.ok) {
+        return { ok: false, committed, pushed: false, text: `${said} · push failed: ${pushed.reason}` };
     }
-    return { ok: true, committed, pushed: true, text: `${said} · pushed${upstream ? ` to origin/${branch}` : ''}` };
+    return {
+        ok: true,
+        committed,
+        pushed: true,
+        text: `${said} · pushed${pushed.upstream ? ` to origin/${branch}` : ''}`,
+    };
+}
+
+/**
+ * Push what a repository has already committed, and commit nothing now.
+ *
+ * This is the other half of `commit & push`, for the commits that were made
+ * somewhere else — in an editor, in an agent, at a shell — and never left the
+ * machine. Nothing waiting is not a failure: a branch level with its upstream is
+ * left alone rather than made to reach across a network to be told so, and a
+ * repository with no commit at all has nothing to push by definition. A branch
+ * that has never been pushed is given an upstream, as it is after a commit.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>} `changed` is
+ *   whether anything actually left the machine.
+ */
+async function push(dir) {
+    const fail = (text) => ({ ok: false, changed: false, text });
+
+    // Nothing to reach is not worth a network timeout to discover, as in sync().
+    const remotes = await git(dir, ['remote']);
+    if (!remotes.ok) return fail(firstLine(remotes.stderr) || 'cannot read remotes');
+    if (!remotes.stdout.trim()) return fail('no remote to reach');
+
+    const branch = await currentBranch(dir);
+    if (branch === '-' || branch.startsWith('(')) return fail('detached HEAD — check out a branch first');
+
+    const head = await git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+    if (!head.ok || !head.stdout.trim()) return { ok: true, changed: false, text: 'nothing to push' };
+
+    // How far the branch stands ahead of its upstream, which is how much there is
+    // to carry. An upstream git cannot name is a branch never pushed, and that is
+    // a push of everything on it — how much that is, it does not say.
+    const ahead = await git(dir, ['rev-list', '--count', '@{upstream}..HEAD']);
+    const commits = ahead.ok ? Number.parseInt(ahead.stdout.trim(), 10) || 0 : null;
+    if (commits === 0) return { ok: true, changed: false, text: 'nothing to push' };
+
+    const result = await pushBranch(dir, branch);
+    if (!result.ok) return fail(`push failed: ${result.reason}`);
+
+    const said = commits === null ? '' : ` ${commits} ${commits === 1 ? 'commit' : 'commits'}`;
+    return { ok: true, changed: true, text: `pushed${said}${result.upstream ? ` to origin/${branch}` : ''}` };
 }
 
 /**
@@ -512,6 +614,105 @@ async function sync(dir, pull) {
 }
 
 /**
+ * What has changed in one repository's working tree, as entries: the same reading
+ * `inspect` counts, for the two commands that empty it. Nothing belonging to a
+ * repository nested inside this one is in it — those have rows of their own, and
+ * an `s` or a `u` on a parent is not an answer about its children.
+ *
+ * @param {string} dir Repository root.
+ * @param {string[]} exclude Absolute paths of repositories nested inside it.
+ * @returns {Promise<{ok: boolean, entries: object[], error: string}>}
+ */
+async function working(dir, exclude = []) {
+    const status = await git(dir, ['status', '--porcelain=v1', '-uall', '-z', '--ignore-submodules=dirty']);
+    if (!status.ok) {
+        return { ok: false, entries: [], error: firstLine(status.stderr) || 'git status failed' };
+    }
+    return { ok: true, entries: parsePorcelain(status.stdout).filter(ownEntry(dir, exclude)), error: '' };
+}
+
+/**
+ * Put a repository's changes out of the way and leave the working tree clean:
+ * `git stash push -u`, which takes the tracked changes and the untracked files
+ * alike. Ignored files stay where they are — build output is not what anybody
+ * means by "my changes" — and so does anything belonging to a repository nested
+ * inside this one.
+ *
+ * This is the one working-tree command that keeps what it takes: `git stash pop`
+ * brings the lot back, which is what it is for and why it stands beside discard()
+ * rather than instead of it.
+ *
+ * Nothing to stash is not a failure. A repository with no commit yet cannot stash
+ * at all — there is no HEAD to stash against — and git's refusal is passed on
+ * word for word rather than worked around.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string[]} [nested] Absolute paths of repositories inside this one.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function stash(dir, nested = []) {
+    const found = await working(dir, nested);
+    if (!found.ok) return { ok: false, changed: false, text: found.error };
+    if (found.entries.length === 0) return { ok: true, changed: false, text: 'nothing to stash' };
+
+    const result = await git(dir, ['stash', 'push', '-u', '--', '.', ...withoutNested(dir, nested)]);
+    if (!result.ok) return { ok: false, changed: false, text: `stash failed: ${firstLine(result.stderr)}` };
+
+    return { ok: true, changed: true, text: `stashed ${files(found.entries.length)}` };
+}
+
+/**
+ * Throw a repository's changes away: the tracked ones put back as HEAD has them,
+ * staged and unstaged alike, and the untracked files removed. Ignored files are
+ * left alone, and so is anything belonging to a repository nested inside this one.
+ *
+ * There is nothing to undo this. Asking first is the caller's business, and
+ * stash() is the same command for anybody who would rather keep what they have.
+ *
+ * Putting back is only asked for when there is a tracked change to put back: git
+ * refuses a pathspec matching no file it knows of, and a repository whose changes
+ * are all new files has nothing for that half to do.
+ *
+ * A repository with no commit yet has nothing to put anything back to — every
+ * change in it is a file git has never committed — so the whole of it is unstaged
+ * and then removed with the rest.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string[]} [nested] Absolute paths of repositories inside this one.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function discard(dir, nested = []) {
+    const fail = (text) => ({ ok: false, changed: false, text });
+
+    const found = await working(dir, nested);
+    if (!found.ok) return fail(found.error);
+    if (found.entries.length === 0) return { ok: true, changed: false, text: 'nothing to discard' };
+
+    const paths = ['--', '.', ...withoutNested(dir, nested)];
+    const tracked = found.entries.filter((entry) => !entry.untracked);
+
+    if (tracked.length > 0) {
+        const head = await git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+        const put = head.ok && head.stdout.trim()
+            ? await git(dir, ['restore', '--source=HEAD', '--staged', '--worktree', ...paths])
+            : await git(dir, ['rm', '--cached', '-r', '-q', ...paths]);
+        if (!put.ok) return fail(`discard failed: ${firstLine(put.stderr)}`);
+    }
+
+    // Always, whether or not anything was untracked a moment ago: what the half
+    // above unstaged in a repository with no commit is untracked now, and this is
+    // what removes it. With nothing left to remove it does nothing, quietly.
+    const cleaned = await git(dir, ['clean', '-fd', ...paths]);
+    if (!cleaned.ok) return fail(`discard failed: ${firstLine(cleaned.stderr)}`);
+
+    return { ok: true, changed: true, text: `discarded ${files(found.entries.length)}` };
+}
+
+/**
  * Add a linked worktree to a repository: another folder with another branch
  * checked out in it, sharing the one history.
  *
@@ -547,4 +748,4 @@ async function addWorktree(dir, branch, target) {
     return { ok: true, added: true, text: `added ${path.basename(target)} · ${said}` };
 }
 
-module.exports = { git, identify, inspect, diff, parseRemote, commitAndPush, sync, addWorktree };
+module.exports = { git, identify, inspect, diff, parseRemote, commitAndPush, push, sync, stash, discard, addWorktree };

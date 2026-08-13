@@ -12,15 +12,15 @@ and keeps one table up to date: which branch each one is on, whether the working
 tree has changes, and how many lines that is.
 Rows that want attention wear an orange bar. Press enter for the menu of what may
 be done to them — open one in an editor or an agent, read its diff, fetch, pull,
-branch a worktree off it, commit and push the lot, delete a folder outright — or
-press the key the menu prints beside the command you wanted. `/` finds a
-repository in a folder too full to read.
+push, branch a worktree off it, commit and push the lot, stash or discard what is
+uncommitted, delete a folder outright — or press the key the menu prints beside
+the command you wanted. `/` finds a repository in a folder too full to read.
 
 ```
-Repo Master v0.0.1
+repo master v0.0.1
 
 
-Watching ~/projects · 12 repos · 3 changed · 2 open PRs
+watching ~/projects · 12 repos · 3 changed · 2 open PRs
 ---------------------------------------------------------------------------------------------------------
 
   repo                 path                 branch  status       last updated  diff
@@ -31,24 +31,29 @@ Watching ~/projects · 12 repos · 3 changed · 2 open PRs
     +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
 ---------------------------------------------------------------------------------------------------------
 
-up/down move · space select · enter menu · / search · e code · v vim · c claude · d diff · f fetch · p pull · …
+up/down move · space select · enter menu · / search · esc clear · r refresh · q quit
 ```
+
+The foot is the table's own keys and nothing else. Every command's key is printed
+beside its row in the menu, which is where the list of them belongs: repeating
+them along the bottom filled the line up and then cut it short, saying less than
+the menu says in full.
 
 
 Files
 -----
 
-| File                 | Description                                                                                                               |
-|----------------------|---------------------------------------------------------------------------------------------------------------------------|
-| `main.js`            | Entry point — run through `gift repo-master`, or directly with `node`                                                     |
-| `lib/repos.js`       | Finding the repositories, working out which sits inside which, and which of them a search leaves showing                  |
-| `lib/git.js`         | Branch, working-tree changes, diff size, the time of the last change, committing and pushing, and adding a worktree       |
-| `lib/watch.js`       | Hearing about edits, with a timer as the fallback                                                                         |
-| `lib/table.js`       | The table itself, which rows are orange, and what goes in each box                                                        |
-| `lib/modal.js`       | The box they are all drawn in, over the table                                                                             |
-| `lib/screen.js`      | The alternate screen and the keys                                                                                         |
-| `lib/actions.js`     | The one list of commands, and what each one does to the repositories picked                                               |
-| `config.schema.json` | The settings this function has, and their defaults — see `functions.repo-master` in config.json                           |
+| File                 | Description                                                                                                         |
+|----------------------|---------------------------------------------------------------------------------------------------------------------|
+| `main.js`            | Entry point — run through `gift repo-master`, or directly with `node`                                               |
+| `lib/repos.js`       | Finding the repositories, working out which sits inside which, and which of them a search leaves showing            |
+| `lib/git.js`         | Branch, working-tree changes, diff size, the last change, committing, pushing, stashing, discarding, worktrees      |
+| `lib/watch.js`       | Hearing about edits, with a timer as the fallback                                                                   |
+| `lib/table.js`       | The table itself, which rows are orange, and what goes in each box                                                  |
+| `lib/modal.js`       | The box they are all drawn in, over the table                                                                       |
+| `lib/screen.js`      | The alternate screen and the keys                                                                                   |
+| `lib/actions.js`     | The one list of commands, and what each one does to the repositories picked                                         |
+| `config.schema.json` | The settings this function has, and their defaults — see `functions.repo-master` in config.json                     |
 
 
 Usage
@@ -89,11 +94,14 @@ Keys
 | space            | Add the row to the selection and step down — the first one added is the main project, the rest are marked `+` |
 | enter            | Open the command menu for the selection, or the row under the cursor                                          |
 | e                | Open the main project in your editor, straight away                                                           |
-| v                | Open the main project in vim, in this terminal                                                                |
+| v                | Pick a file of the main project with fzf, and open it in vim, in this terminal                                |
 | c                | Open the main project in Claude Code, in this terminal                                                        |
 | d                | Read the diff of the row under the cursor                                                                     |
 | f                | Fetch everything picked, after a box asking whether to                                                        |
 | p                | Pull everything picked, after a box asking whether to                                                         |
+| P                | Push what everything picked has already committed, after a box asking whether to                              |
+| s                | Stash the changes of everything picked, after a box asking whether to                                         |
+| u                | Discard the changes of everything picked, after a box asking in earnest                                       |
 | t then a         | Add a worktree to everything picked, after a box asking for the branch                                        |
 | D                | Delete the folders of everything picked, after a box asking in earnest                                        |
 | /                | Search: narrow the table to the repositories matching what you type                                           |
@@ -101,7 +109,7 @@ Keys
 | r                | Rescan and refresh everything now                                                                             |
 | q, Ctrl-C        | Quit                                                                                                          |
 | mouse wheel      | Move the cursor through the table and the menu, and scroll the diff and the reports                           |
-| click            | Enter — except in the delete box, which the keyboard alone answers                                            |
+| click            | Enter — except in the delete and discard boxes, which the keyboard alone answers                              |
 
 Every one of those keys runs a command the menu also holds a row for, on the same
 repositories: the ones picked with space, or the row under the cursor when none
@@ -135,34 +143,57 @@ row as well. The commands are:
 |-----------------------|---------|--------------------------------------------------------------------------------------|
 | goto folder           |         | your shell, standing in the main project's folder                                    |
 | open with code        | `e`     | `code <main project>`                                                                |
-| open with vim         | `v`     | `vim .` in the main project                                                          |
+| open with vim         | `v`     | `fzf` in the main project, and then `vim` on the file it printed — see below         |
 | open with claude code | `c`     | `claude` in the main project, with `--add-dir` for each added repository             |
 | open with codex       |         | `codex` in the main project, the same way                                            |
 | diff                  | `d`     | the box below, holding what changed in the main project                              |
 | fetch                 | `f`     | `git fetch --all` in every picked repository — see below                             |
 | pull                  | `p`     | `git pull` in every picked repository — see below                                    |
 | commit & push         |         | `git add -A`, `git commit` and `git push` in **every** picked repository — see below |
+| push                  | `P`     | `git push` alone, in every picked repository — see below                             |
+| stash                 | `s`     | `git stash push -u` in every picked repository — see below                           |
+| discard changes       | `u`     | throws the same changes away instead — see below                                     |
 | worktree add          | `t` `a` | `git worktree add` beside every picked repository — see below                        |
 | delete repo folder    | `D`     | removes the folder of every picked repository — see below                            |
 
-The number keys reach the first nine rows. The last two are past them on purpose:
-both carry a key of their own, while `commit & push` has no other way in.
+The number keys reach the first nine rows. The last five are past them on purpose:
+every one of them carries a key of its own, while `commit & push` has no other way
+in. That is also what keeps `push` under `commit & push` rather than beside `pull`,
+where it belongs — and it reads well enough there: commit and push, or push what
+was committed somewhere else.
 
 A selection has a shape. The repository picked first is the **main project** and
 wears no mark; the ones picked after it are marked `+`. The editor opens the main
 project — a window is a window, and the marked repositories were not asked for.
 `claude` and `codex` open the main project too, and are handed the marked ones as
-directories they may also work in. `vim` opens the main project and nothing else,
-having no way of being told about the rest.
+directories they may also work in. `vim` opens one file of the main project and
+nothing else, having no way of being told about the rest.
 
 `vim`, `claude` and `codex` want a terminal of their own and borrow this one: the
 table steps aside and comes back when the tool exits. `code` does not, having a
 window of its own, which is why it is the one that costs nothing to press.
 
+`vim` asks which file before it opens anything. Opening a repository in vim is
+opening a file in it, and the fastest way of saying which is to type part of the
+name in front of a list: fzf takes the borrowed terminal first, and what it prints
+is what vim is started on. Picking nothing, with esc or Ctrl-C, opens nothing and
+puts the table back — the file was the command. Where fzf is not installed, vim
+opens the folder as it used to, and the table says so once vim closes.
+
+The list is `fd`, which walks the repository reading `.gitignore` on the way down:
+what you are offered is the repository's own files, with hidden ones among them and
+`.git` and everything ignored left out — no node_modules to scroll past, because
+the repository ignores it. Beside the list is the file the cursor is on, shown with
+`bat`: the colours it would have in an editor, numbered lines, and the first 500 of
+them, which is enough to know whether it is the file you meant. Neither is required.
+Without `fd` the list is git's own — the same files, minus any nobody has added yet
+— and without `bat` the preview is `cat`. `$FZF_DEFAULT_COMMAND` is your own answer
+to what should be in the list, and where you have set one it is left alone.
+
 `e` is the one command that asks nothing and takes no time: a window is only a
-window, and nothing it opens cannot be closed again. `f`, `p` and `D` all put a
-box between the keystroke and the work, and the rest of the menu is its own
-asking.
+window, and nothing it opens cannot be closed again. `f`, `p`, `P`, `s`, `u` and
+`D` all put a box between the keystroke and the work, and the rest of the menu is
+its own asking.
 
 `goto folder` is the same borrowing with a shell as the tool. No program can move
 the shell that started it, so the folder is reached by a shell of its own
@@ -181,15 +212,16 @@ one:
 "code_command": "cursor"
 ```
 
-| Setting          | Default     | What it runs                                                                                                       |
-|------------------|-------------|--------------------------------------------------------------------------------------------------------------------|
-| `shell_command`  | `$SHELL`    | `goto folder`; `sh` when there is no `$SHELL`                                                                      |
-| `code_command`   | `code`      | `open with code` and the `e` key; `cursor` and `windsurf` take a folder the same way                               |
-| `vim_command`    | `vim`       | `open with vim` and the `v` key; `nvim` and `hx` take a folder the same way                                        |
-| `claude_command` | `claude`    | `open with claude code`                                                                                            |
-| `codex_command`  | `codex`     | `open with codex`                                                                                                  |
-| `claude_add_dir` | `--add-dir` | How `claude` is told about the repositories added to the main one, once each. `false` opens the main project alone |
-| `codex_add_dir`  | `--add-dir` | The same for `codex`, for a version that spells the option differently                                             |
+| Setting          | Default     | What it runs                                                                                                                                                                |
+|------------------|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `shell_command`  | `$SHELL`    | `goto folder`; `sh` when there is no `$SHELL`                                                                                                                               |
+| `code_command`   | `code`      | `open with code` and the `e` key; `cursor` and `windsurf` take a folder the same way                                                                                        |
+| `vim_command`    | `vim`       | `open with vim` and the `v` key; `nvim` and `hx` take a file the same way                                                                                                   |
+| `fzf_command`    | `fzf`       | The picker `open with vim` asks which file with — anything that prints what was picked will do. It lists with `fd` and previews with `bat`, and falls back to git and `cat` |
+| `claude_command` | `claude`    | `open with claude code`                                                                                                                                                     |
+| `codex_command`  | `codex`     | `open with codex`                                                                                                                                                           |
+| `claude_add_dir` | `--add-dir` | How `claude` is told about the repositories added to the main one, once each. `false` opens the main project alone                                                          |
+| `codex_add_dir`  | `--add-dir` | The same for `codex`, for a version that spells the option differently                                                                                                      |
 
 
 Committing and pushing
@@ -241,13 +273,13 @@ repository with a detached HEAD is not touched at all: it says so and stays as i
 was.
 
 
-Fetching and pulling
---------------------
+Fetching, pulling and pushing
+----------------------------
 
-`f` fetches and `p` pulls, across everything picked with space — or the row under
-the cursor when nothing is. Both reach a remote, and a pull writes into a working
-tree, so neither goes ahead on the keystroke alone. A box asks first, and it asks
-by listing:
+`f` fetches, `p` pulls and `P` pushes, across everything picked with space — or
+the row under the cursor when nothing is. All three reach a remote, a pull writes
+into a working tree, and a push writes to somewhere other people read, so none of
+them goes ahead on the keystroke alone. A box asks first, and it asks by listing:
 
 ```
     +- Pull 3 repositories -------------------------------------------+
@@ -280,6 +312,78 @@ one argues with git: a pull into a tree too dirty to merge into, or onto a branc
 that has diverged with no rule set for reconciling it, is git's to refuse, and
 its refusal is passed on word for word and the repository left exactly as it was.
 A repository with no remote is told so without a network being waited on.
+
+`P` is the other half of `commit & push`, for the commits that were made somewhere
+else — in an editor, in an agent, at a shell — and never left the machine. It
+commits nothing itself and touches no working tree; it says how many commits it
+carried, and a branch level with its upstream is left alone rather than made to
+reach across a network to be told so:
+
+```
+    +- push · 3 repositories ------------------------------------------+
+    | lhypds/gift       pushed 2 commits                               |
+    | gcc3/content-hub  pushed to origin/feature-x                     |
+    | lhypds/conf       nothing to push                                |
+    +- 2 pushed · 1 nothing to push ----------------------------------+
+```
+
+A branch that has never been pushed is given `origin` as its upstream, exactly as
+it is after a commit, and the box says which branch it now follows. A detached
+HEAD is not touched — there is no branch to push. A push git refuses is reported
+in git's own words: the `[rejected] main -> main (fetch first)` line, which is the
+one worth reading of everything it says.
+
+
+Stashing and discarding
+-----------------------
+
+`s` puts the changes of everything picked out of the way; `u` throws the same
+changes away instead. Both leave the working trees they touch clean, and both are
+asked for first:
+
+```
+    +- Stash 2 repositories -------------------------------------------+
+    | lhypds/gift       master  · +1203 lines -30 lines               |
+    | gcc3/content-hub  main  · +3 lines                              |
+    +- 2 with changes · git stash pop brings them back · enter stash · esc cancel -+
+```
+
+`s` is `git stash push -u`, so untracked files go with the tracked changes and the
+row comes out reading `no changes`. Everything it took is one `git stash pop` away
+in the repository it came from — repo-master has no key for bringing it back,
+because a stash belongs to the repository and popping one is a thing to do with
+git in front of you.
+
+`u` is the same command with nothing to undo it, so its box is drawn the way the
+delete box is: the rows orange, `nothing undoes this` in the footer, and the
+keyboard alone answering it — a click will not, though it answers every other box
+in repo-master. Tracked changes are put back as HEAD has them, staged and unstaged
+alike, and untracked files are removed.
+
+```
+    +- Discard the changes of 2 repositories --------------------------+
+    | lhypds/gift       master  · +1203 lines -30 lines               |
+    | gcc3/content-hub  main  · +3 lines                              |
+    +- 2 with changes · nothing undoes this · enter discard · esc cancel -+
+```
+
+Neither one touches an ignored file — build output and local settings are not what
+anybody means by "my changes" — and neither touches a repository nested inside
+another, which has a row of its own and an `s` and a `u` of its own with it. A
+repository with nothing in it to clear is skipped and said to be; pressing either
+key where nothing at all has changed says so on the message line and opens no box.
+A repository with no commit yet cannot stash — git has no HEAD to stash against,
+and says so — while a discard there has an answer: everything in it is a file
+never committed, so the whole of it goes.
+
+What came of each is reported in the same kind of box committing uses:
+
+```
+    +- stash · 2 repositories -----------------------------------------+
+    | lhypds/gift       stashed 4 files                                |
+    | gcc3/content-hub  stashing…                                      |
+    +- 1 of 2 done · working… ----------------------------------------+
+```
 
 
 The diff
@@ -374,10 +478,12 @@ all the same — the ones living inside a folder that is — are named underneat
 grey. What it removes is a folder, not a repository, and a folder takes what is
 inside it.
 
-Enter deletes; esc backs out. A click will not answer this box, though it answers
-every other one in repo-master: a folder is not to be deleted by a mouse that
-happened to be near, and a question this final should be answered from the
-keyboard. The watched root is never on offer, whatever the cursor is on — it is
+Enter deletes; esc backs out. A click will not answer this box, as it will not
+answer a discard: a folder is not to be deleted by a mouse that happened to be
+near, and a question this final should be answered from the keyboard. Those two
+are the only boxes in repo-master a click does not answer, and they are the two
+with nothing to undo them. The watched root is never on offer, whatever the cursor
+is on — it is
 the folder the table is a table of, and deleting it is not something anybody
 meant by pointing at a row in it.
 
@@ -391,7 +497,7 @@ you is the whole point, so the line is typed along the bottom where the keys
 usually are, and the table stays whole above it.
 
 ```
-Watching ~/projects · 12 repos · 3 changed · “gcc” · 2 showing
+watching ~/projects · 12 repos · 3 changed · “gcc” · 2 showing
 -------------------------------------------------------------------------------
   repo                path                 branch  status       last updated  diff
 > gcc3/gcc3-content   ./gcc3               master  no changes   -             -
