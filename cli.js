@@ -25,15 +25,16 @@ const status = require('./commands/status.js');
 const update = require('./commands/update.js');
 const { pick } = require('./utils/pick.js');
 const { runFunction } = require('./commands/run.js');
-// `serve` and `stop` are root scripts rather than function folders, so
+// `serve`, `restart` and `stop` are root scripts rather than function folders, so
 // service.js names them; `gift update` restarts a running server through the same
 // definitions.
-const { SERVE, STOP, SERVICE, SERVER_DIR } = require('./utils/service.js');
+const { SERVE, RESTART, STOP, SERVICE, SERVER_DIR } = require('./utils/service.js');
 const { version } = require('./commands/version.js');
 
 // Everything the CLI answers itself, rather than by running a function folder.
 const BUILTINS = {
     serve: SERVE.description,
+    restart: RESTART.description,
     stop: STOP.description,
     status: 'Report whether the webhooks server is running and answering.',
     list: 'List the configured server hooks.',
@@ -48,8 +49,8 @@ const BUILTINS = {
 };
 
 // Listed under the webhooks heading in `gift help` rather than with the rest of
-// the built-ins: all six are about the server.
-const WEBHOOK_NAMES = ['serve', 'stop', 'status', 'list', 'create', 'delete', 'log'];
+// the built-ins: all of them are about the server.
+const WEBHOOK_NAMES = ['serve', 'restart', 'stop', 'status', 'list', 'create', 'delete', 'log'];
 
 // The built-ins with commands or options of their own, so `gift help <name>`
 // has real help to print rather than the one-line description.

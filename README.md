@@ -9,7 +9,12 @@ Webhooks Server
 ---------------
 
 Start  
-`gift serve` starts a webhooks server that listens for GitHub events.
+`gift serve` starts a webhooks server that listens for GitHub events. It pulls
+the latest code and rebuilds the dashboard first.
+
+Restart  
+`gift restart` puts the server back on the code already on disk — no pull, no
+rebuild, so it needs no network and returns straight away.
 
 Stop  
 `gift stop`  
