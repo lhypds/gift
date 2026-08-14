@@ -85,8 +85,8 @@ and then keeps watching, printing each line as the server writes it. Ctrl-C
 stops. `gift log --no-follow` prints the lines and exits.  
 
 
-Other functions
----------------
+Functions
+---------
 
 List functions with `gift help`.  
 Run `gift run` and choose a function — `>` marks the one the keys are on,
@@ -96,6 +96,34 @@ away — or invoke one directly with `gift <function-name>`.
 `gift run 3` and `gift run repo` skip the menu: the first word after `run` is the
 answer to it, a number or a name or enough of one. Anything after that word, and
 any flag, is passed on to the function itself — `gift run 3 --once`.  
+
+A function is a folder under `functions/` holding an entry script, so the ones
+below are what is there rather than a fixed list — drop a folder in and it is on
+the menu. Each has its own README with the full parameters and examples, and its
+settings live under `functions.<name>` in `config.json`.
+
+repo-master — `gift repo-master [DIR]`  
+Watches every git repository under one folder in a live table: the branch each
+one is on, whether the working tree has changes, and how many lines that is.
+Nested checkouts and submodules are found too. Rows that want attention wear an
+orange bar; enter opens the menu of what may be done to the ones picked — open
+in an editor or an agent, read the diff, fetch, pull, push, switch or make a
+branch, merge, rebase, branch a worktree, commit and push the lot, stash or
+discard, delete a folder outright — and `/` finds a repository in a folder too
+full to read. The folder is asked for on the first run and remembered as
+`repo_root`. See [functions/repo-master/README.txt](functions/repo-master/README.txt).
+
+pull-repos — `gift pull-repos [--dir=PATH]`  
+Finds every git repository under one directory and runs
+`git pull --recurse-submodules --autostash` in each. The directory is the current one
+unless `--dir` or the configured `repo_root` names another, and `-n` shows the
+commands without running them. See [functions/pull-repos/README.txt](functions/pull-repos/README.txt).
+
+weekly-prs — `gift weekly-prs [--repos=owner/repo1,owner/repo2] [--author=login]`  
+Lists GitHub pull requests for a chosen week, grouped by date. Weeks run Monday
+to Sunday; `--weeks=N` counts back from this one and skips the prompt, and `-v`
+adds each PR's number, state and URL. Configure `repos` and `author` once and
+the common case needs no flags. See [functions/weekly-prs/README.txt](functions/weekly-prs/README.txt).
 
 
 Configuration
