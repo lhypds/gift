@@ -25,11 +25,11 @@ watching ~/projects · 12 repos · 3 changed · 2 open PRs
 ---------------------------------------------------------------------------------------------------------
 
   repo                 path                 branch  status       last updated  diff
-> lhypds/gift          ./gift               main    has changes  1min ago      +1203 lines -30 lines
+> lhypds/gift          ./gift               main    has changes  1min ago      +1203 -30
  +gcc3/gcc3-content    ./gcc3               master  no changes   -             -
 
 
-    +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
+    +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3
 ---------------------------------------------------------------------------------------------------------
 
 up/down move · space select · enter menu · / search · esc clear · R refresh · q quit
@@ -611,7 +611,7 @@ watching ~/projects · 12 repos · 3 changed · “gcc” · 2 showing
 -------------------------------------------------------------------------------
   repo                path                 branch  status       last updated  diff
 > gcc3/gcc3-content   ./gcc3               master  no changes   -             -
-    +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3 lines
+    +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3
 -------------------------------------------------------------------------------
 /gcc_   enter keep · esc clear
 ```
@@ -664,7 +664,7 @@ What the columns mean
 | branch       | The checked-out branch, or `(abc1234)` when HEAD is detached                                                                       |
 | status       | Whether the working tree has anything uncommitted                                                                                  |
 | last updated | When the newest of those changes was written — not when it was noticed                                                             |
-| diff         | Lines added and removed against HEAD, untracked files counted as added                                                             |
+| diff         | Lines added and removed against HEAD as `+1203 -30`, untracked files counted as added                                              |
 
 A repository nested inside another has its own row, and its changes are left off
 its parent's row rather than counted twice.
@@ -675,8 +675,9 @@ digit: none of them moves a column, so the table you are reading stays where it
 is while it refreshes. A wide window opens the repo, path and branch columns out
 towards their maximums; a narrow one squeezes them back. Anything too long for
 the width it is given is cut with an ellipsis and can be read in full from the
-preview, and the diff column drops the word "lines" rather than take room the
-other columns want.
+preview. The diff column is written `+1203 -30` rather than in words: it is a
+column of numbers to be compared down the page, and the boxes are where the
+counts are spelled out in full.
 
 
 How fresh it is

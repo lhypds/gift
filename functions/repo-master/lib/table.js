@@ -61,7 +61,13 @@ function statusCell(repo) {
     return repo.hasChanges ? 'has changes' : 'no changes';
 }
 
-/** `+1203 lines -30 lines`, or the same thing without the word when squeezed. */
+/**
+ * `+1203 -30` for the table, and `+1203 lines -30 lines` for the boxes that say
+ * it in a sentence. The table takes the short one whatever room it has: a column
+ * of counts is read by comparing the numbers down it, and the word repeated on
+ * every row of every half is four times as much to look past as there is to
+ * read.
+ */
 function diffCells(repo) {
     if (!repo.loaded || repo.error) return { long: '-', short: '-' };
     if (repo.adds === 0 && repo.dels === 0) return { long: '-', short: '-' };
@@ -426,10 +432,9 @@ const COLUMNS = [
     { key: 'updated', title: 'last updated', min: 6, want: 12, max: 12 },
     // The diff column is the last one, and the line is trimmed after it, so
     // room given to it is room nobody sees — it takes none of a wide window's
-    // spare, which is why its maximum is the width it wants. 21 is a four-digit
-    // diff with the word "lines" on both halves; past that the short wording is
-    // used instead of a wider column.
-    { key: 'diff', title: 'diff', min: 4, want: 21, max: 21 },
+    // spare, which is why its maximum is the width it wants. 14 holds
+    // `+999999 -99999`, which is more than a working tree usually has in it.
+    { key: 'diff', title: 'diff', min: 4, want: 14, max: 14 },
 ];
 
 const GAP = 2;
@@ -529,28 +534,16 @@ function frame(state, palette, size) {
     // reason, a few lines further down.
     if (state.cursor >= rows.length) state.cursor = rows.length - 1;
 
-    const rowCells = rows.map((repo) => {
-        const diff = diffCells(repo);
-        return {
-            repo: `${treePrefix(repo.depth)}${repo.name}`,
-            path: repo.relPath,
-            branch: repo.branch || '…',
-            status: statusCell(repo),
-            updated: repo.hasChanges ? formatRelative(repo.lastChange, now) : '-',
-            diff: diff.long,
-            short: diff.short,
-        };
-    });
+    const rowCells = rows.map((repo) => ({
+        repo: `${treePrefix(repo.depth)}${repo.name}`,
+        path: repo.relPath,
+        branch: repo.branch || '…',
+        status: statusCell(repo),
+        updated: repo.hasChanges ? formatRelative(repo.lastChange, now) : '-',
+        diff: diffCells(repo).short,
+    }));
 
-    // Try the long diff wording, and fall back to the short one for every row
-    // when it is too long for the column — all of them together, because a
-    // column half of which says "lines" reads as two different columns. The
-    // width does not move either way; only the wording does.
     const widths = layout(available);
-    const longestDiff = Math.max(...rowCells.map((row) => width(row.diff)), 0);
-    if (longestDiff > widths.diff) {
-        for (const row of rowCells) row.diff = row.short;
-    }
 
     const header = Object.fromEntries(COLUMNS.map((column) => [column.key, column.title]));
 
