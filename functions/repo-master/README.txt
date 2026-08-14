@@ -669,6 +669,15 @@ What the columns mean
 A repository nested inside another has its own row, and its changes are left off
 its parent's row rather than counted twice.
 
+The columns are as wide as the window makes them and no wider — what is in them
+has no say in it. A branch you switch, a status that turns, a diff that grows a
+digit: none of them moves a column, so the table you are reading stays where it
+is while it refreshes. A wide window opens the repo, path and branch columns out
+towards their maximums; a narrow one squeezes them back. Anything too long for
+the width it is given is cut with an ellipsis and can be read in full from the
+preview, and the diff column drops the word "lines" rather than take room the
+other columns want.
+
 
 How fresh it is
 ---------------

@@ -403,44 +403,73 @@ function panelFor(state) {
 }
 
 /**
- * `max` is what keeps one outlier from eating the table: a remote whose path is
- * a hundred URL-encoded characters would otherwise set the width of the repo
- * column for everybody. Past the maximum a cell is cut with an ellipsis, however
- * much room the terminal has.
+ * The columns are sized from the window and nothing else — never from what is in
+ * them, which is what used to make the table jump. Measured off the cells, every
+ * column moved on any edit: a status turning from "no changes" to "has changes"
+ * is a character wider, a diff crossing a thousand lines is another, a branch
+ * with a ticket number in its name is eight, and each of them shifted every
+ * column to the right of it. Now nothing an edit can do moves a column; only
+ * resizing the terminal does.
+ *
+ * `want` is the width a column is given whenever there is room for it, and is
+ * meant to hold the ordinary case: `has changes` in full, a diff of four digits
+ * with the word "lines" on both halves. `min` is how far it may be squeezed in a
+ * narrow window, and `max` how far a wide one may open it. Anything longer than
+ * the width it ends up with is cut with an ellipsis, and can be read in full
+ * from the preview.
  */
 const COLUMNS = [
-    { key: 'repo', title: 'repo', min: 12, max: 34 },
-    { key: 'path', title: 'path', min: 8, max: 40 },
-    { key: 'branch', title: 'branch', min: 6, max: 24 },
-    { key: 'status', title: 'status', min: 6, max: 11 },
-    { key: 'updated', title: 'last updated', min: 6, max: 12 },
-    { key: 'diff', title: 'diff', min: 4, max: 24 },
+    { key: 'repo', title: 'repo', min: 12, want: 24, max: 34 },
+    { key: 'path', title: 'path', min: 8, want: 20, max: 40 },
+    { key: 'branch', title: 'branch', min: 6, want: 16, max: 24 },
+    { key: 'status', title: 'status', min: 6, want: 11, max: 11 },
+    { key: 'updated', title: 'last updated', min: 6, want: 12, max: 12 },
+    // The diff column is the last one, and the line is trimmed after it, so
+    // room given to it is room nobody sees — it takes none of a wide window's
+    // spare, which is why its maximum is the width it wants. 21 is a four-digit
+    // diff with the word "lines" on both halves; past that the short wording is
+    // used instead of a wider column.
+    { key: 'diff', title: 'diff', min: 4, want: 21, max: 21 },
 ];
 
 const GAP = 2;
 const GUTTER = 2; // '> ' for the cursor, ' +' for a repository added to the main one
 
-/**
- * Work out how wide each column may be. Everything starts at its natural width;
- * if that does not fit the terminal the diff column drops the word "lines"
- * first, and then the widest column gives up a character at a time.
- */
-function layout(cells, available) {
-    const widths = {};
-    for (const column of COLUMNS) {
-        const natural = Math.max(width(column.title), ...cells.map((row) => width(row[column.key])));
-        widths[column.key] = column.max ? Math.min(natural, column.max) : natural;
-    }
+/** What the columns come to at a given set of widths, gaps and gutter included. */
+function span(widths) {
+    return GUTTER + COLUMNS.reduce((sum, column) => sum + widths[column.key], 0) + GAP * (COLUMNS.length - 1);
+}
 
-    const total = () => GUTTER + COLUMNS.reduce((sum, column) => sum + widths[column.key], 0) + GAP * (COLUMNS.length - 1);
+/**
+ * Work out how wide each column may be, from the width of the window alone.
+ *
+ * Everything starts at the width it wants. A window too narrow for that takes
+ * the difference off the widest column a character at a time, down to the
+ * minimums; a window with room to spare hands it out a character at a time as
+ * well, round the columns that have a use for it — the names and the paths and
+ * the branches — until they are at their maximums or the room is gone.
+ */
+function layout(available) {
+    const widths = Object.fromEntries(COLUMNS.map((column) => [column.key, column.want]));
 
     let shrinkable = COLUMNS.filter((column) => !column.fixed);
-    while (total() > available) {
+    while (span(widths) > available) {
         const widest = shrinkable
             .filter((column) => widths[column.key] > column.min)
             .sort((a, b) => widths[b.key] - widths[a.key])[0];
         if (!widest) break;
         widths[widest.key]--;
+    }
+
+    // Round-robin rather than filling one column and moving on, so the spare
+    // room of a wide window is shared out instead of landing all on the repo.
+    let growable = COLUMNS.filter((column) => widths[column.key] < column.max);
+    while (growable.length > 0 && span(widths) < available) {
+        for (const column of growable) {
+            if (span(widths) >= available) break;
+            widths[column.key]++;
+        }
+        growable = growable.filter((column) => widths[column.key] < column.max);
     }
     return widths;
 }
@@ -513,13 +542,14 @@ function frame(state, palette, size) {
         };
     });
 
-    // Try the long diff wording; fall back to the short one if that is what
-    // stops the table fitting.
-    let widths = layout(rowCells, available);
-    const naturalDiff = Math.max(width('diff'), ...rowCells.map((row) => width(row.diff)), 0);
-    if (widths.diff < naturalDiff) {
+    // Try the long diff wording, and fall back to the short one for every row
+    // when it is too long for the column — all of them together, because a
+    // column half of which says "lines" reads as two different columns. The
+    // width does not move either way; only the wording does.
+    const widths = layout(available);
+    const longestDiff = Math.max(...rowCells.map((row) => width(row.diff)), 0);
+    if (longestDiff > widths.diff) {
         for (const row of rowCells) row.diff = row.short;
-        widths = layout(rowCells, available);
     }
 
     const header = Object.fromEntries(COLUMNS.map((column) => [column.key, column.title]));
