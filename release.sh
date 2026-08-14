@@ -61,14 +61,19 @@ cp "$ROOT_DIR/restart.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/release_gh.sh" "$STAGING_DIR/"
 cp "$ROOT_DIR/package.json" "$STAGING_DIR/"
-[ -f "$ROOT_DIR/pnpm-lock.yaml" ] && cp "$ROOT_DIR/pnpm-lock.yaml" "$STAGING_DIR/"
 cp "$ROOT_DIR/README.md"    "$STAGING_DIR/"
-cp "$ROOT_DIR/README.txt"   "$STAGING_DIR/"
 cp "$ROOT_DIR/LICENSE"      "$STAGING_DIR/"
 cp "$ROOT_DIR/VERSION"      "$STAGING_DIR/"
 
+# setup.sh runs `pnpm i && pnpm run build` in the unpacked release, so the
+# lockfile and the workspace file (its allowBuilds entry lets esbuild build)
+# both have to ship or that build fails on the target machine.
+# Trailing `|| true` keeps a missing optional file from tripping `set -e`.
+[ -f "$ROOT_DIR/pnpm-lock.yaml" ]      && cp "$ROOT_DIR/pnpm-lock.yaml"      "$STAGING_DIR/" || true
+[ -f "$ROOT_DIR/pnpm-workspace.yaml" ] && cp "$ROOT_DIR/pnpm-workspace.yaml" "$STAGING_DIR/" || true
+
 # Optional dotfiles worth shipping (never config.json — that holds the secret).
-[ -f "$ROOT_DIR/.gitignore"   ] && cp "$ROOT_DIR/.gitignore"   "$STAGING_DIR/"
+[ -f "$ROOT_DIR/.gitignore" ] && cp "$ROOT_DIR/.gitignore" "$STAGING_DIR/" || true
 
 # Strip anything machine-specific that a function folder may contain.
 find "$STAGING_DIR" \
