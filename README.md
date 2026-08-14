@@ -106,14 +106,29 @@ weekly-prs` still overrides what is configured for one run.
 Setup
 -----
 
-Setup and install  
+Install  
+```
+curl -fsSL https://raw.githubusercontent.com/lhypds/gift/master/get.sh | bash
+```
+
+That takes the latest release, unpacks it into `~/.gift`, and runs the setup and
+install steps from there — so it asks for the public webhook URL and puts the
+`gift` command on your PATH. Set `GIFT_INSTALL_DIR` to install somewhere else,
+or `GIFT_INSTALL_VERSION=v0.0.1` to pin a release rather than take the newest.
+
+From a checkout instead  
 ```
 ./setup.sh
 ./install.sh
 ```
 
 Update  
-`gift update` pulls the latest code into the folder gift is installed from.
+Run the same one-liner again. `config.json`, `hooks.json` and the logs are
+carried across, so the webhook secret and the hooks survive the upgrade.
+
+`gift update` is the checkout equivalent — it is a `git pull --ff-only` in the
+folder gift is installed from, so it has nothing to pull in a release install.
 
 Uninstall  
-`./uninstall.sh`  
+`~/.gift/uninstall.sh` removes the `gift` command; delete `~/.gift` to remove
+the rest. From a checkout it is `./uninstall.sh`.  

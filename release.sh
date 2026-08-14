@@ -55,6 +55,7 @@ cp "$ROOT_DIR/cli.js"       "$STAGING_DIR/"
 cp "$ROOT_DIR/functions.js" "$STAGING_DIR/"
 cp "$ROOT_DIR/config.schema.json" "$STAGING_DIR/"
 cp "$ROOT_DIR/setup.sh"     "$STAGING_DIR/"
+cp "$ROOT_DIR/get.sh"       "$STAGING_DIR/"
 cp "$ROOT_DIR/install.sh"   "$STAGING_DIR/"
 cp "$ROOT_DIR/uninstall.sh" "$STAGING_DIR/"
 cp "$ROOT_DIR/restart.sh"   "$STAGING_DIR/"
@@ -68,7 +69,9 @@ cp "$ROOT_DIR/VERSION"      "$STAGING_DIR/"
 # setup.sh runs `pnpm i && pnpm run build` in the unpacked release, so the
 # lockfile and the workspace file (its allowBuilds entry lets esbuild build)
 # both have to ship or that build fails on the target machine.
-# Trailing `|| true` keeps a missing optional file from tripping `set -e`.
+# Trailing `|| true` so a missing optional file leaves a zero status here, and
+# these stay safe to move around — a bare `[ -f x ] && cp x y` as the last
+# command of the script would fail the whole release.
 [ -f "$ROOT_DIR/pnpm-lock.yaml" ]      && cp "$ROOT_DIR/pnpm-lock.yaml"      "$STAGING_DIR/" || true
 [ -f "$ROOT_DIR/pnpm-workspace.yaml" ] && cp "$ROOT_DIR/pnpm-workspace.yaml" "$STAGING_DIR/" || true
 

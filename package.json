@@ -1,6 +1,6 @@
 {
   "name": "gift",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "GitHub webhook server with additional Git and GitHub helper functions",
   "license": "MIT",
   "bin": {
