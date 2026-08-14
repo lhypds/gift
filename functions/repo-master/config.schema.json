@@ -5,7 +5,7 @@
             "key": "repo_root",
             "env": "GIFT_REPO_MASTER_REPO_ROOT",
             "type": "path",
-            "description": "Folder holding the repositories to watch, as an absolute path. Without it repo-master watches the directory it is run in."
+            "description": "Folder holding the repositories to watch, as an absolute path. Without it repo-master asks for one the first time it is run and writes the answer here; with nobody to ask — a pipe, --once — it watches the directory it is run in."
         },
         {
             "key": "depth",

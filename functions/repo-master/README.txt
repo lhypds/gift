@@ -62,6 +62,7 @@ Files
 | `lib/modal.js`       | The box they are all drawn in, over the table                                                                       |
 | `lib/screen.js`      | The alternate screen and the keys                                                                                   |
 | `lib/actions.js`     | The one list of commands, and what each one does to the repositories picked                                         |
+| `lib/setup.js`       | The first run's question — which folder to watch — and writing the answer down                                      |
 | `config.schema.json` | The settings this function has, and their defaults — see `functions.repo-master` in config.json                     |
 
 
@@ -74,9 +75,24 @@ gift repo-master [DIR] [options]
 
 (`gift repo` is enough of the name.)
 
-`DIR` is **your current directory** unless the positional argument,
-`--repo-root` or the configured `repo_root` names another one. The usual way is
-to set the folder once and forget it — `gift config` opens the file:
+`DIR` is the configured `repo_root` unless the positional argument or
+`--repo-root` names another one. The folder is set once and then forgotten, so
+the first run with nothing configured asks for it in words, on the terminal,
+before the table goes up:
+
+```
+repo-master watches every git repository under one folder, and does not know
+which folder yet. Answer once and it is written down — `gift config` changes it
+later, and a path given to the command wins over it for the one run.
+
+Folder to watch [~/code]: ~/projects
+Watching ~/projects — written down in /Users/me/gift/config.json.
+```
+
+Enter alone takes the directory you are standing in. A folder that is not there
+is worth another question rather than an exit; Ctrl-C gives up and watches
+nothing. The answer lands under `functions.repo-master` in config.json, which
+`gift config` opens:
 
 ```json
 {
@@ -87,11 +103,15 @@ to set the folder once and forget it — `gift config` opens the file:
 ```
 
 ```bash
-gift repo-master        # from anywhere at all
+gift repo-master        # from anywhere at all, from then on
 ```
 
 Write `repo_root` as an absolute path, so it means the same folder whatever
-directory you run from.
+directory you run from — which is what the question writes for you.
+
+Where there is nobody to ask — down a pipe, in a cron job, with `--once` — an
+unset `repo_root` still means your current directory, and nothing stops to ask a
+script a question it cannot answer.
 
 
 Keys
@@ -619,7 +639,7 @@ Parameters
 
 | Parameter                 | Description                                             | Default                                                |
 |---------------------------|---------------------------------------------------------|--------------------------------------------------------|
-| `DIR`, `--repo-root=PATH` | Folder to watch (`--dir=PATH` is the older spelling)    | the configured `repo_root`, else the current directory |
+| `DIR`, `--repo-root=PATH` | Folder to watch (`--dir=PATH` is the older spelling)    | the configured `repo_root`, else asked for on the first run |
 | `--depth=N`               | How many folders deep to look for repositories          | 4                                                      |
 | `--refresh=SEC`           | Seconds between full sweeps — new repositories included | 30                                                     |
 | `--once`                  | Print the table once and exit, instead of watching      | off                                                    |

@@ -18,6 +18,7 @@ const path = require('node:path');
 const gitLib = require('./lib/git.js');
 const reposLib = require('./lib/repos.js');
 const actionsLib = require('./lib/actions.js');
+const setupLib = require('./lib/setup.js');
 const { watchAll } = require('./lib/watch.js');
 const { createScreen, RESET } = require('./lib/screen.js');
 const { createPalette, frame } = require('./lib/table.js');
@@ -44,7 +45,9 @@ function usage() {
 
 Watch every git repository under DIR and show them as a live table. Without a
 directory it watches the configured repo_root — functions.repo-master in gift's
-config.json — and failing that, the current directory.
+config.json. With nothing configured either, it asks for the folder here, before
+the table goes up, and writes down the answer; where there is nobody to ask — a
+pipe, --once — it watches the current directory.
 
 Options:
   --repo-root=PATH     Folder to watch; same as the positional argument (--dir also works)
@@ -194,13 +197,29 @@ async function main(argv) {
         return 2;
     }
 
+    const interactive = !options.once && process.stdin.isTTY && process.stdout.isTTY;
+
+    // Which folder to watch. A path on the command line answers for this run and
+    // the configured repo_root answers for every run; with neither, there is a
+    // question to ask, and here — before the screen is taken over — is where
+    // there is still a terminal in words to ask it on. The answer is written
+    // down, so it is asked the first time and not again. Nobody who cannot
+    // answer is asked: down a pipe, or with --once, the old fallback stands and
+    // the directory the command was run in is the folder.
+    if (!options.dir && interactive) {
+        const asked = await setupLib.askForRoot();
+        if (asked.status !== 'ok') {
+            console.log('Nothing to watch.');
+            return 130;
+        }
+        options.dir = asked.root;
+    }
+
     const root = path.resolve(options.dir ? expandHome(options.dir) : process.cwd());
     if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
         console.error(`repo-master: ${root} is not a folder`);
         return 1;
     }
-
-    const interactive = !options.once && process.stdin.isTTY && process.stdout.isTTY;
 
     const found = reposLib.arrange(root, await reposLib.discover(root, options.depth));
     const identities = await Promise.all(found.map((entry) => gitLib.identify(entry.dir)));
