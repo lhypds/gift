@@ -1,4 +1,6 @@
-// The VERSION file is the single source of truth; package.json mirrors it.
+// The VERSION file is the only place the release number lives. package.json
+// deliberately carries no "version" field: gift ships as a GitHub release zip
+// rather than an npm package, so a second copy would only ever drift.
 'use strict';
 
 const fs = require('node:fs');
@@ -11,13 +13,9 @@ function version() {
         const value = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim();
         if (value) return value;
     } catch {
-        /* fall through to package.json */
+        /* an unreadable VERSION falls back to the placeholder below */
     }
-    try {
-        return require(path.join(ROOT, 'package.json')).version || '0.0.0';
-    } catch {
-        return '0.0.0';
-    }
+    return '0.0.0';
 }
 
 module.exports = { version };

@@ -19,13 +19,6 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# package.json carries the same number; a mismatch means one of them was missed.
-PKG_VERSION="$(node -p "require('$ROOT_DIR/package.json').version" 2>/dev/null || echo "")"
-if [ -n "$PKG_VERSION" ] && [ "$PKG_VERSION" != "$VERSION" ]; then
-    echo "Error: VERSION ($VERSION) and package.json ($PKG_VERSION) disagree."
-    exit 1
-fi
-
 # The dashboard is React, built by Vite; the release ships the built web/dist
 # alongside its web/src source, so the zip runs standalone without forcing a
 # build on the target machine.
