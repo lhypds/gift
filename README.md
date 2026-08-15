@@ -113,6 +113,17 @@ discard, delete a folder outright — and `/` finds a repository in a folder too
 full to read. The folder is asked for on the first run and remembered as
 `repo_root`. See [functions/repo-master/README.txt](functions/repo-master/README.txt).
 
+fetch-repo-files — `gift fetch-repo-files [--file] [--branch=NAME] <url>`  
+Copies a folder, or a single file, out of a GitHub repository into the current
+directory — nothing is cloned, and no `.git` is left behind. The URL is the one
+the browser shows: the repository, a `/tree/` folder, a `/blob/` file, a raw
+link, or the path written straight after the repository name. `--file` (`-f`)
+says the URL names one file rather than a folder, `--branch` (`-b`) reads a
+branch, tag or commit other than the default one, `--out` puts it somewhere
+other than here, and `--force` writes over what is already there. A private
+repository wants a token — configured, in the environment, or a signed-in `gh`.
+See [functions/fetch-repo-files/README.txt](functions/fetch-repo-files/README.txt).
+
 pull-repos — `gift pull-repos [--dir=PATH]`  
 Finds every git repository under one directory and runs
 `git pull --recurse-submodules --autostash` in each. The directory is the current one

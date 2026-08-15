@@ -1,0 +1,17 @@
+{
+    "description": "Copy a folder or a single file out of a GitHub repository into the current directory.",
+    "options": [
+        {
+            "key": "token",
+            "env": "GIFT_GITHUB_TOKEN",
+            "type": "secret",
+            "description": "GitHub token used to read private repositories, and to lift the hourly request limit. Without it GITHUB_TOKEN, GH_TOKEN and a signed-in `gh` are tried in that order."
+        },
+        {
+            "key": "out",
+            "env": "GIFT_FETCH_OUT",
+            "type": "path",
+            "description": "Folder that fetched files land in when --out is not given. Without it they land in the directory the function is run in."
+        }
+    ]
+}
