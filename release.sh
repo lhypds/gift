@@ -108,14 +108,28 @@ prepare_version_for_release() {
         exit 1
     fi
 
-    local current latest_tag latest cmp new_version branch
+    local current draft_tag draft_tags latest_tag latest cmp new_version branch
     current="$(normalize_version "$(cat "$ROOT_DIR/VERSION")")"
     if [ -z "$current" ]; then
         echo "Error: VERSION file is empty."
         exit 1
     fi
 
-    latest_tag="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
+    if ! draft_tags="$(gh release list --limit 1000 --json tagName,isDraft \
+        --jq '.[] | select(.isDraft) | .tagName' 2>/dev/null)"; then
+        echo "Error: unable to check GitHub for draft releases."
+        exit 1
+    fi
+    if [ -n "$draft_tags" ]; then
+        echo "Warning: GitHub draft release(s) found:"
+        while IFS= read -r draft_tag; do
+            echo "  - $draft_tag"
+        done <<< "$draft_tags"
+        echo "Review, publish, or delete the draft release(s) before continuing."
+        exit 1
+    fi
+
+    latest_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
     if [ "$latest_tag" = "null" ]; then
         latest_tag=""
     fi
