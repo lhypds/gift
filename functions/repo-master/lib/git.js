@@ -213,7 +213,7 @@ async function countLines(file) {
     } catch {
         return 0;
     } finally {
-        await handle?.close().catch(() => {});
+        await handle?.close().catch(() => { });
     }
 }
 
@@ -351,8 +351,8 @@ async function diff(dir, exclude = []) {
     const own = ownEntry(dir, exclude);
     const untracked = status.ok
         ? parsePorcelain(status.stdout).filter(
-              (entry) => entry.untracked && !entry.path.endsWith('/') && own(entry),
-          )
+            (entry) => entry.untracked && !entry.path.endsWith('/') && own(entry),
+        )
         : [];
 
     if (untracked.length > 0) {
@@ -394,13 +394,18 @@ function commitHash(output) {
 /**
  * Pathspecs that keep the repositories nested inside this one out of its commit.
  * They have rows of their own, and a commit of their own; staging one from here
- * would write it into its parent as a gitlink nobody asked for.
+ * would write it into its parent as a gitlink nobody asked for. A nested path
+ * git already ignores needs no exclusion, and naming it here makes `git add`
+ * reject the whole operation as an attempt to add an ignored path.
  */
-function withoutNested(dir, nested) {
-    return nested
+async function withoutNested(dir, nested) {
+    const relative = nested
         .map((child) => path.relative(dir, child).split(path.sep).join('/'))
-        .filter((relative) => relative && !relative.startsWith('..'))
-        .map((relative) => `:(exclude)${relative}`);
+        .filter((child) => child && !child.startsWith('..'));
+    const checked = await Promise.all(
+        relative.map(async (child) => ({ child, ignored: (await git(dir, ['check-ignore', '--quiet', '--', child])).ok })),
+    );
+    return checked.filter(({ ignored }) => !ignored).map(({ child }) => `:(exclude)${child}`);
 }
 
 /** `3 files`, or `1 file`, for the lines that count what was moved or thrown away. */
@@ -471,14 +476,14 @@ async function pushBranch(dir, branch) {
  * @param {(step: string) => void} [onStep] Told 'staging', 'committing', 'pushing'.
  * @returns {Promise<{ok: boolean, committed: boolean, pushed: boolean, text: string}>}
  */
-async function commitAndPush(dir, message, nested = [], onStep = () => {}) {
+async function commitAndPush(dir, message, nested = [], onStep = () => { }) {
     const fail = (text) => ({ ok: false, committed: false, pushed: false, text });
 
     const branch = await currentBranch(dir);
     if (branch === '-' || branch.startsWith('(')) return fail('detached HEAD — check out a branch first');
 
     onStep('staging');
-    const staged = await git(dir, ['add', '-A', '--', '.', ...withoutNested(dir, nested)]);
+    const staged = await git(dir, ['add', '-A', '--', '.', ...(await withoutNested(dir, nested))]);
     if (!staged.ok) return fail(`add failed: ${firstLine(staged.stderr)}`);
 
     onStep('committing');
