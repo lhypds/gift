@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish a gift release zip to GitHub (lhypds/git-toolkit) using the `gh` CLI.
+# Publish a gift release zip to GitHub (lhypds/gift) using the `gh` CLI.
 # Usage:
 #   ./release_gh.sh                            # derive tag + zip path from VERSION
 #   ./release_gh.sh v0.0.2                     # explicit tag, derive zip path
@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE_DIR="$ROOT_DIR/release"
-REPO="${GIFT_RELEASE_REPO:-lhypds/git-toolkit}"
+REPO="${GIFT_RELEASE_REPO:-lhypds/gift}"
 
 if [ $# -ge 2 ]; then
     VERSION="$1"
