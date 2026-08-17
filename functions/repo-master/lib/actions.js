@@ -259,12 +259,8 @@ function actions(env) {
                 empty: 'a message first',
             },
         },
-        // The number keys in the menu reach nine rows, and these are the last
-        // five: every one of them carries a key of its own, so being past the
-        // ninth costs them nothing, while `commit & push` above has no other way
-        // in. That is what keeps `push` below it rather than beside `pull`, where
-        // it belongs — and it reads well enough there: commit and push, or push
-        // what was committed elsewhere.
+        // These all carry a key of their own. Their menu position is learned
+        // from use, along with every other command's.
         {
             id: 'push',
             key: 'P',
@@ -497,7 +493,7 @@ function sweep(repos, onUpdate, work) {
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
  */
-async function sync(repos, kind, onUpdate = () => {}) {
+async function sync(repos, kind, onUpdate = () => { }) {
     return sweep(repos, onUpdate, async (repo, say) => {
         say('working', SYNC[kind].busy);
         // Fetching and pulling are one call with a flag between them; pushing is
@@ -521,7 +517,7 @@ async function sync(repos, kind, onUpdate = () => {}) {
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
  */
-async function clear(repos, kind, onUpdate = () => {}) {
+async function clear(repos, kind, onUpdate = () => { }) {
     return sweep(repos, onUpdate, async (repo, say) => {
         say('working', CLEAR[kind].busy);
         const result =
@@ -546,7 +542,7 @@ async function clear(repos, kind, onUpdate = () => {}) {
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>} The last
  *   word on each repository, in the order they were given.
  */
-async function commit(repos, message, onUpdate = () => {}) {
+async function commit(repos, message, onUpdate = () => { }) {
     return sweep(repos, onUpdate, async (repo, say) => {
         const result = await gitLib.commitAndPush(repo.dir, message, repo.nested, (step) => say('working', `${step}…`));
         return say(!result.ok ? 'failed' : result.committed ? 'done' : 'skipped', result.text);
@@ -568,7 +564,7 @@ async function commit(repos, message, onUpdate = () => {}) {
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
  */
-async function branch(repos, kind, name, onUpdate = () => {}) {
+async function branch(repos, kind, name, onUpdate = () => { }) {
     const work = {
         switch: gitLib.switchBranch,
         create: gitLib.createBranch,
@@ -595,7 +591,7 @@ async function branch(repos, kind, name, onUpdate = () => {}) {
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
  */
-async function worktrees(repos, branch, onUpdate = () => {}) {
+async function worktrees(repos, branch, onUpdate = () => { }) {
     return sweep(repos, onUpdate, async (repo, say) => {
         say('working', 'adding…');
         const result = await gitLib.addWorktree(repo.dir, branch, worktreePath(repo.dir, branch));
@@ -615,7 +611,7 @@ async function worktrees(repos, branch, onUpdate = () => {}) {
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
  */
-async function remove(repos, onUpdate = () => {}) {
+async function remove(repos, onUpdate = () => { }) {
     return sweep(repos, onUpdate, async (repo, say) => {
         // A folder already gone is not a failure: something else deleted it, and
         // the row was on its way out at the next scan anyway.

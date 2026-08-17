@@ -19,6 +19,7 @@ const gitLib = require('./lib/git.js');
 const reposLib = require('./lib/repos.js');
 const ignoreLib = require('./lib/ignore.js');
 const actionsLib = require('./lib/actions.js');
+const usageLib = require('./lib/usage.js');
 const setupLib = require('./lib/setup.js');
 const { watchAll } = require('./lib/watch.js');
 const { createScreen, RESET } = require('./lib/screen.js');
@@ -276,7 +277,7 @@ async function main(argv) {
         // of them the table draws and the cursor may reach.
         filter: '',
         search: null,
-        actions: actionsLib.actions(process.env),
+        actions: usageLib.sort(actionsLib.actions(process.env)),
         notes: { ignored: ignoredNote(scanned.ignored), watch: '' },
         message: '',
         busy: false,
@@ -363,7 +364,7 @@ async function main(argv) {
     // tidies. Rescanning keeps the rows honest without losing what is already
     // known about the ones that stayed: `rows` is edited in place, so the
     // watchers and the selection all keep pointing at the same objects.
-    let onRowsChanged = () => {};
+    let onRowsChanged = () => { };
     let scanning = false;
     const rescan = async () => {
         if (scanning) return false;
@@ -458,6 +459,15 @@ async function main(argv) {
     /** A command by name, for the keys that start one without the menu. */
     const command = (id) => state.actions.find((entry) => entry.id === id);
 
+    const markUsed = (action) => {
+        try {
+            const counts = usageLib.record(action.id);
+            state.actions = usageLib.sort(state.actions, counts);
+        } catch {
+            // Usage history must never stop the command it is observing.
+        }
+    };
+
     const openMenu = () => {
         const chosen = targets();
         if (chosen.length === 0) return;
@@ -484,7 +494,7 @@ async function main(argv) {
             case 'diff':
                 // The main project is the one with a diff to read; the rest were
                 // picked to be worked on together, which reading is not.
-                openPreview(chosen[0]);
+                openPreview(chosen[0], action);
                 return;
             case 'sync':
                 askSync(action, chosen, back);
@@ -549,6 +559,7 @@ async function main(argv) {
     // the only thing that starts a command: a key starts one from the table, on
     // what the cursor and the selection say without a box in between.
     const runAction = async (action, chosen) => {
+        markUsed(action);
         state.mode = 'table';
         state.busy = true;
         say('');
@@ -634,7 +645,8 @@ async function main(argv) {
     // @param {() => void} [after] What to put right afterwards. Refreshing the
     //   rows is enough for work done inside them; work that makes or unmakes a
     //   folder has to go looking for rows as well.
-    const runReport = async (title, label, repos, words, start, after = refreshAll) => {
+    const runReport = async (action, title, label, repos, words, start, after = refreshAll) => {
+        markUsed(action);
         const entries = repos.map((repo) => ({ repo, state: 'pending', text: 'waiting…' }));
         state.mode = 'report';
         state.report = { title, entries, words, running: true, scroll: 0, view: 1 };
@@ -674,11 +686,12 @@ async function main(argv) {
     const rescanAfter = () => {
         rescan()
             .then(refreshAll)
-            .catch(() => {});
+            .catch(() => { });
     };
 
     const runCommit = (action, repos, message) =>
         runReport(
+            action,
             `${action.label} · "${message}"`,
             action.label,
             repos,
@@ -691,6 +704,7 @@ async function main(argv) {
 
     const runSync = (kind, repos) =>
         runReport(
+            command(kind),
             `${actionsLib.SYNC[kind].label} · ${counting(repos)}`,
             actionsLib.SYNC[kind].label,
             repos,
@@ -703,6 +717,7 @@ async function main(argv) {
     // what has to be put right: no folder came or went.
     const runClear = (kind, repos) =>
         runReport(
+            command(kind),
             `${actionsLib.CLEAR[kind].label} · ${counting(repos)}`,
             actionsLib.CLEAR[kind].label,
             repos,
@@ -715,6 +730,7 @@ async function main(argv) {
     // and refreshing the rows is the whole of what has to be put right.
     const runBranch = (kind, repos, name) =>
         runReport(
+            command(kind),
             `${actionsLib.BRANCH[kind].label} · ${name}`,
             actionsLib.BRANCH[kind].label,
             repos,
@@ -727,6 +743,7 @@ async function main(argv) {
     // rather than leaving it to the next sweep half a minute later.
     const runWorktree = (action, repos, branch) =>
         runReport(
+            action,
             `${action.label} · ${branch}`,
             action.label,
             repos,
@@ -737,6 +754,7 @@ async function main(argv) {
 
     const runDelete = (action, repos) =>
         runReport(
+            action,
             `${action.label} · ${repos.length} ${repos.length === 1 ? 'folder' : 'folders'}`,
             action.label,
             repos,
@@ -797,7 +815,7 @@ async function main(argv) {
                     field.branches.set(repo.dir, found);
                     requestRender();
                 })
-                .catch(() => {});
+                .catch(() => { });
         }
     };
 
@@ -1002,14 +1020,15 @@ async function main(argv) {
                 state.preview.lines = result.error
                     ? [`error: ${result.error}`]
                     : result.lines.length > 0
-                      ? result.lines
-                      : ['no changes'];
+                        ? result.lines
+                        : ['no changes'];
                 draw();
             });
     };
 
-    const openPreview = (repo) => {
+    const openPreview = (repo, action = command('diff')) => {
         if (!repo) return;
+        markUsed(action);
         state.mode = 'preview';
         say('');
         // The title is the renderer's, and so are `scroll` and `view` once it has
@@ -1456,7 +1475,7 @@ async function main(argv) {
                 draw();
                 rescan()
                     .then(refreshAll)
-                    .catch(() => {})
+                    .catch(() => { })
                     .then(() => {
                         say('');
                         draw();
@@ -1489,7 +1508,7 @@ async function main(argv) {
     const sweeper = setInterval(() => {
         rescan()
             .then(refreshAll)
-            .catch(() => {});
+            .catch(() => { });
     }, options.refresh * 1000);
 
     const onSignal = () => finish(130);
