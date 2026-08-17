@@ -17,6 +17,7 @@ const path = require('node:path');
 
 const gitLib = require('./lib/git.js');
 const reposLib = require('./lib/repos.js');
+const ignoreLib = require('./lib/ignore.js');
 const actionsLib = require('./lib/actions.js');
 const setupLib = require('./lib/setup.js');
 const { watchAll } = require('./lib/watch.js');
@@ -29,6 +30,7 @@ const VERSION = '0.0.1';
 const DEFAULTS = {
     depth: 4,
     refresh: 30, // full sweep, in case a file watcher missed something
+    ignoreFile: ignoreLib.FILE, // read in the watched folder, when it is there
 };
 
 /** How many git processes may run at once, however many repositories there are. */
@@ -53,6 +55,7 @@ Options:
   --repo-root=PATH     Folder to watch; same as the positional argument (--dir also works)
   --depth=N            How many folders deep to search        (default ${DEFAULTS.depth})
   --refresh=SEC        Seconds between full git sweeps        (default ${DEFAULTS.refresh})
+  --ignore-file=PATH   Folders to leave out of the table      (default ${DEFAULTS.ignoreFile} in the watched folder)
   --once               Print the table once and exit
   -h, --help           Show this help
 
@@ -115,6 +118,13 @@ feature-x in ~/projects/gift — which is a row of its own as soon as it exists.
 branch that is already here is checked out, one that is only on origin is
 followed, and a new name is a new branch off HEAD.
 
+A .gitignore in the watched folder is the folders the table is to leave out —
+git's own syntax, one to a line, # for a comment, ! to let one back in, * and **
+where a name is a shape. A folder it rules out is neither scanned nor listed, and
+neither is anything inside it, so an archive of finished work costs nothing to
+walk past. The header says how many were left out. --ignore-file names the file
+where .gitignore is the wrong one to write in.
+
 / narrows the table to the repositories whose name, path or branch holds what is
 typed. The list narrows as it is typed; enter keeps it and gives the keys back,
 esc undoes it. Everything else goes on as before behind it — rows are watched and
@@ -138,6 +148,9 @@ function parseArgs(argv, env) {
         dir: env.GIFT_REPO_MASTER_REPO_ROOT || '',
         depth: Number(env.GIFT_REPO_MASTER_DEPTH) || DEFAULTS.depth,
         refresh: Number(env.GIFT_REPO_MASTER_REFRESH) || DEFAULTS.refresh,
+        // An empty one is somebody turning this off rather than somebody saying
+        // nothing, so the environment answers even when the answer is nothing.
+        ignoreFile: env.GIFT_REPO_MASTER_IGNORE_FILE ?? DEFAULTS.ignoreFile,
         once: false,
         help: false,
         positional: '',
@@ -160,6 +173,7 @@ function parseArgs(argv, env) {
         else if (argument.startsWith('--dir=')) options.dir = argument.slice(6); // the older spelling
         else if (argument.startsWith('--depth=')) options.depth = number(argument.slice(8), '--depth', 1) ?? options.depth;
         else if (argument.startsWith('--refresh=')) options.refresh = number(argument.slice(10), '--refresh', 1) ?? options.refresh;
+        else if (argument.startsWith('--ignore-file=')) options.ignoreFile = argument.slice(14);
         else if (argument.startsWith('-')) options.error = `unknown option: ${argument}`;
         else if (!options.positional) options.positional = argument;
         else options.error = `unexpected argument: ${argument}`;
@@ -183,6 +197,16 @@ function makeRow(found, identity) {
         lastChange: null,
         error: null,
     };
+}
+
+/**
+ * What the header says about the folders the ignore file left out. A table of
+ * eleven repositories out of a folder of thirty should say so somewhere, and
+ * this is the line where it costs nothing; a folder with no ignore file, or one
+ * that ruled nothing out, says nothing.
+ */
+function ignoredNote(count) {
+    return count > 0 ? `${count} ignored` : '';
 }
 
 async function main(argv) {
@@ -221,7 +245,14 @@ async function main(argv) {
         return 1;
     }
 
-    const found = reposLib.arrange(root, await reposLib.discover(root, options.depth));
+    // The folders to leave out, read fresh on every sweep rather than held: the
+    // file is edited to change what the table shows, and a table that went on
+    // showing what the file said when it started would want restarting to be
+    // believed.
+    let ignores = await ignoreLib.load(root, options.ignoreFile);
+
+    const scanned = await reposLib.discover(root, options.depth, ignores);
+    const found = reposLib.arrange(root, scanned.dirs);
     const identities = await Promise.all(found.map((entry) => gitLib.identify(entry.dir)));
     const rows = found.map((entry, index) => makeRow(entry, identities[index]));
 
@@ -246,7 +277,7 @@ async function main(argv) {
         filter: '',
         search: null,
         actions: actionsLib.actions(process.env),
-        notes: { watch: '' },
+        notes: { ignored: ignoredNote(scanned.ignored), watch: '' },
         message: '',
         busy: false,
     };
@@ -338,7 +369,11 @@ async function main(argv) {
         if (scanning) return false;
         scanning = true;
         try {
-            const discovered = reposLib.arrange(root, await reposLib.discover(root, options.depth));
+            ignores = await ignoreLib.load(root, options.ignoreFile);
+            const swept = await reposLib.discover(root, options.depth, ignores);
+            state.notes.ignored = ignoredNote(swept.ignored);
+
+            const discovered = reposLib.arrange(root, swept.dirs);
             const known = new Map(rows.map((row) => [row.dir, row]));
             if (discovered.length === known.size && discovered.every((entry) => known.has(entry.dir))) {
                 for (const entry of discovered) Object.assign(known.get(entry.dir), entry);

@@ -110,8 +110,21 @@ orange bar; enter opens the menu of what may be done to the ones picked — open
 in an editor or an agent, read the diff, fetch, pull, push, switch or make a
 branch, merge, rebase, branch a worktree, commit and push the lot, stash or
 discard, delete a folder outright — and `/` finds a repository in a folder too
-full to read. The folder is asked for on the first run and remembered as
+full to read. A `.gitignore` in the watched folder keeps the folders that are
+nobody's work — an archive, a scratch folder — out of the table altogether. The
+folder is asked for on the first run and remembered as
 `repo_root`. See [functions/repo-master/README.txt](functions/repo-master/README.txt).
+
+clone-repos — `gift clone-repos [--out=DIR] [organization]`  
+Clones every repository an organization has into one folder: the public ones,
+the private ones the token can see, the forks and the archived ones, each in a
+folder of its own. Without the name it asks for one, and takes the URL of the
+organization's page as an answer. A repository already there is left alone, so
+running it again clones what is new — `--pull` updates those instead. `--ssh`
+clones over SSH rather than with the token, `--no-archived` and `--no-forks`
+narrow what is taken, `--depth` clones shallow, `-j` says how many at a time,
+and `-n` lists what would be cloned without cloning it. A name that is nobody's
+organization is tried as a user account. See [functions/clone-repos/README.txt](functions/clone-repos/README.txt).
 
 fetch-repo-files — `gift fetch-repo-files [--file] [--branch=NAME] <url>`  
 Copies a folder, or a single file, out of a GitHub repository into the current

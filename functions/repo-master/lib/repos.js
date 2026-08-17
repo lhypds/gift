@@ -33,12 +33,25 @@ const SKIP = new Set([
  *
  * Symlinked folders are left alone — following them invites a cycle.
  *
- * @returns {Promise<string[]>} Absolute repository roots, sorted.
+ * `ignores` is the watched folder's ignore file, compiled — see lib/ignore.js.
+ * A folder it rules out is not walked into and never becomes a row, and neither
+ * does anything inside it: a folder left out takes its repositories with it. It
+ * may also let one of the folders below back in, for the odd checkout kept
+ * inside a `vendor` or a `build`.
+ *
+ * @returns {Promise<{dirs: string[], ignored: number}>} Absolute repository
+ *   roots, sorted, and how many folders the ignore file left out — which the
+ *   header says, so the table never quietly claims to be the whole folder.
  */
-async function discover(root, maxDepth) {
+async function discover(root, maxDepth, ignores = null) {
     const found = [];
+    let ignored = 0;
 
-    async function walk(dir, depth) {
+    // `hidden` is a folder the ignore file ruled out, walked into all the same
+    // because a `!` rule names something under it. Nothing in there is a row
+    // until that rule speaks: the folder was left out, and one project being
+    // asked for back does not ask for its neighbours.
+    async function walk(dir, depth, hidden) {
         let entries;
         try {
             entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -46,18 +59,37 @@ async function discover(root, maxDepth) {
             return; // unreadable folder — nothing to report
         }
 
-        if (entries.some((entry) => entry.name === '.git')) found.push(dir);
+        if (!hidden && entries.some((entry) => entry.name === '.git')) found.push(dir);
         if (depth >= maxDepth) return;
 
         for (const entry of entries) {
             if (!entry.isDirectory()) continue; // isDirectory() is false for a symlink
-            if (entry.name.startsWith('.') || SKIP.has(entry.name)) continue;
-            await walk(path.join(dir, entry.name), depth + 1);
+            if (entry.name.startsWith('.')) continue;
+
+            const child = path.join(dir, entry.name);
+            const relative = path.relative(root, child).split(path.sep).join('/');
+            const verdict = ignores ? ignores.decide(relative) : null;
+
+            if (verdict === 'ignore') {
+                ignored++;
+                if (ignores.reopens(relative)) await walk(child, depth + 1, true);
+                continue;
+            }
+            if (SKIP.has(entry.name) && verdict !== 'keep') continue;
+
+            // A `!` rule puts the folder back on its own terms: it is a row
+            // again, and so is whatever it holds.
+            if (hidden && verdict !== 'keep') {
+                if (ignores.reopens(relative)) await walk(child, depth + 1, true);
+                continue;
+            }
+
+            await walk(child, depth + 1, false);
         }
     }
 
-    await walk(root, 0);
-    return found.sort();
+    await walk(root, 0, false);
+    return { dirs: found.sort(), ignored };
 }
 
 /** Is `child` inside `parent`? */

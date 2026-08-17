@@ -24,6 +24,14 @@
             "description": "Seconds between full sweeps: a rescan for repositories that came or went, plus a git refresh of every row."
         },
         {
+            "key": "ignore_file",
+            "env": "GIFT_REPO_MASTER_IGNORE_FILE",
+            "type": "string",
+            "default": ".gitignore",
+            "description": "The folders to leave out of the table, written in git's own syntax and read in the watched folder — one folder to a line, # for a comment, ! to let one back in. A name is read as a path when it holds a slash, and an absolute path is read where it is. Empty leaves nothing out.",
+            "advanced": true
+        },
+        {
             "key": "shell_command",
             "env": "GIFT_REPO_MASTER_SHELL",
             "type": "string",

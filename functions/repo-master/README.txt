@@ -15,7 +15,8 @@ be done to them — open one in an editor or an agent, read its diff, fetch, pul
 push, switch or make a branch, merge, rebase, branch a worktree off it, commit and
 push the lot, stash or discard what is uncommitted, delete a folder outright — or
 press the key the menu prints beside the command you wanted. `/` finds a
-repository in a folder too full to read.
+repository in a folder too full to read, and a `.gitignore` in the watched folder
+keeps the folders that are nobody's work out of the table altogether.
 
 ```
 repo master v0.0.1
@@ -56,6 +57,7 @@ Files
 |----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `main.js`            | Entry point — run through `gift repo-master`, or directly with `node`                                               |
 | `lib/repos.js`       | Finding the repositories, working out which sits inside which, and which of them a search leaves showing            |
+| `lib/ignore.js`      | The folders left out of the table, and the `.gitignore` they are written in                                         |
 | `lib/git.js`         | Branch, working-tree changes, diff size, the last change, and the git behind every command that runs one            |
 | `lib/watch.js`       | Hearing about edits, with a timer as the fallback                                                                   |
 | `lib/table.js`       | The table itself, which rows are orange, and what goes in each box                                                  |
@@ -634,6 +636,60 @@ In the table, `esc` clears the search first and the selection second: the search
 is the newer of the two, and the one hiding things.
 
 
+Leaving folders out
+-------------------
+
+A folder of everything anybody ever cloned holds a good deal that is nobody's
+work: an archive of finished projects, somebody else's source read once, a
+scratch folder tried out and left. A `.gitignore` in the watched folder is which
+of them the table is to do without, written in the syntax already known:
+
+```
+# ~/code/.gitignore
+
+archive/            the finished ones
+vendor-*            anything cloned to be read
+/tmp                only the one at the top
+!archive/gift       except this one
+```
+
+One folder to a line, `#` for a comment, `!` to put one back, `*` for any part of
+a name, `**` for any number of folders and `?` for one character. A name with no
+slash in it — `archive` — is a folder of that name wherever it turns up; one with
+a slash — `/tmp`, `public/notes` — is tied to the top of the watched folder, the
+way git reads them both. A trailing slash is allowed and asks for nothing extra:
+everything here is a folder.
+
+A folder left out is not scanned either, so a hundred repositories nobody is
+working on cost nothing to walk past, and it takes its repositories with it — one
+living inside an ignored folder has no row of its own. The header says how many
+went, so the table never quietly claims to be the whole folder:
+
+```
+watching ~/code · 12 repos · 3 changed · 2 ignored
+```
+
+The `!` line above is the one place this parts company with git, which will not
+put anything back that is inside a folder it was told to leave out. repo-master
+walks that one folder to find what was asked for and lists that alone, nothing
+beside it: all of an archive gone bar the project still being worked on is the
+reason anybody writes those two lines together.
+
+The file is read again on every sweep, so an edit to it takes hold within the
+refresh interval, and `R` asks for that sooner. It is called `.gitignore` because
+the syntax is git's and because a folder full of repositories is not usually a
+repository itself and has no other use for the name. `ignore_file` under
+`functions.repo-master` names another file where that is the wrong assumption —
+an absolute path is read where it lies — and `--ignore-file=PATH` does the same
+for one run. Empty leaves nothing out.
+
+`node_modules`, `dist`, `build`, `out`, `target`, `coverage`, `vendor`, `venv`,
+`__pycache__`, `Pods` and `DerivedData` are never walked into, file or no file: a
+dependency tree holds no repository of your own, and a recursive scan through one
+is where the scan goes to die. `!vendor` puts one of those back, for the checkout
+that really does live in there.
+
+
 Parameters
 ----------
 
@@ -642,6 +698,7 @@ Parameters
 | `DIR`, `--repo-root=PATH` | Folder to watch (`--dir=PATH` is the older spelling)    | the configured `repo_root`, else asked for on the first run |
 | `--depth=N`               | How many folders deep to look for repositories          | 4                                                      |
 | `--refresh=SEC`           | Seconds between full sweeps — new repositories included | 30                                                     |
+| `--ignore-file=PATH`      | The folders to leave out, read in the watched folder    | `.gitignore`                                           |
 | `--once`                  | Print the table once and exit, instead of watching      | off                                                    |
 | `-h`, `--help`            | Show the help message and exit                          |                                                        |
 

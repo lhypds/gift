@@ -1,0 +1,33 @@
+{
+    "description": "Clone every repository a GitHub organization has into one folder.",
+    "options": [
+        {
+            "key": "token",
+            "env": "GIFT_GITHUB_TOKEN",
+            "type": "secret",
+            "description": "GitHub token used to list and clone private repositories, and to lift the hourly request limit. Without it GITHUB_TOKEN, GH_TOKEN and a signed-in `gh` are tried in that order."
+        },
+        {
+            "key": "clone_dir",
+            "env": "GIFT_CLONE_DIR",
+            "type": "path",
+            "description": "Folder the clones land in when --out is not given. Without it they land in the directory the function is run in."
+        },
+        {
+            "key": "protocol",
+            "env": "GIFT_CLONE_PROTOCOL",
+            "type": "string",
+            "default": "https",
+            "description": "How repositories are cloned: `https`, which uses the token, or `ssh`, which uses the key already on the machine."
+        },
+        {
+            "key": "jobs",
+            "env": "GIFT_CLONE_JOBS",
+            "type": "number",
+            "min": 1,
+            "default": 4,
+            "advanced": true,
+            "description": "How many clones run at once."
+        }
+    ]
+}
