@@ -4,11 +4,12 @@
 // once, a scratch folder — and a table listing all of it is a table read past
 // rather than read.
 //
-// A `.gitignore` in the watched folder is the answer, in the syntax already
-// known: one folder to a line, `#` for a comment, `!` to let one back in, `*`
-// and `**` where a name is a shape rather than a name. What it rules out is not
-// scanned and not listed, and neither is anything inside it — a folder left out
-// takes its repositories with it, exactly as git's does.
+// A `.giftignore` in the watched folder is the answer — or a `.gitignore`, where
+// there is no `.giftignore` — in the syntax already known: one folder to a line,
+// `#` for a comment, `!` to let one back in, `*` and `**` where a name is a shape
+// rather than a name. What it rules out is not scanned and not listed, and neither
+// is anything inside it — a folder left out takes its repositories with it,
+// exactly as git's does.
 //
 //     archive/           the finished ones
 //     vendor-*           anything cloned to be read
@@ -25,8 +26,13 @@ const path = require('node:path');
 
 const { expandHome } = require('./util.js');
 
-/** The file this is all read from, unless `ignore_file` names another. */
-const FILE = '.gitignore';
+// The file this is all read from, unless `ignore_file` names another. gift's own
+// name is looked for first and git's is the fallback, so a folder may leave its
+// `.gitignore` to git and keep what the table skips in a `.giftignore` of its own.
+const DEFAULT_FILES = ['.giftignore', '.gitignore'];
+
+/** The name the help and header call the default by. */
+const FILE = DEFAULT_FILES[0];
 
 /** One character of a pattern, as a regular expression means it literally. */
 function literal(character) {
@@ -152,6 +158,11 @@ function nothing(file) {
  * inside the folder — or an absolute path; an empty one is nobody asking for
  * this at all.
  *
+ * The default is a short list read in order — `.giftignore` first, then
+ * `.gitignore` — so the file may be called either, and the first one that is
+ * there wins. A name given outright is read as itself and nothing is tried in
+ * its place.
+ *
  * A file that is not there is not a mistake and not a warning: most folders
  * want every repository in them listed, and the feature is the file existing.
  *
@@ -164,6 +175,19 @@ async function load(root, file = FILE) {
     const name = expandHome(String(file || '').trim());
     if (!name) return nothing('');
 
+    const candidates = name === FILE ? DEFAULT_FILES : [name];
+
+    let last = nothing(path.join(root, candidates[candidates.length - 1]));
+    for (const candidate of candidates) {
+        const loaded = await loadFile(root, candidate);
+        if (loaded.found) return loaded;
+        last = loaded;
+    }
+    return last;
+}
+
+/** Read and compile one ignore file, or `nothing` where it is not there. */
+async function loadFile(root, name) {
     const target = path.isAbsolute(name) ? name : path.join(root, name);
 
     let text;

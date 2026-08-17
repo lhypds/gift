@@ -1,98 +1,98 @@
 {
-    "description": "Watch every git repository under one folder in a live table.",
-    "options": [
-        {
-            "key": "repo_root",
-            "env": "GIFT_REPO_MASTER_REPO_ROOT",
-            "type": "path",
-            "description": "Folder holding the repositories to watch, as an absolute path. Without it repo-master asks for one the first time it is run and writes the answer here; with nobody to ask — a pipe, --once — it watches the directory it is run in."
-        },
-        {
-            "key": "depth",
-            "env": "GIFT_REPO_MASTER_DEPTH",
-            "type": "number",
-            "min": 1,
-            "default": 4,
-            "description": "How many folders deep to look for repositories."
-        },
-        {
-            "key": "refresh",
-            "env": "GIFT_REPO_MASTER_REFRESH",
-            "type": "number",
-            "min": 1,
-            "default": 30,
-            "description": "Seconds between full sweeps: a rescan for repositories that came or went, plus a git refresh of every row."
-        },
-        {
-            "key": "ignore_file",
-            "env": "GIFT_REPO_MASTER_IGNORE_FILE",
-            "type": "string",
-            "default": ".gitignore",
-            "description": "The folders to leave out of the table, written in git's own syntax and read in the watched folder — one folder to a line, # for a comment, ! to let one back in. A name is read as a path when it holds a slash, and an absolute path is read where it is. Empty leaves nothing out.",
-            "advanced": true
-        },
-        {
-            "key": "shell_command",
-            "env": "GIFT_REPO_MASTER_SHELL",
-            "type": "string",
-            "description": "Command behind `goto folder` — the shell started in the chosen repository. Without it, your login shell from $SHELL.",
-            "advanced": true
-        },
-        {
-            "key": "code_command",
-            "env": "GIFT_REPO_MASTER_CODE",
-            "type": "string",
-            "default": "code",
-            "description": "Command behind `open with code` and the `e` key — `cursor` and `windsurf` take a folder the same way.",
-            "advanced": true
-        },
-        {
-            "key": "vim_command",
-            "env": "GIFT_REPO_MASTER_VIM",
-            "type": "string",
-            "default": "vim",
-            "description": "Command behind `open with vim` and the `v` key — `nvim`, `hx` and the like take a file the same way.",
-            "advanced": true
-        },
-        {
-            "key": "fzf_command",
-            "env": "GIFT_REPO_MASTER_FZF",
-            "type": "string",
-            "default": "fzf",
-            "description": "The picker `open with vim` asks which file with, before vim opens it. It is given the terminal and read for what it prints, so anything that lists a choice and prints it will do. Without it installed, vim opens the folder instead. It lists the files with `fd`, which leaves out whatever .gitignore does, and previews them with `bat` — falling back to git's own file list and to `cat` where those are missing, and to your $FZF_DEFAULT_COMMAND for the list where you have set one.",
-            "advanced": true
-        },
-        {
-            "key": "claude_command",
-            "env": "GIFT_REPO_MASTER_CLAUDE",
-            "type": "string",
-            "default": "claude",
-            "description": "Command behind `open with claude code`.",
-            "advanced": true
-        },
-        {
-            "key": "codex_command",
-            "env": "GIFT_REPO_MASTER_CODEX",
-            "type": "string",
-            "default": "codex",
-            "description": "Command behind `open with codex`.",
-            "advanced": true
-        },
-        {
-            "key": "claude_add_dir",
-            "env": "GIFT_REPO_MASTER_CLAUDE_ADD_DIR",
-            "type": "string",
-            "default": "--add-dir",
-            "description": "The option `open with claude code` passes the repositories picked after the main one, once per repository. Set it to false to open the main project alone.",
-            "advanced": true
-        },
-        {
-            "key": "codex_add_dir",
-            "env": "GIFT_REPO_MASTER_CODEX_ADD_DIR",
-            "type": "string",
-            "default": "--add-dir",
-            "description": "The same for `open with codex`, for a version that spells the option differently.",
-            "advanced": true
-        }
-    ]
+  "description": "Watch every git repository under one folder in a live table.",
+  "options": [
+    {
+      "key": "repo_root",
+      "env": "GIFT_REPO_MASTER_REPO_ROOT",
+      "type": "path",
+      "description": "Folder holding the repositories to watch, as an absolute path. Without it repo-master asks for one the first time it is run and writes the answer here; with nobody to ask — a pipe, --once — it watches the directory it is run in."
+    },
+    {
+      "key": "depth",
+      "env": "GIFT_REPO_MASTER_DEPTH",
+      "type": "number",
+      "min": 1,
+      "default": 4,
+      "description": "How many folders deep to look for repositories."
+    },
+    {
+      "key": "refresh",
+      "env": "GIFT_REPO_MASTER_REFRESH",
+      "type": "number",
+      "min": 1,
+      "default": 30,
+      "description": "Seconds between full sweeps: a rescan for repositories that came or went, plus a git refresh of every row."
+    },
+    {
+      "key": "ignore_file",
+      "env": "GIFT_REPO_MASTER_IGNORE_FILE",
+      "type": "string",
+      "default": ".giftignore",
+      "description": "The folders to leave out of the table, written in git's own syntax and read in the watched folder — one folder to a line, # for a comment, ! to let one back in. The default looks for .giftignore first and falls back to .gitignore. A name is read as a path when it holds a slash, and an absolute path is read where it is. Empty leaves nothing out.",
+      "advanced": true
+    },
+    {
+      "key": "shell_command",
+      "env": "GIFT_REPO_MASTER_SHELL",
+      "type": "string",
+      "description": "Command behind `goto folder` — the shell started in the chosen repository. Without it, your login shell from $SHELL.",
+      "advanced": true
+    },
+    {
+      "key": "code_command",
+      "env": "GIFT_REPO_MASTER_CODE",
+      "type": "string",
+      "default": "code",
+      "description": "Command behind `open with code` and the `e` key — `cursor` and `windsurf` take a folder the same way.",
+      "advanced": true
+    },
+    {
+      "key": "vim_command",
+      "env": "GIFT_REPO_MASTER_VIM",
+      "type": "string",
+      "default": "vim",
+      "description": "Command behind `open with vim` and the `v` key — `nvim`, `hx` and the like take a file the same way.",
+      "advanced": true
+    },
+    {
+      "key": "fzf_command",
+      "env": "GIFT_REPO_MASTER_FZF",
+      "type": "string",
+      "default": "fzf",
+      "description": "The picker `open with vim` asks which file with, before vim opens it. It is given the terminal and read for what it prints, so anything that lists a choice and prints it will do. Without it installed, vim opens the folder instead. It lists the files with `fd`, which leaves out whatever .gitignore does, and previews them with `bat` — falling back to git's own file list and to `cat` where those are missing, and to your $FZF_DEFAULT_COMMAND for the list where you have set one.",
+      "advanced": true
+    },
+    {
+      "key": "claude_command",
+      "env": "GIFT_REPO_MASTER_CLAUDE",
+      "type": "string",
+      "default": "claude",
+      "description": "Command behind `open with claude code`.",
+      "advanced": true
+    },
+    {
+      "key": "codex_command",
+      "env": "GIFT_REPO_MASTER_CODEX",
+      "type": "string",
+      "default": "codex",
+      "description": "Command behind `open with codex`.",
+      "advanced": true
+    },
+    {
+      "key": "claude_add_dir",
+      "env": "GIFT_REPO_MASTER_CLAUDE_ADD_DIR",
+      "type": "string",
+      "default": "--add-dir",
+      "description": "The option `open with claude code` passes the repositories picked after the main one, once per repository. Set it to false to open the main project alone.",
+      "advanced": true
+    },
+    {
+      "key": "codex_add_dir",
+      "env": "GIFT_REPO_MASTER_CODEX_ADD_DIR",
+      "type": "string",
+      "default": "--add-dir",
+      "description": "The same for `open with codex`, for a version that spells the option differently.",
+      "advanced": true
+    }
+  ]
 }
