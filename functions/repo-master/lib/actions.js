@@ -27,8 +27,8 @@
 // rather than putting it back up in front of somebody on their way out.
 //
 // The rest borrow nothing. Fetching, pulling, pushing, committing, stashing,
-// discarding, adding a worktree and deleting a folder are all the table's own
-// work, done to every repository picked with git or the filesystem asked
+// restoring, discarding, adding a worktree and deleting a folder are all the
+// table's own work, done to every repository picked with git or the filesystem asked
 // directly, and reported on in a box while the table stays up. Each is a
 // repository of its own there rather than one leading and the rest following — a
 // commit belongs to a repository, and so does a branch — which is why they run
@@ -281,6 +281,14 @@ function actions(env) {
             label: 'discard changes',
             kind: 'clear',
             clear: 'discard',
+        },
+        // The one command down here with no key of its own. It stands beside the
+        // stash because it is the undo of one, and there is no letter left worth
+        // spending on the command that answers a stash a day later.
+        {
+            id: 'restore',
+            label: 'restore stash',
+            kind: 'restore',
         },
         // The four that take a branch name. Each one's box is the same box, and
         // what it says about each repository is written where the key is bound.
@@ -550,6 +558,27 @@ async function commit(repos, message, onUpdate = () => { }) {
 }
 
 /**
+ * Give every chosen repository back what it put aside: the newest stash of each,
+ * popped where there is one.
+ *
+ * Each repository stands on its own, as it does for a stash — what was put aside
+ * in one is nothing to another — and one with nothing stashed is skipped rather
+ * than failed. There is no name to type: which stash is meant is the newest of
+ * that repository's own, and every repository answers that question for itself.
+ *
+ * @param {object[]} repos Rows to restore.
+ * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
+ * @returns {Promise<Array<{repo: object, state: string, text: string}>>}
+ */
+async function restore(repos, onUpdate = () => { }) {
+    return sweep(repos, onUpdate, async (repo, say) => {
+        say('working', 'restoring…');
+        const result = await gitLib.restore(repo.dir);
+        return say(!result.ok ? 'failed' : result.changed ? 'done' : 'skipped', result.text);
+    });
+}
+
+/**
  * Do one of the four branch commands to every chosen repository, all of them with
  * the one branch name.
  *
@@ -633,6 +662,7 @@ module.exports = {
     commit,
     sync,
     clear,
+    restore,
     branch,
     worktrees,
     worktreePath,

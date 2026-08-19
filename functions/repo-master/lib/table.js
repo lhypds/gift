@@ -308,6 +308,45 @@ function clearPanel(ask) {
 }
 
 /**
+ * What each repository has to give back, and which entry of it that would be.
+ *
+ * The list is the point of the box, as it is everywhere else: a repository with
+ * nothing stashed says so here rather than in the report, and one holding three
+ * says how many it is keeping after this one. Until its stashes have been read
+ * there is nothing said about them — saying nothing beats saying something wrong,
+ * which is how the branch box waits too.
+ *
+ * Drawn quietly. A pop takes nothing away: what was put aside comes back to the
+ * working tree, and an entry that will not go back in cleanly is kept where it is.
+ */
+function restorePanel(ask) {
+    const { targets, stashes } = ask;
+    const held = (repo) => stashes?.get(repo.dir);
+    const read = targets.filter((repo) => held(repo));
+    const holding = read.filter((repo) => held(repo).length > 0);
+
+    return Object.assign(ask, {
+        title: `Restore ${counting(targets)}`,
+        lines: labelled(
+            targets.map((repo) => {
+                const entries = held(repo);
+                if (!entries) return { name: repo.name, text: repo.branch || '…' };
+                if (entries.length === 0) return { name: repo.name, text: `${repo.branch || '…'}  · nothing stashed` };
+                const more = entries.length > 1 ? `  · ${entries.length - 1} more stashed` : '';
+                return { name: repo.name, text: `${repo.branch || '…'}  · ${entries[0]}${more}` };
+            }),
+        ),
+        paint: () => 'dim',
+        status:
+            read.length < targets.length
+                ? 'reading…'
+                : [`${holding.length} with something stashed`, 'the newest of each'].join(' · '),
+        footer: 'enter restore · esc cancel',
+        width: REPORT_WIDTH,
+    });
+}
+
+/**
  * The same box, asked in earnest. Every other question in repo-master is asked
  * about something that can be done again; this one cannot be, so it is drawn to
  * be read rather than answered: every folder named with its path, the whole of
@@ -352,6 +391,8 @@ function confirmPanel(state) {
             return deletePanel(ask);
         case 'clear':
             return clearPanel(ask);
+        case 'restore':
+            return restorePanel(ask);
         default:
             return syncPanel(ask);
     }

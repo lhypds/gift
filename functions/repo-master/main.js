@@ -7,9 +7,9 @@
 // keys or find them with /, add more with space, and press enter for the menu of
 // what may be done to them: open them in an editor or an agent, read what
 // changed, fetch, pull, push, switch or make a branch, merge, rebase, branch a
-// worktree off one, commit and push the lot, stash or discard what is
-// uncommitted, or delete a folder outright. The commands worth reaching for carry
-// a key of their own, and the menu prints it beside them.
+// worktree off one, commit and push the lot, stash what is uncommitted, put a
+// stash back or throw the changes away, or delete a folder outright. The commands
+// worth reaching for carry a key of their own, and the menu prints it beside them.
 'use strict';
 
 const fs = require('node:fs');
@@ -85,12 +85,12 @@ folder, and fzf asks which one in the borrowed terminal first: fd lists the file
 .gitignore does not rule out, bat shows whichever one the cursor is on, and your
 own $FZF_DEFAULT_COMMAND is the list instead where you have set one. Picking
 nothing opens nothing.
-The ones that reach a remote, the ones that empty a working tree, and the one that
-deletes a folder are asked for first in a box naming every repository they are
-about: enter runs it, esc backs out. Pulling marks the ones with uncommitted
-changes, which is where a pull goes wrong; discarding and deleting mark all of
-them, because nothing undoes either, and the delete box says what else is inside
-the folders. What came of each is reported in a box of its own.
+The ones that reach a remote, the ones that empty a working tree or fill it back
+up, and the one that deletes a folder are asked for first in a box naming every
+repository they are about: enter runs it, esc backs out. Pulling marks the ones
+with uncommitted changes, which is where a pull goes wrong; discarding and
+deleting mark all of them, because nothing undoes either, and the delete box says
+what else is inside the folders. What came of each is reported in a box of its own.
 
 P pushes what is already committed and commits nothing, for the commits that were
 made in an editor or an agent and never left the machine. A branch level with its
@@ -98,10 +98,18 @@ upstream is left alone; one that has never been pushed is given an upstream.
 
 s puts the changes of everything picked aside — git stash push -u, so untracked
 files go with them and the working tree comes out clean — and u throws the same
-changes away instead. A stash comes back with git stash pop; a discard does not
-come back at all, which is why its box is drawn the way the delete box is and
-answered by the keyboard alone. Neither one touches ignored files, and neither
-touches a repository nested inside another: those have rows of their own.
+changes away instead. A discard does not come back at all, which is why its box is
+drawn the way the delete box is and answered by the keyboard alone. Neither one
+touches ignored files, and neither touches a repository nested inside another:
+those have rows of their own.
+
+restore stash is what brings a stash back: git stash pop in every picked
+repository, the newest entry of each and no more. It has no key of its own and is
+run from the menu, and its box says what each repository has to give back before
+enter — the entry it would pop, how many it is keeping after that one, and which
+repositories have nothing stashed at all. A pop that conflicts is left standing
+the way a merge is: git keeps the entry, and the row says how many files are
+waiting.
 
 b, n, m and r are the four that take a branch name, and all four ask for it in the
 one box: b checks a branch out, n makes one off whatever is checked out, m merges
@@ -502,6 +510,9 @@ async function main(argv) {
             case 'clear':
                 askClear(action, chosen, back);
                 return;
+            case 'restore':
+                askRestore(action, chosen, back);
+                return;
             case 'delete':
                 askDelete(action, chosen, back);
                 return;
@@ -725,6 +736,19 @@ async function main(argv) {
             (onUpdate) => actionsLib.clear(repos, kind, onUpdate),
         );
 
+    // A restore fills a working tree back up, which is the same column the stash
+    // that emptied it moved: a refresh of the rows is the whole of what has to be
+    // put right afterwards.
+    const runRestore = (action, repos) =>
+        runReport(
+            action,
+            `${action.label} · ${counting(repos)}`,
+            action.label,
+            repos,
+            { done: 'restored', skipped: 'nothing stashed' },
+            (onUpdate) => actionsLib.restore(repos, onUpdate),
+        );
+
     // Switching, branching, merging and rebasing all move a repository without
     // moving a folder: the branch column changes, or what is on that branch does,
     // and refreshing the rows is the whole of what has to be put right.
@@ -796,6 +820,50 @@ async function main(argv) {
         state.confirm = { kind: action.clear, action, targets: chosen, back, scroll: 0, view: 1 };
         say('');
         draw();
+    };
+
+    /**
+     * A restore is asked for in a box of its own, the way the commands that empty
+     * a working tree are: a pop writes into one, and which repositories it is
+     * about to write into is worth reading before enter rather than after it.
+     *
+     * What each one has to give back is read while the box is up. A stash list is
+     * a git process per repository — a whole sweep's worth for a box of thirty —
+     * so it is read once when the box opens rather than on every refresh, and the
+     * rows fill themselves in as the answers arrive.
+     */
+    const askRestore = (action, chosen, back) => {
+        const panel = {
+            kind: 'restore',
+            action,
+            targets: chosen,
+            back,
+            scroll: 0,
+            view: 1,
+            // Filled in as each repository answers. A repository not in it yet is
+            // one the box has nothing to say about.
+            stashes: new Map(),
+        };
+
+        state.mode = 'confirm';
+        state.confirm = panel;
+        say('');
+        draw();
+        loadStashes(panel);
+    };
+
+    // A box closed and opened again reads afresh — stashes come and go — and a
+    // slower read of a box no longer up has nothing to say.
+    const loadStashes = (panel) => {
+        for (const repo of panel.targets) {
+            gate(() => gitLib.stashList(repo.dir))
+                .then((found) => {
+                    if (state.confirm !== panel) return;
+                    panel.stashes.set(repo.dir, found);
+                    requestRender();
+                })
+                .catch(() => { });
+        }
     };
 
     // The branch names the box needs to mark the repositories it is about. They
@@ -971,6 +1039,7 @@ async function main(argv) {
             // box it was asked in did; `kind` is which of that command's pair.
             if (action.kind === 'delete') runDelete(action, chosen);
             else if (action.kind === 'clear') runClear(kind, chosen);
+            else if (action.kind === 'restore') runRestore(action, chosen);
             else runSync(kind, chosen);
             return;
         }

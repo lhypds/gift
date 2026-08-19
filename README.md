@@ -108,8 +108,8 @@ one is on, whether the working tree has changes, and how many lines that is.
 Nested checkouts and submodules are found too. Rows that want attention wear an
 orange bar; enter opens the menu of what may be done to the ones picked — open
 in an editor or an agent, read the diff, fetch, pull, push, switch or make a
-branch, merge, rebase, branch a worktree, commit and push the lot, stash or
-discard, delete a folder outright — and `/` finds a repository in a folder too
+branch, merge, rebase, branch a worktree, commit and push the lot, stash, restore
+a stash or discard, delete a folder outright — and `/` finds a repository in a folder too
 full to read. A `.gitignore` in the watched folder keeps the folders that are
 nobody's work — an archive, a scratch folder — out of the table altogether. The
 folder is asked for on the first run and remembered as

@@ -13,7 +13,8 @@ tree has changes, and how many lines that is.
 Rows that want attention wear an orange bar. Press enter for the menu of what may
 be done to them — open one in an editor or an agent, read its diff, fetch, pull,
 push, switch or make a branch, merge, rebase, branch a worktree off it, commit and
-push the lot, stash or discard what is uncommitted, delete a folder outright — or
+push the lot, stash what is uncommitted, put a stash back, discard the changes,
+delete a folder outright — or
 press the key the menu prints beside the command you wanted. `/` finds a
 repository in a folder too full to read, and a `.gitignore` in the watched folder
 keeps the folders that are nobody's work out of the table altogether.
@@ -188,6 +189,7 @@ row as well. The commands are:
 | push                  | `P`     | `git push` alone, in every picked repository — see below                             |
 | stash                 | `s`     | `git stash push -u` in every picked repository — see below                           |
 | discard changes       | `u`     | throws the same changes away instead — see below                                     |
+| restore stash         |         | `git stash pop` in every picked repository, the newest entry of each — see below     |
 | switch branch         | `b`     | `git switch` in every picked repository — see below                                  |
 | new branch            | `n`     | `git switch -c` in every picked repository — see below                               |
 | merge                 | `m`     | `git merge --no-edit` in every picked repository — see below                         |
@@ -195,11 +197,12 @@ row as well. The commands are:
 | worktree add          | `t` `a` | `git worktree add` beside every picked repository — see below                        |
 | delete repo folder    | `D`     | removes the folder of every picked repository — see below                            |
 
-The number keys reach the first nine rows. The last nine are past them on purpose:
-every one of them carries a key of its own, while `commit & push` has no other way
-in. That is also what keeps `push` under `commit & push` rather than beside `pull`,
-where it belongs — and it reads well enough there: commit and push, or push what
-was committed somewhere else.
+The menu orders itself by use: the command run most often is at the top, commands
+run the same number of times are in alphabetical order, and the count is kept in
+`~/.gift/repo-master-usage.json` between runs. The number keys reach the first nine
+rows of whatever order that has come to be, which is why the commands with no key
+of their own — `goto folder`, `open with codex`, `commit & push`, `restore stash` —
+are the ones that gain the most from being used: they walk up to a number.
 
 A selection has a shape. The repository picked first is the **main project** and
 wears no mark; the ones picked after it are marked `+`. The editor opens the main
@@ -396,9 +399,8 @@ asked for first:
 
 `s` is `git stash push -u`, so untracked files go with the tracked changes and the
 row comes out reading `no changes`. Everything it took is one `git stash pop` away
-in the repository it came from — repo-master has no key for bringing it back,
-because a stash belongs to the repository and popping one is a thing to do with
-git in front of you.
+in the repository it came from, and `restore stash` in the menu is that pop — see
+below.
 
 `u` is the same command with nothing to undo it, so its box is drawn the way the
 delete box is: the rows orange, `nothing undoes this` in the footer, and the
@@ -430,6 +432,47 @@ What came of each is reported in the same kind of box committing uses:
     | gcc3/content-hub  stashing…                                      |
     +- 1 of 2 done · working… ----------------------------------------+
 ```
+
+
+Restoring a stash
+-----------------
+
+`restore stash` is the other half of `s`: `git stash pop` in every picked
+repository, the newest entry of each and no more. It has no key of its own — a
+stash is put back a day after it was made, from the menu rather than from muscle
+memory — and it is asked for in a box like everything else that writes into a
+working tree:
+
+```
+    +- Restore 2 repositories -----------------------------------------+
+    | lhypds/gift       master  · WIP on master: 9e73484 the table  · 1 more stashed |
+    | gcc3/content-hub  main  · nothing stashed                       |
+    +- 1 with something stashed · the newest of each · enter restore · esc cancel -+
+```
+
+The list is the point of it, as it is in the other boxes. What each repository has
+stashed is read while the box is up — one `git stash list` each, once, rather than
+on every refresh — and each row says the entry it would put back in git's own
+words, how many entries it would be keeping after that one, and `nothing stashed`
+where there is nothing to give back. Until a repository has answered, its row says
+only which branch it is on: saying nothing beats saying something wrong.
+
+A restore takes nothing away, so the box is drawn quietly and a click answers it.
+A repository with nothing stashed is skipped rather than failed. A pop that
+conflicts is left standing the way a merge is — git has put what it could into the
+working tree and kept the entry it came from, so nothing is lost — and the row says
+how many files are waiting:
+
+```
+    +- restore stash · 2 repositories ---------------------------------+
+    | lhypds/gift       restored 4 files · 1 more stashed              |
+    | gcc3/content-hub  nothing stashed                                |
+    +- 1 restored · 1 nothing stashed --------------------------------+
+```
+
+The stashes underneath the newest are left where they are: a stash is a stack
+filled one push at a time, and emptying the whole of it on one keystroke is not
+what anybody pointing at a row meant. Run it again for the next one.
 
 
 Branches

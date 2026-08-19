@@ -643,9 +643,9 @@ async function working(dir, exclude = []) {
  * means by "my changes" — and so does anything belonging to a repository nested
  * inside this one.
  *
- * This is the one working-tree command that keeps what it takes: `git stash pop`
- * brings the lot back, which is what it is for and why it stands beside discard()
- * rather than instead of it.
+ * This is the one working-tree command that keeps what it takes: restore() below
+ * is the `git stash pop` that brings the lot back, which is what it is for and
+ * why it stands beside discard() rather than instead of it.
  *
  * Nothing to stash is not a failure. A repository with no commit yet cannot stash
  * at all — there is no HEAD to stash against — and git's refusal is passed on
@@ -662,7 +662,7 @@ async function stash(dir, nested = []) {
     if (!found.ok) return { ok: false, changed: false, text: found.error };
     if (found.entries.length === 0) return { ok: true, changed: false, text: 'nothing to stash' };
 
-    const result = await git(dir, ['stash', 'push', '-u', '--', '.', ...withoutNested(dir, nested)]);
+    const result = await git(dir, ['stash', 'push', '-u', '--', '.', ...(await withoutNested(dir, nested))]);
     if (!result.ok) return { ok: false, changed: false, text: `stash failed: ${firstLine(result.stderr)}` };
 
     return { ok: true, changed: true, text: `stashed ${files(found.entries.length)}` };
@@ -697,7 +697,7 @@ async function discard(dir, nested = []) {
     if (!found.ok) return fail(found.error);
     if (found.entries.length === 0) return { ok: true, changed: false, text: 'nothing to discard' };
 
-    const paths = ['--', '.', ...withoutNested(dir, nested)];
+    const paths = ['--', '.', ...(await withoutNested(dir, nested))];
     const tracked = found.entries.filter((entry) => !entry.untracked);
 
     if (tracked.length > 0) {
@@ -715,6 +715,76 @@ async function discard(dir, nested = []) {
     if (!cleaned.ok) return fail(`discard failed: ${firstLine(cleaned.stderr)}`);
 
     return { ok: true, changed: true, text: `discarded ${files(found.entries.length)}` };
+}
+
+/**
+ * What a repository has put aside, newest first — the subject line git writes for
+ * each stash entry, as `git stash list` prints them.
+ *
+ * The box asking about a restore marks its rows with this, the way the branch box
+ * marks its own: a repository with nothing stashed is worth seeing before enter
+ * rather than in the report afterwards, and one holding three is worth being told
+ * it is about to be given back only the newest.
+ *
+ * Never throws, and a repository that will not answer has nothing stashed rather
+ * than an error: this is what a box says while it waits, not work anybody asked
+ * for.
+ *
+ * @param {string} dir Repository root.
+ * @returns {Promise<string[]>}
+ */
+async function stashList(dir) {
+    const found = await git(dir, ['stash', 'list', '--format=%gs']);
+    return found.ok ? found.stdout.split('\n').filter(Boolean) : [];
+}
+
+/**
+ * Give a repository back what stash() put aside: `git stash pop`, which is the
+ * undo stash() is drawn quietly for.
+ *
+ * The newest entry and no more. A stash is a stack filled one push at a time, and
+ * emptying the whole of it on one keystroke is not what anybody pointing at a row
+ * meant — the entries underneath are counted in the row and left where they are.
+ *
+ * Nothing stashed is not a failure. A repository that was already clean when the
+ * rest were stashed has nothing to give back, and says so.
+ *
+ * A pop that conflicts is left standing, as a merge is: git has put what it could
+ * into the working tree and kept the entry it came from, so nothing is lost, and
+ * unpicking that on somebody's behalf is not repo-master's business. The row says
+ * how many files are waiting.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @returns {Promise<{ok: boolean, changed: boolean, text: string}>}
+ */
+async function restore(dir) {
+    const fail = (text) => ({ ok: false, changed: false, text });
+
+    const held = await stashList(dir);
+    if (held.length === 0) return { ok: true, changed: false, text: 'nothing stashed' };
+
+    // What is in the entry, counted while it is still an entry: the pop says as
+    // much in a paragraph of git's own, and a row of a table has one line. Older
+    // git cannot be asked about the untracked half, which is a count not made
+    // rather than a restore not done.
+    const inside = await git(dir, ['stash', 'show', '--name-only', '--include-untracked', 'stash@{0}']);
+    const count = inside.ok ? inside.stdout.split('\n').filter(Boolean).length : 0;
+
+    const done = await git(dir, ['stash', 'pop']);
+    if (!done.ok) {
+        const waiting = await conflicts(dir);
+        if (waiting > 0) return fail(`conflicted · ${files(waiting)} to resolve · the stash is kept`);
+        return fail(`restore failed: ${refusal(done)}`);
+    }
+
+    const left = held.length - 1;
+    return {
+        ok: true,
+        changed: true,
+        text: `restored ${count > 0 ? files(count) : 'the stash'}${left > 0 ? ` · ${left} more stashed` : ''}`,
+    };
 }
 
 /**
@@ -996,6 +1066,8 @@ module.exports = {
     sync,
     stash,
     discard,
+    stashList,
+    restore,
     branches,
     switchBranch,
     createBranch,
