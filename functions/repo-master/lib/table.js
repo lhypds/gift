@@ -1,14 +1,17 @@
 // Drawing the table.
 //
-// Rows are highlighted by their background: a row wanting attention — one whose
-// working tree changed — gets a Claude-orange bar, and the rows the user is
-// pointing at or has picked get the pale grey of an ordinary selection.
+// Rows are highlighted by their background, never by recolouring their text: a
+// row wanting attention — one whose working tree changed — gets a Claude-orange
+// bar, and the rows the user is pointing at or has picked get the pale grey of an
+// ordinary selection.
 //
-// One row is marked by its text instead. A repository that has committed and not
-// pushed is worth seeing without being an alarm — the work is safe, it is only
-// still here — so it is drawn in grey, which is a mark and not a bar, and leaves
-// the orange to mean what it has always meant. The two greys of a background
-// belong to the cursor and the selection, and are not lent out.
+// A repository that has committed and not pushed gets a bar of its own, in a dark
+// grey — far enough below both of those greys to be a mark of its own rather than
+// a row that looks half-selected, and dark enough to want pale text rather than
+// the dark ink the other three are written in. It is worth seeing without being
+// an alarm, the work being committed and only still here, so the orange goes on
+// meaning what it has always meant. Which of the two a row wearing both gets is
+// decided in needsAttention.
 //
 // Everything else keeps the terminal's own colours.
 'use strict';
@@ -21,8 +24,9 @@ const reposLib = require('./repos.js');
 const ORANGE = { rgb: [217, 119, 87], xterm: 173 }; // Claude's orange
 const CURSOR_GREY = { rgb: [214, 214, 214], xterm: 252 }; // the row under the cursor
 const SELECTED_GREY = { rgb: [168, 168, 168], xterm: 248 }; // rows picked with space
-const GREY = { rgb: [138, 138, 138], xterm: 245 }; // a row committed and not pushed
-const INK = { rgb: [32, 32, 32], xterm: 235 }; // text drawn on top of a bar
+const UNPUSHED_GREY = { rgb: [100, 100, 100], xterm: 241 }; // committed, not pushed
+const INK = { rgb: [32, 32, 32], xterm: 235 }; // text drawn on top of a pale bar
+const PAPER = { rgb: [238, 238, 238], xterm: 255 }; // and on top of a dark one
 const GREEN = { rgb: [87, 166, 106], xterm: 71 }; // an added line in the preview
 const RED = { rgb: [197, 90, 90], xterm: 167 }; // a removed one
 
@@ -38,8 +42,11 @@ function createPalette(stream) {
     const bg = (colour) =>
         truecolor ? `\x1b[48;2;${colour.rgb.join(';')}m` : `\x1b[48;5;${colour.xterm}m`;
 
-    /** A row highlight: dark ink on a coloured bar. */
-    const barCode = (colour) => `${bg(colour)}${fg(INK)}`;
+    /**
+     * A row highlight: a coloured bar with the text that can be read on it — dark
+     * ink on the pale colours, pale on the one dark enough to swallow it.
+     */
+    const barCode = (colour, ink = INK) => `${bg(colour)}${fg(ink)}`;
 
     const wrap = (code) => (text) => (enabled && text ? `${code}${text}${RESET}` : text);
     return {
@@ -52,8 +59,7 @@ function createPalette(stream) {
         attentionBar: wrap(barCode(ORANGE)),
         cursorBar: wrap(barCode(CURSOR_GREY)),
         selectedBar: wrap(barCode(SELECTED_GREY)),
-        // Not a bar: the row's own text, greyed. See the top of this file.
-        greyRow: wrap(fg(GREY)),
+        unpushedBar: wrap(barCode(UNPUSHED_GREY, PAPER)),
         // The terminal's own cursor is hidden while the table is up, so a box
         // being typed into draws its own out of reversed video.
         caret: wrap('\x1b[7m'),
@@ -118,9 +124,10 @@ function diffCells(repo) {
  * Whether a row is one of the ones wanting attention: one with something in its
  * working tree, which is work no repository anywhere has a copy of.
  *
- * A repository that has committed and not pushed is not one of these. It is worth
- * seeing — it wears the grey — but the work is safe where it is, and an alarm
- * that goes off for both says less about either.
+ * A repository that has committed and not pushed is not one of these. It wears
+ * the dark grey bar instead — worth seeing, but the work is committed, and an
+ * alarm that goes off for both says less about either. A row with both in it
+ * wears the orange, the uncommitted half being the more urgent fact.
  */
 function needsAttention(repo) {
     return Boolean(repo.hasChanges);
@@ -768,9 +775,7 @@ function frame(state, palette, size) {
         if (cursor) body.push(palette.cursorBar(bar));
         else if (selected) body.push(palette.selectedBar(bar));
         else if (needsAttention(repo)) body.push(palette.attentionBar(bar));
-        // Grey text rather than a bar, so it is not padded: there is no
-        // background to fill out to the edge of the table.
-        else if (repo.unpushed) body.push(palette.greyRow(text));
+        else if (repo.unpushed) body.push(palette.unpushedBar(bar));
         else body.push(text);
     }
 

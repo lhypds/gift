@@ -4,7 +4,7 @@
 // It finds the repositories (nested checkouts and submodules included), watches
 // their working trees, and paints the lot as a table that keeps itself up to
 // date. A row with something uncommitted in it wears an orange bar, and one that
-// has committed and not pushed is written in grey. Pick rows with the arrow
+// has committed and not pushed wears a dark grey one. Pick rows with the arrow
 // keys or find them with /, add more with space, and press enter for the menu of
 // what may be done to them: open them in an editor or an agent, read what
 // changed, commit them, fetch, pull, push, switch or make a branch, merge,

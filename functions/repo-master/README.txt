@@ -12,7 +12,7 @@ and keeps one table up to date: which branch each one is on, whether the working
 tree has changes, how many lines that is, and how much is committed here and
 nowhere else.
 A row with something uncommitted in it wears an orange bar; one that has committed
-and not pushed is written in grey. Press enter for the menu of what may
+and not pushed wears a dark grey one. Press enter for the menu of what may
 be done to them — open one in an editor or an agent, read its diff, commit the
 lot, fetch, pull, push, switch or make a branch, merge, rebase, branch a worktree
 off it, stash what is uncommitted, put a stash back, discard the changes,
@@ -129,11 +129,11 @@ Keys
 | enter            | Open the command menu for the selection, or the row under the cursor                                          |
 | e                | Open the main project in your editor, straight away                                                           |
 | v                | Pick a file of the main project with fzf, and open it in vim, in this terminal                                |
-| c                | Open the main project in Claude Code, in this terminal                                                        |
-| d                | Read the diff of the row under the cursor                                                                     |
+| c                | Commit everything picked, after a box asking for the message — the report takes a `P`                         |
+| d                | Read what the row under the cursor has that is only there                                                     |
 | f                | Fetch everything picked, after a box asking whether to                                                        |
 | p                | Pull everything picked, after a box asking whether to                                                         |
-| P                | Push what everything picked has already committed, after a box asking whether to                              |
+| P                | Push what everything picked has already committed — and in a commit's own report, what it just committed      |
 | s                | Stash the changes of everything picked, after a box asking whether to                                         |
 | u                | Discard the changes of everything picked, after a box asking in earnest                                       |
 | b                | Switch everything picked to a branch, after a box asking which                                                |
@@ -333,7 +333,7 @@ front of you, and not the one that had nothing to do — and the report of the p
 opens in its place. There is no box asking whether it was meant: the one you are
 looking at is the list such a box would have drawn, and the message in its title is
 the answer you already gave. `esc` leaves the commits where they are, which is a
-whole answer too — the rows turn grey in the table and say how many commits are
+whole answer too — the rows wear the grey bar in the table and say how many commits are
 waiting, and a `P` on the table pushes them whenever you come back to it.
 
 A box with a push still to decide on waits to be read. Every other report has been
@@ -399,7 +399,7 @@ A repository with no remote is told so without a network being waited on.
 
 `P` is the other half of the commit — the one the commit's own box offers, and the
 one on the table for the commits that were made somewhere else, in an editor, in an
-agent, at a shell, and never left the machine. It is the key a grey row is about.
+agent, at a shell, and never left the machine. It is the key a grey bar is about.
 It commits nothing itself and touches no working tree;
 it says how many commits it carried, and a branch level with its upstream is left
 alone rather than made to reach across a network to be told so:
@@ -819,21 +819,21 @@ its parent's row rather than counted twice.
 
 A working tree is not the only place work sits. A repository whose commits are on
 this machine and nowhere else — standing ahead of its upstream, or on a branch that
-has never been pushed at all — is written in grey, because a repository committed
-and left, by you or by an agent, is worth seeing and nothing about its working tree
-says so. The status column says how many commits that is where git can count them,
-and `unpushed` on its own where there is no upstream to count against.
+has never been pushed at all — wears a bar of its own, a dark grey one with pale
+text: a repository committed and left, by you or by an agent, is worth seeing, and
+nothing about its working tree says so. The status column says how many commits
+that is where git can count them, and `unpushed` on its own where there is no
+upstream to count against.
 
-Grey and not the orange bar: what is committed is safe where it is, and it is
-still here rather than in trouble. The bar stays for the working tree, which is the
-one kind of work no repository anywhere has a copy of. A row with both in it wears
-the bar — the uncommitted half is the more urgent fact, and `c` is the key for it,
-with the report that commit leaves taking the `P` afterwards.
+Grey rather than orange, because what is committed is safe where it is — it is
+still here, not in trouble. The orange stays for the working tree, which is the one
+kind of work no repository anywhere has a copy of. A row with both in it wears the
+orange, the uncommitted half being the more urgent fact: `c` is the key for that
+one, and the report it leaves takes the `P` afterwards.
 
-Two rows are grey for neither: one whose branch has no remote to push to, since
-there is nowhere for that work to go and a row marked for ever says nothing, and
-one that is only behind — what is waiting there is somebody else's, and `p` is the
-key for it.
+Two rows wear neither: one whose branch has no remote to push to, since there is
+nowhere for that work to go and a row marked for ever says nothing, and one that is
+only behind — what is waiting there is somebody else's, and `p` is the key for it.
 
 The columns are as wide as the window makes them and no wider — what is in them
 has no say in it. A branch you switch, a status that turns, a diff that grows a
