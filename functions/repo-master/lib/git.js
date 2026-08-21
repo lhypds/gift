@@ -10,6 +10,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 
+const { pad, width } = require('./util.js');
+
 /** Untracked files larger than this are counted as a change but not read. */
 const MAX_UNTRACKED_BYTES = 512 * 1024;
 /** How many untracked files are read for their line count before we stop. */
@@ -18,6 +20,8 @@ const MAX_UNTRACKED_FILES = 300;
 const MAX_STAT_FILES = 200;
 /** How many lines of a patch the preview keeps; the rest is a note. */
 const MAX_DIFF_LINES = 5000;
+/** How many unpushed commits the preview names before it only counts them. */
+const MAX_COMMITS = 50;
 
 /** A commit runs the repository's own hooks, which are nobody's business but its. */
 const COMMIT_TIMEOUT_MS = 60000;
@@ -107,21 +111,26 @@ function originUrl(config) {
  * say the same thing. Spawning git is what a sweep of a folder full of
  * repositories actually spends its time on, and this one runs once per row
  * before anything is drawn at all.
+ *
+ * `remote` is whether there is an origin to push to at all, which is the same
+ * question answered by the same read: a branch that has never been pushed is
+ * work sitting on one machine where there is a remote, and is all there is where
+ * there is not.
  */
 async function identify(dir) {
     const home = await gitDir(dir);
     if (home) {
         try {
             const slug = parseRemote(originUrl(await fsp.readFile(path.join(home, 'config'), 'utf8')));
-            if (slug) return { name: slug };
+            if (slug) return { name: slug, remote: true };
         } catch {
             /* unreadable, or not a shape we know — ask git below */
         }
     }
 
-    const remote = await git(dir, ['remote', 'get-url', 'origin']);
-    const slug = remote.ok ? parseRemote(remote.stdout) : null;
-    return { name: slug || path.basename(dir) };
+    const url = await git(dir, ['remote', 'get-url', 'origin']);
+    const slug = url.ok ? parseRemote(url.stdout) : null;
+    return { name: slug || path.basename(dir), remote: url.ok && Boolean(url.stdout.trim()) };
 }
 
 /** The short commit to show where there is no branch name to show instead. */
@@ -155,6 +164,47 @@ function branchFromHeader(header) {
     // `...` separates the branch from its upstream, and cannot appear in a ref
     // name; the ahead/behind count that may follow goes with the upstream.
     return text.split('...')[0].replace(/\s*\[.*\]$/, '').trim() || '-';
+}
+
+/** Whether a `--branch` header says the branch has no commit on it yet. */
+function unbornFromHeader(header) {
+    return /^## No commits yet on /.test(header);
+}
+
+/**
+ * What the same header says about the upstream: whether there is one git can
+ * count against, and how far the branch stands ahead of it — which is how many
+ * commits are on this machine and nowhere else.
+ *
+ * `## main...origin/main [ahead 2, behind 1]` is two ahead. `## main` has no
+ * upstream at all, and neither, for this purpose, has `## main...origin/main
+ * [gone]`: the branch it followed is not on origin any more, so there is nothing
+ * to count against and the counting is done another way.
+ */
+function upstreamFromHeader(header) {
+    const text = header.slice(3).trim();
+    const marks = text.match(/\s\[([^\]]+)\]$/);
+    if (!text.includes('...') || (marks && /\bgone\b/.test(marks[1]))) return { upstream: false, ahead: 0 };
+
+    const ahead = marks ? marks[1].match(/\bahead (\d+)/) : null;
+    return { upstream: true, ahead: ahead ? Number.parseInt(ahead[1], 10) : 0 };
+}
+
+/**
+ * How many commits are on this machine and nowhere else.
+ *
+ * The header's own count where there is an upstream to count against. Where there
+ * is not, the commits no remote-tracking ref of any remote can reach — which is
+ * the same question `unpushedCommits` lists the answer to, asked as a number. A
+ * repository with no remote at all is not asked: there is nowhere for its commits
+ * to go, and nothing to say about their not having gone there.
+ */
+async function aheadCount(dir, tracking, remote) {
+    if (tracking.upstream) return tracking.ahead;
+    if (!remote) return 0;
+
+    const only = await git(dir, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
+    return only.ok ? Number.parseInt(only.stdout.trim(), 10) || 0 : 0;
 }
 
 /**
@@ -246,10 +296,14 @@ function ownEntry(dir, exclude) {
  * @param {string} dir Repository root.
  * @param {string[]} [exclude] Absolute paths of repositories nested inside this
  *   one. They have rows of their own, so their changes are not counted twice.
- * @returns {Promise<object>} branch, whether anything changed, the diff size,
- *   the newest change time, and an error string when git refused to answer.
+ * @param {{remote?: boolean}} [options] `remote` is whether there is an origin
+ *   to push to, from identify(): a branch with no upstream is unpushed work
+ *   where there is somewhere to push it, and nothing to say where there is not.
+ * @returns {Promise<object>} branch, whether anything changed, how much is
+ *   committed here and nowhere else, the diff size, the newest change time, and
+ *   an error string when git refused to answer.
  */
-async function inspect(dir, exclude = []) {
+async function inspect(dir, exclude = [], { remote = false } = {}) {
     // Starting git is what a sweep costs — the work each one does is nothing
     // beside the process it takes to do it, and a folder of fifty repositories
     // pays that fifty times over, refresh after refresh. So a row asks once and
@@ -262,9 +316,29 @@ async function inspect(dir, exclude = []) {
     }
 
     const header = status.stdout.split('\0', 1)[0];
+    const named = branchFromHeader(header);
     // A detached HEAD is the one state the header cannot name, and the one
     // repository in a hundred that is in it can afford to be asked twice.
-    const branch = branchFromHeader(header) ?? (await detachedHead(dir));
+    const branch = named ?? (await detachedHead(dir));
+
+    // Commits that are on this machine and nowhere else — which is the other way
+    // a repository has work in it, and the one no amount of looking at the
+    // working tree finds. A detached HEAD is not a branch to push, and an unborn
+    // one has nothing on it.
+    //
+    // Where the branch has an upstream, the `--branch` header has already said
+    // how far ahead of it we are, so this costs nothing. Where it has not — a
+    // branch never pushed, or one whose upstream is gone — the header has nothing
+    // to say and git is asked: what is only here is what no remote-tracking ref
+    // can reach. That is a process, and it is only ever spent on a branch that
+    // follows nothing in a repository that has somewhere to push to. Asking is
+    // the point of asking, though: a branch made a moment ago and not committed
+    // on is not unpushed work, and counting it as such would light up a row that
+    // has nothing in it.
+    const tracking = upstreamFromHeader(header);
+    const pushable = Boolean(named) && !unbornFromHeader(header);
+    const ahead = pushable ? await aheadCount(dir, tracking, remote) : 0;
+    const unpushed = ahead > 0;
 
     const entries = parsePorcelain(status.stdout).filter(ownEntry(dir, exclude));
 
@@ -302,6 +376,8 @@ async function inspect(dir, exclude = []) {
         branch,
         hasChanges: entries.length > 0,
         changedFiles: entries.length,
+        unpushed,
+        ahead,
         adds: counts.adds,
         dels: counts.dels,
         lastChange,
@@ -310,18 +386,94 @@ async function inspect(dir, exclude = []) {
 }
 
 /**
- * The working-tree changes of one repository, as lines ready to be shown.
+ * The commits a repository has and its remote has not, newest first.
+ *
+ * `@{upstream}..HEAD` is exactly what a push would carry, and is asked for
+ * first: it is the answer wherever there is an upstream to answer against. Where
+ * there is not — a branch that has never been pushed — git refuses that range and
+ * says so, and what is only here is then everything no remote-tracking ref of any
+ * remote can reach, which is what `--not --remotes` means.
+ *
+ * Long lists are cut. Fifty commit subjects is more than anybody reads out of a
+ * box, and the count says how many were not named — asked for only when there is
+ * something to say, since a repository with three unpushed commits has already
+ * been counted by listing them.
+ *
+ * Never throws: a repository that will not answer has nothing waiting.
+ *
+ * @param {string} dir Repository root.
+ * @returns {Promise<{entries: {hash: string, when: string, subject: string}[], total: number}>}
+ */
+async function unpushedCommits(dir) {
+    // A tab cannot appear in any of the three, so it is the one separator a
+    // subject cannot break — `%x09` rather than a tab in the argument, because
+    // that is what git's own format language calls it.
+    const format = '--format=%h%x09%ar%x09%s';
+    const limit = ['-n', String(MAX_COMMITS + 1)];
+
+    let range = ['@{upstream}..HEAD'];
+    let found = await git(dir, ['log', format, ...limit, ...range]);
+    if (!found.ok) {
+        range = ['HEAD', '--not', '--remotes'];
+        found = await git(dir, ['log', format, ...limit, ...range]);
+    }
+    if (!found.ok) return { entries: [], total: 0 };
+
+    const entries = found.stdout
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+            const [hash, when, ...rest] = line.split('\t');
+            return { hash, when: when || '', subject: rest.join('\t') };
+        });
+    if (entries.length <= MAX_COMMITS) return { entries, total: entries.length };
+
+    const counted = await git(dir, ['rev-list', '--count', ...range]);
+    const total = Number.parseInt(counted.stdout, 10);
+    return {
+        entries: entries.slice(0, MAX_COMMITS),
+        total: Number.isFinite(total) && total > MAX_COMMITS ? total : entries.length,
+    };
+}
+
+/**
+ * The commit list for the head of the preview: `8ac1f2e  2 days ago  A message`,
+ * the ages lined up under one another so the subjects start in one column.
+ */
+function commitLines(found) {
+    const column = Math.max(...found.entries.map((entry) => width(entry.when)), 0);
+    const lines = [
+        `unpushed (${found.total}):`,
+        ...found.entries.map((entry) => `${entry.hash}  ${pad(entry.when, column)}  ${entry.subject}`),
+    ];
+
+    const rest = found.total - found.entries.length;
+    if (rest > 0) lines.push(`  … ${rest} more`);
+    return lines;
+}
+
+/**
+ * What one repository has in it that is nowhere else, as lines ready to be shown.
  *
  * This is the same ground `inspect` covers, told at length instead of counted:
- * the patch against HEAD, and then the untracked files, which no patch mentions
- * because git has never seen them. Nested repositories are left out of both, the
- * way they are left out of the row.
+ * the commits that never left the machine, then the patch against HEAD, and then
+ * the untracked files, which no patch mentions because git has never seen them.
+ * Nested repositories are left out of the last two, the way they are left out of
+ * the row — the commits are the whole repository's by nature.
+ *
+ * The commits come first because that is the order the work happened in, and
+ * because the patch under them is the part that is not committed anywhere at all.
  *
  * @param {string} dir Repository root.
  * @param {string[]} [exclude] Absolute paths of repositories nested inside it.
+ * @param {{unpushed?: boolean}} [options] `unpushed` is what the row says about
+ *   this repository, from inspect(): the same fact the orange bar is about, and
+ *   the one that decides whether there are commits worth listing. A detached
+ *   HEAD, a branch with nowhere to push to, a repository merely behind its
+ *   upstream — all say no here, as they say no there.
  * @returns {Promise<{lines: string[], error: string|null}>}
  */
-async function diff(dir, exclude = []) {
+async function diff(dir, exclude = [], { unpushed = false } = {}) {
     const [tracked, status] = await Promise.all([
         git(dir, ['diff', '--no-color', '--no-ext-diff', '--ignore-submodules=dirty', 'HEAD']),
         git(dir, ['status', '--porcelain=v1', '-uall', '-z', '--ignore-submodules=dirty']),
@@ -336,12 +488,19 @@ async function diff(dir, exclude = []) {
         return { lines: [], error: reason || 'git diff failed' };
     }
 
+    // The commits that never left the machine, where the row says there are any.
+    // A repository with everything pushed asks git nothing about it.
+    const waiting = unpushed ? await unpushedCommits(dir) : { entries: [], total: 0 };
+    const lines = waiting.entries.length > 0 ? [...commitLines(waiting), ''] : [];
+
     // Tabs are expanded here rather than left to the terminal: the box the
     // preview is drawn in counts characters, and a tab it counted as one would
     // push the line through the right-hand border.
-    const lines = patch.ok
+    const patched = patch.ok
         ? patch.stdout.split('\n').map((line) => line.replace(/\r$/, '').replace(/\t/g, '    '))
         : [];
+    while (patched.length > 0 && patched[patched.length - 1] === '') patched.pop();
+    lines.push(...patched);
     while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
 
     // Status answered and the diff did not: say so, rather than let the
@@ -457,10 +616,54 @@ async function pushBranch(dir, branch) {
 }
 
 /**
- * Commit one repository's working tree and push it.
+ * Commit one repository's working tree, and leave the commit here.
  *
  * "The working tree" is what the row counts: tracked changes and untracked files
  * alike, minus anything belonging to a repository nested inside this one.
+ *
+ * Nothing to commit is not a failure. A repository somebody pointed at along with
+ * five others, and has not touched since the last commit, is left alone and says
+ * so — the same answer a stash of a clean tree gives.
+ *
+ * This is the whole of the `c` key, and the first half of `commit & push`: the
+ * push is what the two differ by, and the report the first one leaves behind is
+ * where a `P` carries it the rest of the way.
+ *
+ * Never throws: trouble comes back as ok: false and a line saying what.
+ *
+ * @param {string} dir Repository root.
+ * @param {string} message The commit message.
+ * @param {string[]} [nested] Absolute paths of repositories inside this one.
+ * @param {(step: string) => void} [onStep] Told 'staging', 'committing'.
+ * @returns {Promise<{ok: boolean, committed: boolean, branch: string, text: string}>}
+ *   `branch` is the branch the commit went on, for whoever is about to push it.
+ */
+async function commit(dir, message, nested = [], onStep = () => { }) {
+    const fail = (text) => ({ ok: false, committed: false, branch: '', text });
+
+    const branch = await currentBranch(dir);
+    if (branch === '-' || branch.startsWith('(')) return fail('detached HEAD — check out a branch first');
+
+    onStep('staging');
+    const staged = await git(dir, ['add', '-A', '--', '.', ...(await withoutNested(dir, nested))]);
+    if (!staged.ok) return fail(`add failed: ${firstLine(staged.stderr)}`);
+
+    onStep('committing');
+    const made = await git(dir, ['commit', '-m', message], COMMIT_TIMEOUT_MS);
+    if (!made.ok) {
+        if (!NOTHING_TO_COMMIT.test(`${made.stdout}\n${made.stderr}`)) {
+            return fail(`commit failed: ${firstLine(made.stderr) || firstLine(made.stdout)}`);
+        }
+        return { ok: true, committed: false, branch, text: 'nothing to commit' };
+    }
+
+    const hash = commitHash(made.stdout);
+    return { ok: true, committed: true, branch, text: `committed${hash ? ` ${hash}` : ''}` };
+}
+
+/**
+ * Commit one repository's working tree and push it: commit() above, and then the
+ * branch it committed on.
  *
  * Nothing to commit is not a failure — a repository whose commits never left the
  * machine is still worth pushing. One with neither is left alone rather than
@@ -479,20 +682,10 @@ async function pushBranch(dir, branch) {
 async function commitAndPush(dir, message, nested = [], onStep = () => { }) {
     const fail = (text) => ({ ok: false, committed: false, pushed: false, text });
 
-    const branch = await currentBranch(dir);
-    if (branch === '-' || branch.startsWith('(')) return fail('detached HEAD — check out a branch first');
+    const made = await commit(dir, message, nested, onStep);
+    if (!made.ok) return fail(made.text);
 
-    onStep('staging');
-    const staged = await git(dir, ['add', '-A', '--', '.', ...(await withoutNested(dir, nested))]);
-    if (!staged.ok) return fail(`add failed: ${firstLine(staged.stderr)}`);
-
-    onStep('committing');
-    const commit = await git(dir, ['commit', '-m', message], COMMIT_TIMEOUT_MS);
-    const committed = commit.ok;
-    if (!committed && !NOTHING_TO_COMMIT.test(`${commit.stdout}\n${commit.stderr}`)) {
-        return fail(`commit failed: ${firstLine(commit.stderr) || firstLine(commit.stdout)}`);
-    }
-
+    const { branch, committed } = made;
     if (!committed) {
         const ahead = await git(dir, ['rev-list', '--count', '@{upstream}..HEAD']);
         // An upstream git cannot name is a branch that has never been pushed.
@@ -504,8 +697,7 @@ async function commitAndPush(dir, message, nested = [], onStep = () => { }) {
     onStep('pushing');
     const pushed = await pushBranch(dir, branch);
 
-    const hash = committed ? commitHash(commit.stdout) : '';
-    const said = committed ? `committed${hash ? ` ${hash}` : ''}` : 'nothing new';
+    const said = committed ? made.text : 'nothing new';
     if (!pushed.ok) {
         return { ok: false, committed, pushed: false, text: `${said} · push failed: ${pushed.reason}` };
     }
@@ -520,9 +712,9 @@ async function commitAndPush(dir, message, nested = [], onStep = () => { }) {
 /**
  * Push what a repository has already committed, and commit nothing now.
  *
- * This is the other half of `commit & push`, for the commits that were made
- * somewhere else — in an editor, in an agent, at a shell — and never left the
- * machine. Nothing waiting is not a failure: a branch level with its upstream is
+ * This is the second half of a commit — the one the report offers a `P` for —
+ * and the whole of the key on the table, for the commits that were made somewhere
+ * else, in an editor, in an agent, at a shell, and never left the machine. Nothing waiting is not a failure: a branch level with its upstream is
  * left alone rather than made to reach across a network to be told so, and a
  * repository with no commit at all has nothing to push by definition. A branch
  * that has never been pushed is given an upstream, as it is after a commit.
@@ -1061,12 +1253,14 @@ module.exports = {
     inspect,
     diff,
     parseRemote,
+    commit,
     commitAndPush,
     push,
     sync,
     stash,
     discard,
     stashList,
+    unpushedCommits,
     restore,
     branches,
     switchBranch,

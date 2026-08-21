@@ -3,13 +3,14 @@
 //
 // It finds the repositories (nested checkouts and submodules included), watches
 // their working trees, and paints the lot as a table that keeps itself up to
-// date. Rows that want attention wear an orange bar. Pick rows with the arrow
+// date. Rows holding work that is only here — something uncommitted, or commits
+// that never left the machine — wear an orange bar. Pick rows with the arrow
 // keys or find them with /, add more with space, and press enter for the menu of
 // what may be done to them: open them in an editor or an agent, read what
-// changed, fetch, pull, push, switch or make a branch, merge, rebase, branch a
-// worktree off one, commit and push the lot, stash what is uncommitted, put a
-// stash back or throw the changes away, or delete a folder outright. The commands
-// worth reaching for carry a key of their own, and the menu prints it beside them.
+// changed, commit them, fetch, pull, push, switch or make a branch, merge,
+// rebase, branch a worktree off one, stash what is uncommitted, put a stash back
+// or throw the changes away, or delete a folder outright. The commands worth
+// reaching for carry a key of their own, and the menu prints it beside them.
 'use strict';
 
 const fs = require('node:fs');
@@ -64,7 +65,7 @@ Keys:
   up/down or k/j   move                  space   add to the selection
   enter            the command menu      /       search the table
   e                open with code        v       pick a file, open with vim
-  c                open with claude      d       read the diff
+  c                commit                d       read the diff
   f                fetch                 p       pull
   P                push                  s       stash the changes
   u                discard the changes   b       switch branch
@@ -76,6 +77,10 @@ Keys:
 Every one of those keys runs a command the enter menu also holds a row for, on
 the repositories picked with space — or the row under the cursor when none are.
 The menu prints each command's key beside it, so nothing has to be learned twice.
+
+claude code and codex have no key of their own and are run from the menu: opening
+an agent is a thing you do between looks at the table rather than the work the
+table is for, and c is the commit.
 
 The ones that open something open the main project — the first repository picked
 — and claude and codex are handed the rest as directories they may also work in.
@@ -92,9 +97,16 @@ with uncommitted changes, which is where a pull goes wrong; discarding and
 deleting mark all of them, because nothing undoes either, and the delete box says
 what else is inside the folders. What came of each is reported in a box of its own.
 
+c commits and pushes nothing: it asks for a message in a box, commits every picked
+repository with it — each one a project of its own, none the main project of the
+others — and the report it leaves takes a P to send them on, on exactly the
+repositories that committed. A commit and a push are two decisions, and the box
+waits to be answered rather than taking itself away after three seconds.
+
 P pushes what is already committed and commits nothing, for the commits that were
-made in an editor or an agent and never left the machine. A branch level with its
-upstream is left alone; one that has never been pushed is given an upstream.
+made in an editor or an agent and never left the machine, and for the ones c has
+just made. A branch level with its upstream is left alone; one that has never been
+pushed is given an upstream.
 
 s puts the changes of everything picked aside — git stash push -u, so untracked
 files go with them and the working tree comes out clean — and u throws the same
@@ -147,9 +159,10 @@ scrolls the diff and the reports as well. A delete and a discard are the two
 things a click will not answer for. Selecting text with the mouse needs a modifier
 held down while the table is up — option in iTerm2, shift most other places.
 
-commit & push treats every picked repository as a project of its own: it asks for
-a message in a box, then commits and pushes each of them with it, none the main
-project of the others.`);
+commit & push is the same commit without the second decision, for whoever would
+rather not be asked twice: one message, and every picked repository committed and
+pushed with it. It is run from the menu, since c and then P is the same errand a
+key at a time.`);
 }
 
 function parseArgs(argv, env) {
@@ -201,6 +214,8 @@ function makeRow(found, identity) {
         loaded: false,
         hasChanges: false,
         changedFiles: 0,
+        unpushed: false,
+        ahead: 0,
         adds: 0,
         dels: 0,
         lastChange: null,
@@ -340,13 +355,15 @@ async function main(argv) {
         gate(async () => {
             let result;
             try {
-                result = await gitLib.inspect(repo.dir, repo.nested);
+                result = await gitLib.inspect(repo.dir, repo.nested, { remote: repo.remote });
             } catch (failure) {
                 result = { error: failure.message || String(failure) };
             }
             Object.assign(repo, {
                 hasChanges: false,
                 changedFiles: 0,
+                unpushed: false,
+                ahead: 0,
                 adds: 0,
                 dels: 0,
                 lastChange: null,
@@ -684,7 +701,21 @@ async function main(argv) {
         // The line the box comes to, said when it goes rather than now: while it
         // is up it is already saying that and more, a repository at a time.
         state.report.summary = `${label}: ${summary.join(' · ') || 'nothing to do'}`;
-        if (counted('failed') === 0) reportTimer = setTimeout(closeReport, MESSAGE_MS);
+
+        // A commit that pushed nothing has left the other half of the work
+        // undone, and the box saying so is where it is offered: `P` carries
+        // exactly the repositories that committed, which are the ones named in
+        // front of you. Nothing committed is nothing to carry, and the box goes
+        // the way every other one does.
+        if (action.kind === 'commit' && !action.push) {
+            const committed = outcome.filter((result) => result.state === 'done').map((result) => result.repo);
+            if (committed.length > 0) state.report.push = committed;
+        }
+
+        // A box with something still to do waits to be read, the way one with a
+        // failure in it does: three seconds is long enough to see a row say
+        // `committed`, and not long enough to decide what to do about it.
+        if (counted('failed') === 0 && !state.report.push) reportTimer = setTimeout(closeReport, MESSAGE_MS);
         draw();
 
         // Every one of those repositories may have just changed underneath the
@@ -706,8 +737,8 @@ async function main(argv) {
             `${action.label} · "${message}"`,
             action.label,
             repos,
-            { done: 'pushed', skipped: 'unchanged' },
-            (onUpdate) => actionsLib.commit(repos, message, onUpdate),
+            { done: action.push ? 'pushed' : 'committed', skipped: 'unchanged' },
+            (onUpdate) => actionsLib.commit(repos, message, action.push, onUpdate),
         );
 
     /** `3 repositories`, for the boxes that head themselves with how many. */
@@ -1079,7 +1110,7 @@ async function main(argv) {
         // Outside the limiter on purpose: this is one repository somebody is
         // waiting on, and it should not queue behind a sweep of all the others.
         gitLib
-            .diff(repo.dir, repo.nested)
+            .diff(repo.dir, repo.nested, { unpushed: repo.unpushed })
             .catch((failure) => ({ lines: [], error: failure.message || String(failure) }))
             .then((result) => {
                 // A slower read of a repository already closed, or replaced by a
@@ -1316,6 +1347,16 @@ async function main(argv) {
             return;
         }
 
+        // The push a commit left to be decided on. It goes straight through
+        // rather than asking again: the box in front of you is the list a push
+        // box would have drawn, and it holds only the repositories that
+        // committed — the report it opens in its place says what became of each.
+        if (key === 'P' && panel.push && !panel.running) {
+            holdReport();
+            runSync('push', panel.push);
+            return;
+        }
+
         // Out of range is the renderer's business, as in the preview.
         const page = Math.max(1, panel.view - 1);
         switch (key) {
@@ -1458,8 +1499,14 @@ async function main(argv) {
             case 'v':
                 startAction(command('vim'), targets(), 'table');
                 return;
+            // A commit is what a table of repositories is opened to make, so it
+            // has the letter. The commit stays here and the report it leaves is
+            // where a `P` sends it on; `commit & push` is the menu row for
+            // whoever would rather not be asked twice. The agents have no key of
+            // their own — opening one is a thing you do between looks at the
+            // table rather than the work the table is for.
             case 'c':
-                startAction(command('claude'), targets(), 'table');
+                startAction(command('commit'), targets(), 'table');
                 return;
             case 'd':
                 // The one command that reads a row rather than acting on a

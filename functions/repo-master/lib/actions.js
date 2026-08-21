@@ -213,8 +213,10 @@ function actions(env) {
             args: ['.'],
         },
         {
+            // No key of its own: `c` is the commit, which is the thing a table of
+            // repositories is opened to do rather than a place to go and do it.
+            // This and codex are the two the menu is the way to.
             id: 'claude',
-            key: 'c',
             label: 'open with claude code',
             command: env.GIFT_REPO_MASTER_CLAUDE || 'claude',
             kind: 'terminal',
@@ -249,10 +251,27 @@ function actions(env) {
         },
         {
             id: 'commit',
-            label: 'commit & push',
+            key: 'c',
+            label: 'commit',
             kind: 'commit',
+            // The commit stays here. What to do about that is asked in the report
+            // it leaves behind, where `P` pushes what was just committed — a
+            // commit and a push are two decisions, and this is the key for the
+            // first of them.
+            push: false,
             // Nothing is committed until there is something to call it: the
             // message is asked for in a box of its own first.
+            prompt: {
+                title: 'Commit message',
+                footer: 'enter commit · esc back',
+                empty: 'a message first',
+            },
+        },
+        {
+            id: 'commit-push',
+            label: 'commit & push',
+            kind: 'commit',
+            push: true,
             prompt: {
                 title: 'Commit message',
                 footer: 'enter commit & push · esc back',
@@ -420,7 +439,7 @@ function runHere(command, args, cwd) {
 async function run(action, repos, { suspend, resume }) {
     const [main, ...extra] = repos;
     if (!main) return null;
-    if (action.kind === 'commit') return 'commit & push is run with a message — see commit()';
+    if (action.kind === 'commit') return `${action.label} is run with a message — see commit()`;
 
     if (action.kind === 'windowed') {
         const error = await launch(action.command, [main.dir], main.dir);
@@ -535,7 +554,8 @@ async function clear(repos, kind, onUpdate = () => { }) {
 }
 
 /**
- * Commit and push every chosen repository, with the one message between them.
+ * Commit every chosen repository with the one message between them, and push
+ * them where that is what was asked for.
  *
  * Each repository stands on its own here, rather than one leading and the rest
  * following: a commit belongs to a repository, and there is no main project to
@@ -545,14 +565,19 @@ async function clear(repos, kind, onUpdate = () => { }) {
  *
  * @param {object[]} repos Rows to commit.
  * @param {string} message The commit message.
+ * @param {boolean} [push] Carry the commit to the remote as well, which is the
+ *   whole difference between the two commands this runs.
  * @param {(update: {repo: object, state: string, text: string}) => void} [onUpdate]
  *   Called as each repository moves — 'working', then 'done', 'skipped' or 'failed'.
  * @returns {Promise<Array<{repo: object, state: string, text: string}>>} The last
  *   word on each repository, in the order they were given.
  */
-async function commit(repos, message, onUpdate = () => { }) {
+async function commit(repos, message, push = true, onUpdate = () => { }) {
     return sweep(repos, onUpdate, async (repo, say) => {
-        const result = await gitLib.commitAndPush(repo.dir, message, repo.nested, (step) => say('working', `${step}…`));
+        const step = (name) => say('working', `${name}…`);
+        const result = push
+            ? await gitLib.commitAndPush(repo.dir, message, repo.nested, step)
+            : await gitLib.commit(repo.dir, message, repo.nested, step);
         return say(!result.ok ? 'failed' : result.committed ? 'done' : 'skipped', result.text);
     });
 }

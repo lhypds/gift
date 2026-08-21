@@ -1,9 +1,11 @@
 // Drawing the table.
 //
 // Rows are highlighted by their background, never by recolouring their text: a
-// row wanting attention — one whose working tree changed — gets a Claude-orange
-// bar, and the rows the user is pointing at or has picked get the pale grey of
-// an ordinary selection. Everything else keeps the terminal's own colours.
+// row wanting attention — one with work in it that is nowhere else, whether that
+// is a working tree that changed or commits that never left the machine — gets a
+// Claude-orange bar, and the rows the user is pointing at or has picked get the
+// pale grey of an ordinary selection. Everything else keeps the terminal's own
+// colours.
 'use strict';
 
 const { width, pad, truncate, formatRelative, shortenHome } = require('./util.js');
@@ -55,10 +57,28 @@ function treePrefix(depth) {
     return depth === 0 ? '' : `${'  '.repeat(depth)}+- `;
 }
 
+/**
+ * What a repository has committed here and nowhere else, in the words the status
+ * column and the preview's own heading both use. A repository standing ahead of
+ * its upstream says how far; one whose branch has never been pushed says only
+ * that, because there is no upstream to count against and the answer is "all of
+ * it". Null where there is nothing waiting.
+ */
+function unpushedCell(repo) {
+    if (!repo.unpushed) return null;
+    return repo.ahead > 0 ? `${repo.ahead} unpushed` : 'unpushed';
+}
+
+/**
+ * What a row has in it. The working tree comes first where there is something in
+ * both — it is the half that is not committed anywhere at all, and the half `c`
+ * empties; `P` is for what is left after that.
+ */
 function statusCell(repo) {
     if (repo.error) return 'error';
     if (!repo.loaded) return '…';
-    return repo.hasChanges ? 'has changes' : 'no changes';
+    if (repo.hasChanges) return 'has changes';
+    return unpushedCell(repo) || 'no changes';
 }
 
 /**
@@ -86,9 +106,15 @@ function diffCells(repo) {
     return { long: parts.join(' '), short: short.join(' ') };
 }
 
-/** Whether a row is one of the ones the user is meant to notice. */
+/**
+ * Whether a row is one of the ones the user is meant to notice: one holding work
+ * that is only here. A working tree with something in it, and a branch with
+ * commits that never left the machine — a repository committed and left, or
+ * committed by an agent and left, is exactly the row worth being shown, and
+ * nothing about its working tree says so.
+ */
 function needsAttention(repo) {
-    return Boolean(repo.hasChanges);
+    return Boolean(repo.hasChanges || repo.unpushed);
 }
 
 /**
@@ -135,7 +161,8 @@ function changeCell(repo) {
 }
 
 /**
- * The preview: a repository's diff. Its title is written from the row as it
+ * The preview: what a repository has that is only here — the commits that never
+ * left the machine, and then the patch. Its title is written from the row as it
  * stands now rather than as it stood when the box opened — the row goes on
  * refreshing underneath, and the heading saying so is the hint that the patch
  * itself wants an `r`.
@@ -147,7 +174,9 @@ function previewPanel(state) {
     const repo = panel.repo;
     const counts = diffCells(repo);
     return Object.assign(panel, {
-        title: [repo.name, repo.branch || '…', counts.long === '-' ? null : counts.long].filter(Boolean).join(' · '),
+        title: [repo.name, repo.branch || '…', unpushedCell(repo), counts.long === '-' ? null : counts.long]
+            .filter(Boolean)
+            .join(' · '),
         paint: patchTone,
         count: !panel.loading, // nothing to count yet, and one placeholder line to miscount
         status: panel.loading ? 'reading…' : '',
@@ -424,7 +453,13 @@ function reportPanel(state) {
         status: report.running
             ? `${report.entries.length - waiting} of ${report.entries.length} done · working…`
             : summary || 'nothing to do',
-        footer: report.running ? '' : 'up/down scroll · esc close',
+        // A commit that stayed here leaves a key in the footer to carry it the
+        // rest of the way, on the repositories this box is about and no others.
+        footer: report.running
+            ? ''
+            : [report.push ? `P push ${report.push.length === 1 ? 'it' : 'them'}` : null, 'up/down scroll', 'esc close']
+                .filter(Boolean)
+                .join(' · '),
         width: REPORT_WIDTH,
     });
 }
@@ -602,12 +637,16 @@ function frame(state, palette, size) {
     const fit = (text) => truncate(text, tableWidth);
 
     const changed = state.rows.filter((repo) => repo.hasChanges).length;
+    // Only when there are any: a folder where everything has been pushed has
+    // nothing to say about pushing, and the line is short enough to read as it is.
+    const unpushed = state.rows.filter((repo) => repo.unpushed).length;
 
     const summary = [
         `watching ${shortenHome(state.root)}`,
         `${state.rows.length} ${state.rows.length === 1 ? 'repo' : 'repos'}`,
         `${changed} changed`,
     ];
+    if (unpushed > 0) summary.push(`${unpushed} unpushed`);
     // The header counts every repository whatever is showing, and then says how
     // much of that this is: a filtered table that only counted itself would let
     // somebody read "2 repos · 0 changed" off a folder of thirty.

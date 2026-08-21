@@ -9,11 +9,13 @@ Watch every git repository under one folder in a live table, and open the ones t
 A folder full of half-finished projects is hard to hold in your head. repo-master
 finds every repository under it — nested checkouts and submodules included —
 and keeps one table up to date: which branch each one is on, whether the working
-tree has changes, and how many lines that is.
-Rows that want attention wear an orange bar. Press enter for the menu of what may
-be done to them — open one in an editor or an agent, read its diff, fetch, pull,
-push, switch or make a branch, merge, rebase, branch a worktree off it, commit and
-push the lot, stash what is uncommitted, put a stash back, discard the changes,
+tree has changes, how many lines that is, and how much is committed here and
+nowhere else.
+Rows holding work that is only on this machine — something uncommitted, or commits
+that were never pushed — wear an orange bar. Press enter for the menu of what may
+be done to them — open one in an editor or an agent, read its diff, commit the
+lot, fetch, pull, push, switch or make a branch, merge, rebase, branch a worktree
+off it, stash what is uncommitted, put a stash back, discard the changes,
 delete a folder outright — or
 press the key the menu prints beside the command you wanted. `/` finds a
 repository in a folder too full to read, and a `.gitignore` in the watched folder
@@ -23,12 +25,12 @@ keeps the folders that are nobody's work out of the table altogether.
 repo master v0.0.1
 
 
-watching ~/projects · 12 repos · 3 changed · 2 open PRs
+watching ~/projects · 12 repos · 3 changed · 1 unpushed · 2 open PRs
 ---------------------------------------------------------------------------------------------------------
 
   repo                 path                 branch  status       last updated  diff
 > lhypds/gift          ./gift               main    has changes  1min ago      +1203 -30
- +gcc3/gcc3-content    ./gcc3               master  no changes   -             -
+ +gcc3/gcc3-content    ./gcc3               master  2 unpushed   -             -
 
 
     +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3
@@ -180,12 +182,13 @@ row as well. The commands are:
 | goto folder           |         | your shell, standing in the main project's folder                                    |
 | open with code        | `e`     | `code <main project>`                                                                |
 | open with vim         | `v`     | `fzf` in the main project, and then `vim` on the file it printed — see below         |
-| open with claude code | `c`     | `claude` in the main project, with `--add-dir` for each added repository             |
+| open with claude code |         | `claude` in the main project, with `--add-dir` for each added repository             |
 | open with codex       |         | `codex` in the main project, the same way                                            |
-| diff                  | `d`     | the box below, holding what changed in the main project                              |
+| diff                  | `d`     | the box below, holding what the main project has that is only there                  |
 | fetch                 | `f`     | `git fetch --all` in every picked repository — see below                             |
 | pull                  | `p`     | `git pull` in every picked repository — see below                                    |
-| commit & push         |         | `git add -A`, `git commit` and `git push` in **every** picked repository — see below |
+| commit                | `c`     | `git add -A` and `git commit` in **every** picked repository — see below            |
+| commit & push         |         | the same, and `git push` after it, without the second question — see below           |
 | push                  | `P`     | `git push` alone, in every picked repository — see below                             |
 | stash                 | `s`     | `git stash push -u` in every picked repository — see below                           |
 | discard changes       | `u`     | throws the same changes away instead — see below                                     |
@@ -201,8 +204,13 @@ The menu orders itself by use: the command run most often is at the top, command
 run the same number of times are in alphabetical order, and the count is kept in
 `~/.gift/repo-master-usage.json` between runs. The number keys reach the first nine
 rows of whatever order that has come to be, which is why the commands with no key
-of their own — `goto folder`, `open with codex`, `commit & push`, `restore stash` —
-are the ones that gain the most from being used: they walk up to a number.
+of their own — `goto folder`, `open with claude code`, `open with codex`,
+`commit & push`, `restore stash` — are the ones that gain the most from being
+used: they walk up to a number.
+
+Opening an agent is a thing you do between looks at the table rather than the work
+the table is for, which is why `claude` and `codex` are both menu rows and `c` is
+the commit.
 
 A selection has a shape. The repository picked first is the **main project** and
 wears no mark; the ones picked after it are marked `+`. The editor opens the main
@@ -234,8 +242,8 @@ to what should be in the list, and where you have set one it is left alone.
 
 `e` is the one command that asks nothing and takes no time: a window is only a
 window, and nothing it opens cannot be closed again. `f`, `p`, `P`, `s`, `u` and
-`D` all put a box between the keystroke and the work; `b`, `n`, `m` and `r` put a
-box there to be typed in; and the rest of the menu is its own asking.
+`D` all put a box between the keystroke and the work; `c`, `b`, `n`, `m` and `r`
+put a box there to be typed in; and the rest of the menu is its own asking.
 
 `goto folder` is the same borrowing with a shell as the tool. No program can move
 the shell that started it, so the folder is reached by a shell of its own
@@ -269,8 +277,8 @@ one:
 Committing and pushing
 ----------------------
 
-`commit & push` is the one command that treats every picked repository as a
-project of its own: there is no main project to make of the others, because a
+`c` is the commit, and it is the one command that treats every picked repository
+as a project of its own: there is no main project to make of the others, because a
 commit belongs to one repository and nothing else. It asks for a message first,
 in a box listing what it is about to commit:
 
@@ -280,7 +288,7 @@ in a box listing what it is about to commit:
     |                                                                |
     | lhypds/gift       +1203 lines -30 lines                        |
     | gcc3/content-hub  +3 lines                                     |
-    +- 3 repos · enter commit & push · esc back ---------------------+
+    +- 3 repos · enter commit · esc back ----------------------------+
 ```
 
 Type the message and press enter; esc goes back to the menu, and an empty message
@@ -290,36 +298,63 @@ is a character here — `q` types a q rather than quitting.
 
 Each repository then has everything in its working tree staged, tracked changes
 and untracked files alike — the same changes the row counts, and nothing
-belonging to a repository nested inside it — committed with your message, and
-pushed. A few are worked on at once, and one that fails takes none of the others
-down with it. The box stays up and fills in as they finish:
+belonging to a repository nested inside it — and committed with your message. A
+few are worked on at once, and one that fails takes none of the others down with
+it. The box stays up and fills in as they finish:
 
 ```
-    +- commit & push · "fix: 修复表格宽度" ---------------------------+
-    | lhypds/gift       committed 8ac1f2e · pushed                   |
-    | gcc3/content-hub  pushing…                                     |
+    +- commit · "fix: 修复表格宽度" ----------------------------------+
+    | lhypds/gift       committed 8ac1f2e                            |
+    | gcc3/content-hub  committing…                                  |
     | lhypds/conf       waiting…                                     |
     +- 1 of 3 done · working… ---------------------------------------+
 ```
 
-Green is a repository that committed and pushed, grey one that had nothing to do,
-orange one that could not. Nothing else in repo-master answers while it runs.
+Green is a repository that committed, grey one that had nothing to commit, orange
+one that could not. Nothing else in repo-master answers while it runs.
 
-When it is over, a box with nothing in it but work that went as asked has been
-read by the time it is drawn — the row says `pushed`, and that is the whole of it
-— so it takes itself away after three seconds and leaves what it came to under
-the table, where it is a line like any other and fades like one. A failure is the
-one thing in a box worth going back over, so a box with one in it stays until
-`esc`; so does one being scrolled, because that is somebody reading rather than
-somebody waiting. Either way the table refreshes itself afterwards.
+Nothing to commit is not a failure: a repository somebody pointed at along with
+five others, and has not touched since its last commit, says so and is left alone.
+A repository with a detached HEAD is not touched at all — it says so and stays as
+it was.
 
-Nothing to commit is not a failure — a repository whose commits never left the
-machine is pushed anyway. One with neither is left alone rather than made to
-reach across a network to be told it is up to date. A branch that has never been
-pushed is given `origin` as its upstream when there is a commit to carry there,
-which is the `git push --set-upstream origin <branch>` git itself suggests. A
-repository with a detached HEAD is not touched at all: it says so and stays as it
-was.
+And then the push, which is the second half and a second decision:
+
+```
+    +- commit · "fix: 修复表格宽度" ----------------------------------+
+    | lhypds/gift       committed 8ac1f2e                            |
+    | gcc3/content-hub  committed 41c9e02                            |
+    | lhypds/conf       nothing to commit                            |
+    +- 2 committed · P push them · up/down scroll · esc close -------+
+```
+
+`P` in that box pushes exactly the repositories that committed — the ones named in
+front of you, and not the one that had nothing to do — and the report of the push
+opens in its place. There is no box asking whether it was meant: the one you are
+looking at is the list such a box would have drawn, and the message in its title is
+the answer you already gave. `esc` leaves the commits where they are, which is a
+whole answer too — the rows go orange in the table and say how many commits are
+waiting, and a `P` on the table pushes them whenever you come back to it.
+
+A box with a push still to decide on waits to be read. Every other report has been
+read by the time it is drawn — the row says `fetched`, and that is the whole of it
+— so it takes itself away after three seconds and leaves what it came to under the
+table, where it is a line like any other and fades like one. A failure is the other
+thing worth going back over, so a box with one in it stays until `esc`; so does one
+being scrolled, because that is somebody reading rather than somebody waiting.
+Either way the table refreshes itself afterwards.
+
+`commit & push` is the same command with the second question already answered, for
+whoever would rather not be asked twice: one message, and every picked repository
+committed and pushed with it. Its rows read `committed 8ac1f2e · pushed`. Nothing
+to commit is not a failure there either — a repository whose commits never left the
+machine is pushed anyway — and one with neither is left alone rather than made to
+reach across a network to be told it is up to date. It has no key of its own,
+because `c` and then `P` is the same errand a key at a time.
+
+A branch that has never been pushed is given `origin` as its upstream when there is
+a commit to carry there, which is the `git push --set-upstream origin <branch>` git
+itself suggests.
 
 
 Fetching, pulling and pushing
@@ -362,11 +397,12 @@ that has diverged with no rule set for reconciling it, is git's to refuse, and
 its refusal is passed on word for word and the repository left exactly as it was.
 A repository with no remote is told so without a network being waited on.
 
-`P` is the other half of `commit & push`, for the commits that were made somewhere
-else — in an editor, in an agent, at a shell — and never left the machine. It
-commits nothing itself and touches no working tree; it says how many commits it
-carried, and a branch level with its upstream is left alone rather than made to
-reach across a network to be told so:
+`P` is the other half of the commit — the one the commit's own box offers, and the
+one on the table for the commits that were made somewhere else, in an editor, in an
+agent, at a shell, and never left the machine. It is the key the orange bar of a
+clean repository is about. It commits nothing itself and touches no working tree;
+it says how many commits it carried, and a branch level with its upstream is left
+alone rather than made to reach across a network to be told so:
 
 ```
     +- push · 3 repositories ------------------------------------------+
@@ -544,20 +580,32 @@ tree besides, so `R` only ever asks for the sweep sooner.
 The diff
 --------
 
-`d` opens a box over the table holding the row's changes: the patch against HEAD,
-and then the untracked files, which no patch mentions because git has never seen
-them. Nested repositories are left out of both, the way they are left out of the
-row — they have a row of their own, and a `d` of their own.
+`d` opens a box over the table holding everything the row has that is only there:
+the commits that never left the machine, then the patch against HEAD, and then the
+untracked files, which no patch mentions because git has never seen them. Nested
+repositories are left out of the last two, the way they are left out of the row —
+they have a row of their own, and a `d` of their own.
 
 ```
-    +- lhypds/gift · main · +1203 lines -30 lines ----------------------------+
+    +- lhypds/gift · main · 2 unpushed · +1203 lines -30 lines ---------------+
+    | unpushed (2):                                                           |
+    | 8ac1f2e  2 days ago    Sticky pnpm version                              |
+    | 1347394  3 weeks ago   Update release.sh                                |
+    |                                                                         |
     | diff --git a/cli.js b/cli.js                                            |
     | @@ -1,4 +1,5 @@                                                         |
     |  'use strict';                                                          |
     | -const { run } = require('./functions.js');                             |
     | +const { run, list } = require('./functions.js');                       |
-    +- 1-5 of 87 · up/down scroll · space page · r reload · esc close --------+
+    +- 1-9 of 91 · up/down scroll · space page · r reload · esc close --------+
 ```
+
+The commits come first because that is the order the work happened in, and because
+the patch under them is the half that is not committed anywhere at all. They are
+what `P` would carry — `@{upstream}..HEAD`, or everything no remote has heard of
+where the branch follows nothing — newest first, with how long each has been
+waiting. Fifty is as many as are named; the heading counts the rest. A repository
+with everything pushed has no such heading, and is not asked about it.
 
 | Key              | Does                           |
 |------------------|--------------------------------|
@@ -567,11 +615,11 @@ row — they have a row of their own, and a `d` of their own.
 | r                | Read the changes again         |
 | esc, q, d        | Close the box                  |
 
-The title carries the repository, its branch and the size of the diff, and keeps
-up with the table underneath. The patch does not: it is the one read when the box
-opened, because a page of text moving under somebody reading it is no kindness. A
-file saved while you read it moves the title and leaves the text alone — `r` then
-fetches the rest.
+The title carries the repository, its branch, how much is waiting to be pushed and
+the size of the diff, and keeps up with the table underneath. What is in the box
+does not: it is what was read when the box opened, because a page of text moving
+under somebody reading it is no kindness. A file saved while you read it moves the
+title and leaves the text alone — `r` then fetches the rest.
 
 A patch longer than 5000 lines is cut, with a note saying how much was left off.
 Binary files are named rather than printed, as git names them.
@@ -762,12 +810,25 @@ What the columns mean
 | repo         | `owner/repo` from the origin remote, or the folder name when there is none. `+-` marks a repository living inside the one above it |
 | path         | Where it is, relative to the watched folder                                                                                        |
 | branch       | The checked-out branch, or `(abc1234)` when HEAD is detached                                                                       |
-| status       | Whether the working tree has anything uncommitted                                                                                  |
+| status       | `has changes` for a working tree with something in it, `2 unpushed` for a clean one whose commits never left the machine            |
 | last updated | When the newest of those changes was written — not when it was noticed                                                             |
 | diff         | Lines added and removed against HEAD as `+1203 -30`, untracked files counted as added                                              |
 
 A repository nested inside another has its own row, and its changes are left off
 its parent's row rather than counted twice.
+
+A working tree is not the only place work sits, and the orange bar is not only
+about it. A repository whose commits are on this machine and nowhere else wears
+one too — standing ahead of its upstream, or on a branch that has never been
+pushed at all — because a repository committed and left, by you or by an agent,
+is exactly the row worth being shown, and nothing about its working tree says so.
+The status column says how many commits that is where git can count them, and
+`unpushed` on its own where there is no upstream to count against. Two rows are
+not orange for it: one whose branch has no remote to push to, since there is
+nowhere for that work to go and a row that was orange for ever would say nothing,
+and one that is only behind — what is waiting there is somebody else's, and `p`
+is the key for it. `P` pushes what the orange is about; a row with both halves in
+it wants a `c` first, and the report that commit leaves takes the `P`.
 
 The columns are as wide as the window makes them and no wider — what is in them
 has no say in it. A branch you switch, a status that turns, a diff that grows a
