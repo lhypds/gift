@@ -11,8 +11,8 @@ finds every repository under it — nested checkouts and submodules included —
 and keeps one table up to date: which branch each one is on, whether the working
 tree has changes, how many lines that is, and how much is committed here and
 nowhere else.
-Rows holding work that is only on this machine — something uncommitted, or commits
-that were never pushed — wear an orange bar. Press enter for the menu of what may
+A row with something uncommitted in it wears an orange bar; one that has committed
+and not pushed is written in grey. Press enter for the menu of what may
 be done to them — open one in an editor or an agent, read its diff, commit the
 lot, fetch, pull, push, switch or make a branch, merge, rebase, branch a worktree
 off it, stash what is uncommitted, put a stash back, discard the changes,
@@ -45,7 +45,7 @@ them along the bottom filled the line up and then cut it short, saying less than
 the menu says in full.
 
 Under them, an orange line when there is something to say: what a command did, or
-what it would not do. It is there for three seconds and then it is not — what is
+what it would not do. It is there for a second and then it is not — what is
 said there is what has just happened, and a line about a push that finished a
 minute ago has stopped being that, leaving something to read past on the way to
 the table it sits under. A row that says `error` explains itself on the same line
@@ -63,7 +63,7 @@ Files
 | `lib/ignore.js`      | The folders left out of the table, and the `.gitignore` they are written in                                         |
 | `lib/git.js`         | Branch, working-tree changes, diff size, the last change, and the git behind every command that runs one            |
 | `lib/watch.js`       | Hearing about edits, with a timer as the fallback                                                                   |
-| `lib/table.js`       | The table itself, which rows are orange, and what goes in each box                                                  |
+| `lib/table.js`       | The table itself, how each row is coloured, and what goes in each box                                               |
 | `lib/modal.js`       | The box they are all drawn in, over the table                                                                       |
 | `lib/screen.js`      | The alternate screen and the keys                                                                                   |
 | `lib/actions.js`     | The one list of commands, and what each one does to the repositories picked                                         |
@@ -333,12 +333,12 @@ front of you, and not the one that had nothing to do — and the report of the p
 opens in its place. There is no box asking whether it was meant: the one you are
 looking at is the list such a box would have drawn, and the message in its title is
 the answer you already gave. `esc` leaves the commits where they are, which is a
-whole answer too — the rows go orange in the table and say how many commits are
+whole answer too — the rows turn grey in the table and say how many commits are
 waiting, and a `P` on the table pushes them whenever you come back to it.
 
 A box with a push still to decide on waits to be read. Every other report has been
 read by the time it is drawn — the row says `fetched`, and that is the whole of it
-— so it takes itself away after three seconds and leaves what it came to under the
+— so it takes itself away after a second and leaves what it came to under the
 table, where it is a line like any other and fades like one. A failure is the other
 thing worth going back over, so a box with one in it stays until `esc`; so does one
 being scrolled, because that is somebody reading rather than somebody waiting.
@@ -399,8 +399,8 @@ A repository with no remote is told so without a network being waited on.
 
 `P` is the other half of the commit — the one the commit's own box offers, and the
 one on the table for the commits that were made somewhere else, in an editor, in an
-agent, at a shell, and never left the machine. It is the key the orange bar of a
-clean repository is about. It commits nothing itself and touches no working tree;
+agent, at a shell, and never left the machine. It is the key a grey row is about.
+It commits nothing itself and touches no working tree;
 it says how many commits it carried, and a branch level with its upstream is left
 alone rather than made to reach across a network to be told so:
 
@@ -817,18 +817,23 @@ What the columns mean
 A repository nested inside another has its own row, and its changes are left off
 its parent's row rather than counted twice.
 
-A working tree is not the only place work sits, and the orange bar is not only
-about it. A repository whose commits are on this machine and nowhere else wears
-one too — standing ahead of its upstream, or on a branch that has never been
-pushed at all — because a repository committed and left, by you or by an agent,
-is exactly the row worth being shown, and nothing about its working tree says so.
-The status column says how many commits that is where git can count them, and
-`unpushed` on its own where there is no upstream to count against. Two rows are
-not orange for it: one whose branch has no remote to push to, since there is
-nowhere for that work to go and a row that was orange for ever would say nothing,
-and one that is only behind — what is waiting there is somebody else's, and `p`
-is the key for it. `P` pushes what the orange is about; a row with both halves in
-it wants a `c` first, and the report that commit leaves takes the `P`.
+A working tree is not the only place work sits. A repository whose commits are on
+this machine and nowhere else — standing ahead of its upstream, or on a branch that
+has never been pushed at all — is written in grey, because a repository committed
+and left, by you or by an agent, is worth seeing and nothing about its working tree
+says so. The status column says how many commits that is where git can count them,
+and `unpushed` on its own where there is no upstream to count against.
+
+Grey and not the orange bar: what is committed is safe where it is, and it is
+still here rather than in trouble. The bar stays for the working tree, which is the
+one kind of work no repository anywhere has a copy of. A row with both in it wears
+the bar — the uncommitted half is the more urgent fact, and `c` is the key for it,
+with the report that commit leaves taking the `P` afterwards.
+
+Two rows are grey for neither: one whose branch has no remote to push to, since
+there is nowhere for that work to go and a row marked for ever says nothing, and
+one that is only behind — what is waiting there is somebody else's, and `p` is the
+key for it.
 
 The columns are as wide as the window makes them and no wider — what is in them
 has no say in it. A branch you switch, a status that turns, a diff that grows a

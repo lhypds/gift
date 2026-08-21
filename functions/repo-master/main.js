@@ -3,8 +3,8 @@
 //
 // It finds the repositories (nested checkouts and submodules included), watches
 // their working trees, and paints the lot as a table that keeps itself up to
-// date. Rows holding work that is only here — something uncommitted, or commits
-// that never left the machine — wear an orange bar. Pick rows with the arrow
+// date. A row with something uncommitted in it wears an orange bar, and one that
+// has committed and not pushed is written in grey. Pick rows with the arrow
 // keys or find them with /, add more with space, and press enter for the menu of
 // what may be done to them: open them in an editor or an agent, read what
 // changed, commit them, fetch, pull, push, switch or make a branch, merge,
@@ -40,7 +40,7 @@ const GIT_CONCURRENCY = 4;
 /** Redraws are coalesced this long, so a burst of edits paints once. */
 const RENDER_MS = 60;
 /** How long a line under the table is worth reading before it is in the way. */
-const MESSAGE_MS = 3000;
+const MESSAGE_MS = 1000;
 /** The clock the "last updated" column is read against moves on its own. */
 const TICK_MS = 5000;
 
@@ -101,7 +101,7 @@ c commits and pushes nothing: it asks for a message in a box, commits every pick
 repository with it — each one a project of its own, none the main project of the
 others — and the report it leaves takes a P to send them on, on exactly the
 repositories that committed. A commit and a push are two decisions, and the box
-waits to be answered rather than taking itself away after three seconds.
+waits to be answered rather than taking itself away the way the others do.
 
 P pushes what is already committed and commits nothing, for the commits that were
 made in an editor or an agent and never left the machine, and for the ones c has
@@ -325,7 +325,7 @@ async function main(argv) {
     };
 
     /**
-     * Say something on the line under the table, and take it back three seconds
+     * Say something on the line under the table, and take it back a second
      * later. What is said there is what has just happened — what a command did,
      * what it would not do — and something that just happened stops being news:
      * a line about a push that finished a minute ago is only in the way of the
@@ -659,8 +659,8 @@ async function main(argv) {
     // What the box does when the work is over depends on what came of it. One
     // with nothing but good news in it has been read by the time it is drawn —
     // the row says `fetched`, and that is the whole of it — so it takes itself
-    // away after the three seconds any other line about something that just
-    // happened gets, and leaves the summary under the table in its place. A
+    // away after the second any other line about something that just happened
+    // gets, and leaves the summary under the table in its place. A
     // failure is the one thing in a box worth going back over, so a box with one
     // in it waits to be closed instead. So does one somebody is scrolling: that
     // is reading rather than waiting, and reading is not to be interrupted.
@@ -713,8 +713,8 @@ async function main(argv) {
         }
 
         // A box with something still to do waits to be read, the way one with a
-        // failure in it does: three seconds is long enough to see a row say
-        // `committed`, and not long enough to decide what to do about it.
+        // failure in it does: a second is long enough to see a row say
+        // `committed`, and nowhere near long enough to decide what to do about it.
         if (counted('failed') === 0 && !state.report.push) reportTimer = setTimeout(closeReport, MESSAGE_MS);
         draw();
 

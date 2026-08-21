@@ -105,9 +105,9 @@ settings live under `functions.<name>` in `config.json`.
 repo-master — `gift repo-master [DIR]`  
 Watches every git repository under one folder in a live table: the branch each
 one is on, whether the working tree has changes, and how many lines that is.
-Nested checkouts and submodules are found too. Rows holding work that is only on
-this machine — something uncommitted, or commits that were never pushed — wear an
-orange bar; enter opens the menu of what may be done to the ones picked — open
+Nested checkouts and submodules are found too. A row with something uncommitted in
+it wears an orange bar, and one that has committed and not pushed is written in
+grey; enter opens the menu of what may be done to the ones picked — open
 in an editor or an agent, read the diff, commit the lot and push it, fetch, pull,
 push, switch or make a branch, merge, rebase, branch a worktree, stash, restore
 a stash or discard, delete a folder outright — and `/` finds a repository in a folder too
