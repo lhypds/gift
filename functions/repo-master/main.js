@@ -44,7 +44,7 @@ const MESSAGE_MS = 1000;
 /** The clock the "last updated" column is read against moves on its own. */
 const TICK_MS = 5000;
 /** How long with nothing pressed before the cursor stops wearing its bar. */
-const IDLE_MS = 60000;
+const IDLE_MS = 10000;
 
 function usage() {
     console.log(`Usage: gift repo-master [DIR] [options]
@@ -148,13 +148,13 @@ neither is anything inside it, so an archive of finished work costs nothing to
 walk past. The header says how many were left out. --ignore-file names the file
 where .gitignore is the wrong one to write in.
 
-The cursor bar comes off after a minute with nothing pressed, and any key or a
+The cursor bar comes off after ten seconds with nothing pressed, and any key or a
 turn of the wheel puts it back. A table left up while the work happens elsewhere
 is being read rather than used, and the pale bar over one row is then only hiding
 what that row would otherwise be saying in orange or grey. Nothing moves while it
 is off: the > in the gutter still says which row the cursor is on, what was
 picked with space stays picked and stays marked, and the next key acts on exactly
-the row it would have a minute ago.
+the row it would have before.
 
 / narrows the table to the repositories whose name, path or branch holds what is
 typed. The list narrows as it is typed; enter keeps it and gives the keys back,
