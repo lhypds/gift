@@ -773,7 +773,7 @@ function frame(state, palette, size) {
         // row is padded out to the width of the table to draw as a full bar.
         // Without colour there is no bar to fill, and no reason to trail spaces.
         const bar = palette.enabled ? pad(text, tableWidth) : text;
-        // A table nobody has touched for a minute is being read rather than
+        // A table nobody has touched for ten seconds is being read rather than
         // used, and the cursor bar is then the one thing on it that is not
         // about a repository: it covers whatever colour the row would be
         // wearing to say what is in it. So it comes off until somebody is back,
