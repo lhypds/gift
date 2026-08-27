@@ -3,7 +3,7 @@
 // Rows are highlighted by their background, never by recolouring their text: a
 // row wanting attention — one whose working tree changed — gets a Claude-orange
 // bar, and the rows the user is pointing at or has picked get the pale grey of an
-// ordinary selection. The pointing one comes off after a quiet minute — see
+// ordinary selection. The pointing one comes off after a quiet stretch — see
 // `state.idle`, and the loop at the foot of frame() that reads it.
 //
 // A repository that has committed and not pushed gets a bar of its own, in a dark

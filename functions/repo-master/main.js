@@ -1437,16 +1437,16 @@ async function main(argv) {
 
     /**
      * Somebody is here — put the cursor bar back if it had come off, and start
-     * the wait for the next quiet minute over again.
+     * the wait for the next quiet stretch over again.
      *
      * The bar says where you are, which is worth saying to somebody who is
      * looking. A table left up while the work happens elsewhere is being read
      * rather than used, and there the pale bar over one row is only covering
-     * what that row is otherwise saying — its orange, or its unpushed grey. So a
-     * minute with nothing pressed takes it off and gives the row its own colour
-     * back. Nothing else moves: the `>` in the gutter still says which row the
-     * cursor is on, the selection is untouched, and the next key acts on exactly
-     * the row it would have acted on a minute ago.
+     * what that row is otherwise saying — its orange, or its unpushed grey. So
+     * ten seconds with nothing pressed takes it off and gives the row its own
+     * colour back. Nothing else moves: the `>` in the gutter still says which
+     * row the cursor is on, the selection is untouched, and the next key acts on
+     * exactly the row it would have acted on before.
      *
      * The wheel and a click come through here too, being keys as far as the
      * table is concerned, so any hand on the machine at all counts.
@@ -1652,7 +1652,7 @@ async function main(argv) {
     screen = createScreen({ onKey, onResize: draw });
     screen.start();
     draw();
-    stir(); // the table goes up with the bar on, and the quiet minute starts now
+    stir(); // the table goes up with the bar on, and the quiet stretch starts now
 
     let watchers = watchAll(rows, refresh, Math.min(options.refresh, 5));
     const noteWatchers = () => {
