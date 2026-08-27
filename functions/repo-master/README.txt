@@ -835,6 +835,15 @@ Two rows wear neither: one whose branch has no remote to push to, since there is
 nowhere for that work to go and a row marked for ever says nothing, and one that is
 only behind — what is waiting there is somebody else's, and `p` is the key for it.
 
+The cursor's own bar comes off after a minute with nothing pressed, and any key —
+or a turn of the wheel — puts it back. A table left up on a second screen while
+the work happens elsewhere is being read rather than used, and the pale bar over
+one row is then the one thing on the table that is not about a repository: it
+covers the orange or the grey that row would otherwise be showing you. Nothing
+moves while it is off. The `>` in the gutter still says which row the cursor is
+on, whatever was picked with space stays picked and goes on wearing its own grey,
+and the next key acts on exactly the row it would have acted on a minute before.
+
 The columns are as wide as the window makes them and no wider — what is in them
 has no say in it. A branch you switch, a status that turns, a diff that grows a
 digit: none of them moves a column, so the table you are reading stays where it

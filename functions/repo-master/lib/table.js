@@ -3,7 +3,8 @@
 // Rows are highlighted by their background, never by recolouring their text: a
 // row wanting attention — one whose working tree changed — gets a Claude-orange
 // bar, and the rows the user is pointing at or has picked get the pale grey of an
-// ordinary selection.
+// ordinary selection. The pointing one comes off after a quiet minute — see
+// `state.idle`, and the loop at the foot of frame() that reads it.
 //
 // A repository that has committed and not pushed gets a bar of its own, in a dark
 // grey — far enough below both of those greys to be a mark of its own rather than
@@ -772,7 +773,14 @@ function frame(state, palette, size) {
         // row is padded out to the width of the table to draw as a full bar.
         // Without colour there is no bar to fill, and no reason to trail spaces.
         const bar = palette.enabled ? pad(text, tableWidth) : text;
-        if (cursor) body.push(palette.cursorBar(bar));
+        // A table nobody has touched for a minute is being read rather than
+        // used, and the cursor bar is then the one thing on it that is not
+        // about a repository: it covers whatever colour the row would be
+        // wearing to say what is in it. So it comes off until somebody is back,
+        // and the row underneath says its own piece. The `>` in the gutter is
+        // still there — the cursor has not moved, only stopped being drawn over
+        // the row it is on.
+        if (cursor && !state.idle) body.push(palette.cursorBar(bar));
         else if (selected) body.push(palette.selectedBar(bar));
         else if (needsAttention(repo)) body.push(palette.attentionBar(bar));
         else if (repo.unpushed) body.push(palette.unpushedBar(bar));

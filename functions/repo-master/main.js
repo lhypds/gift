@@ -43,6 +43,8 @@ const RENDER_MS = 60;
 const MESSAGE_MS = 1000;
 /** The clock the "last updated" column is read against moves on its own. */
 const TICK_MS = 5000;
+/** How long with nothing pressed before the cursor stops wearing its bar. */
+const IDLE_MS = 60000;
 
 function usage() {
     console.log(`Usage: gift repo-master [DIR] [options]
@@ -145,6 +147,14 @@ where a name is a shape. A folder it rules out is neither scanned nor listed, an
 neither is anything inside it, so an archive of finished work costs nothing to
 walk past. The header says how many were left out. --ignore-file names the file
 where .gitignore is the wrong one to write in.
+
+The cursor bar comes off after a minute with nothing pressed, and any key or a
+turn of the wheel puts it back. A table left up while the work happens elsewhere
+is being read rather than used, and the pale bar over one row is then only hiding
+what that row would otherwise be saying in orange or grey. Nothing moves while it
+is off: the > in the gutter still says which row the cursor is on, what was
+picked with space stays picked and stays marked, and the next key acts on exactly
+the row it would have a minute ago.
 
 / narrows the table to the repositories whose name, path or branch holds what is
 typed. The list narrows as it is typed; enter keeps it and gives the keys back,
@@ -304,6 +314,10 @@ async function main(argv) {
         notes: { ignored: ignoredNote(scanned.ignored), watch: '' },
         message: '',
         busy: false,
+        // Whether nothing has been pressed for long enough that the cursor bar
+        // is off. Where the cursor is has nothing to do with it: only how it is
+        // drawn changes, and the next key finds it exactly where it was left.
+        idle: false,
     };
 
     const gate = limiter(GIT_CONCURRENCY);
@@ -1421,7 +1435,41 @@ async function main(argv) {
         }
     };
 
+    /**
+     * Somebody is here — put the cursor bar back if it had come off, and start
+     * the wait for the next quiet minute over again.
+     *
+     * The bar says where you are, which is worth saying to somebody who is
+     * looking. A table left up while the work happens elsewhere is being read
+     * rather than used, and there the pale bar over one row is only covering
+     * what that row is otherwise saying — its orange, or its unpushed grey. So a
+     * minute with nothing pressed takes it off and gives the row its own colour
+     * back. Nothing else moves: the `>` in the gutter still says which row the
+     * cursor is on, the selection is untouched, and the next key acts on exactly
+     * the row it would have acted on a minute ago.
+     *
+     * The wheel and a click come through here too, being keys as far as the
+     * table is concerned, so any hand on the machine at all counts.
+     */
+    let idleTimer = null;
+    const stir = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+            idleTimer = null;
+            state.idle = true;
+            draw();
+        }, IDLE_MS);
+
+        if (!state.idle) return;
+        state.idle = false;
+        draw();
+    };
+
     const onKey = (key) => {
+        // Before the busy check: a key pressed while a command runs is nobody
+        // walking away, however little else is done about it.
+        stir();
+
         if (key === 'ctrl-c' || key === 'ctrl-d') {
             finish(130);
             return;
@@ -1604,6 +1652,7 @@ async function main(argv) {
     screen = createScreen({ onKey, onResize: draw });
     screen.start();
     draw();
+    stir(); // the table goes up with the bar on, and the quiet minute starts now
 
     let watchers = watchAll(rows, refresh, Math.min(options.refresh, 5));
     const noteWatchers = () => {
@@ -1643,6 +1692,7 @@ async function main(argv) {
     if (renderTimer) clearTimeout(renderTimer);
     if (messageTimer) clearTimeout(messageTimer);
     if (reportTimer) clearTimeout(reportTimer);
+    if (idleTimer) clearTimeout(idleTimer);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);
     watchers.close();
