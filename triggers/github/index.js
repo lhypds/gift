@@ -2,14 +2,14 @@
 //
 // A webhook delivery arrives, its signature is checked against the shared
 // secret, and the hooks whose repository, event and branch all match run their
-// script. serve.js next door is the endpoint itself; this is the trigger
+// script. server_webhooks.js next door is the endpoint itself; this is the trigger
 // contract around it — what `gift create` asks, what `gift list` shows, and
 // what the server mounts at startup.
 'use strict';
 
 const { forTrigger } = require('../../utils/log.js');
 const gh = require('./gh.js');
-const receiver = require('./serve.js');
+const receiver = require('./server_webhooks.js');
 
 const log = forTrigger('github');
 
