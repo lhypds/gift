@@ -16,15 +16,17 @@ function runStatus(run) {
 
 export default function Detail({ event, onClose }) {
   const runs = event?.runs ?? [];
+  const singleRun = runs.length === 1;
+  const title = singleRun ? runs[0].hook : runs.length > 1 ? `${runs.length} hook runs` : undefined;
 
   return (
-    <Modal isOpen={Boolean(event)} onClose={onClose} closeOnOverlay>
+    <Modal isOpen={Boolean(event)} onClose={onClose} title={title} closeOnOverlay>
       {runs.length === 0 && <p className={styles.empty}>No hook ran for this event.</p>}
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>
           <div className={styles.runHeader}>
-            <span className={styles.hookName}>{run.hook}</span>
-            <span className={styles.runState}>{runStatus(run)}</span>
+            {!singleRun && <div className={styles.hookName}>{run.hook}</div>}
+            <div className={styles.runState}>{runStatus(run)}</div>
           </div>
           {!run.error && (
             <TextArea
