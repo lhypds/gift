@@ -8,6 +8,18 @@ export default function Modal({ isOpen, onClose, title, children, closeOnOverlay
   // naive target check on click alone would misread that as a dismiss click.
   // Requiring the press to have *also* started on the overlay rules that out.
   const pressedOnOverlay = useRef(false);
+  // ESC dismisses, wherever focus happens to be — listening on the document
+  // rather than the modal covers the read-only textareas most of these panels
+  // are made of. Here rather than per-modal, so every modal behaves the same.
+  useEffect(() => {
+    if (!isOpen || !onClose) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   // Prevent touchmove on the background; allow it on scrollable content
   // (textarea/input/select, or anything that actually scrolls).
   useEffect(() => {

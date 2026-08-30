@@ -16,8 +16,10 @@ function runStatus(run) {
 
 export default function Detail({ event, onClose }) {
   const runs = event?.runs ?? [];
-  const singleRun = runs.length === 1;
-  const title = singleRun ? runs[0].hook : runs.length > 1 ? `${runs.length} hook runs` : undefined;
+  // One delivery can fan out to several hooks, so no single hook owns the
+  // title: it counts the runs, and every run carries its own name above its
+  // message or output — the same shape whether one hook ran or five did.
+  const title = runs.length > 0 ? `${runs.length} hook run${runs.length === 1 ? "" : "s"}` : undefined;
 
   return (
     <Modal isOpen={Boolean(event)} onClose={onClose} title={title} closeOnOverlay>
@@ -25,7 +27,7 @@ export default function Detail({ event, onClose }) {
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>
           <div className={styles.runHeader}>
-            {!singleRun && <div className={styles.hookName}>{run.hook}</div>}
+            <div className={styles.hookName}>{run.hook}</div>
             <div className={styles.runState}>{runStatus(run)}</div>
           </div>
           {!run.error && (
