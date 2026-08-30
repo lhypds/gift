@@ -1,8 +1,8 @@
 .vscode
 .DS_Store
-# Local settings and state. config.json holds the webhook secret. gift no longer
-# reads .env at all; the line stays so that one left over from an older
-# installation cannot be committed by accident.
+# Local settings and state. config.json holds the webhook secret and hooks.json
+# may hold website credentials. gift no longer reads .env at all; the line stays
+# so one left over from an older installation cannot be committed by accident.
 config.json
 config.json.tmp
 .env

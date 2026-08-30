@@ -13,6 +13,8 @@
 const crypto = require('node:crypto');
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_REDIRECTS = 10;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
  * @returns {Promise<{ok: true, status: number, body: string, truncated: boolean,
@@ -29,12 +31,40 @@ async function fetchPage(url, { method = 'GET', timeout = 10000, userAgent, head
     const deadline = setTimeout(() => controller.abort(), timeout);
 
     try {
-        const response = await fetch(url, {
-            method,
-            redirect: 'follow',
-            signal: controller.signal,
-            headers: { 'user-agent': userAgent || 'gift', accept: '*/*', ...headers },
-        });
+        let current = new URL(url);
+        let requestMethod = String(method).toUpperCase();
+        let requestHeaders = { 'user-agent': userAgent || 'gift', accept: '*/*', ...headers };
+        const credentialNames = new Set(Object.keys(headers).map((name) => name.toLowerCase()));
+        let response;
+
+        for (let redirects = 0; ; redirects += 1) {
+            response = await fetch(current, {
+                method: requestMethod,
+                redirect: 'manual',
+                signal: controller.signal,
+                headers: requestHeaders,
+            });
+
+            const location = REDIRECT_STATUSES.has(response.status) && response.headers.get('location');
+            if (!location) break;
+            if (redirects >= MAX_REDIRECTS) throw new Error(`more than ${MAX_REDIRECTS} redirects`);
+
+            const next = new URL(location, current);
+            if (next.origin !== current.origin) {
+                // A custom auth header is not one of the Fetch standard's
+                // automatically protected names. Strip every caller-supplied
+                // credential before following a redirect to another origin.
+                requestHeaders = Object.fromEntries(
+                    Object.entries(requestHeaders)
+                        .filter(([name]) => !credentialNames.has(name.toLowerCase())),
+                );
+            }
+            if (response.status === 303 || ([301, 302].includes(response.status) && requestMethod === 'POST')) {
+                requestMethod = 'GET';
+            }
+            await response.body?.cancel();
+            current = next;
+        }
 
         const body = await readCapped(response, controller);
         return {
@@ -105,4 +135,4 @@ async function readCapped(response, controller) {
     return { text: text + (truncated ? '' : decoder.decode()), truncated };
 }
 
-module.exports = { fetchPage, MAX_BODY_BYTES };
+module.exports = { fetchPage, MAX_BODY_BYTES, MAX_REDIRECTS };

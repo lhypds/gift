@@ -217,7 +217,6 @@ function section(values, name) {
 function asEnvValue(value) {
     if (value === true) return '1';
     if (value === false) return '';
-    if (value && typeof value === 'object') return JSON.stringify(value);
     return String(value);
 }
 

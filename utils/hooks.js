@@ -136,16 +136,12 @@ function stringify(value, indent = '') {
 
 /** Write the config through a temporary file, so a failure cannot truncate it. */
 function writeConfig(file, config) {
-    let mode = 0o644;
-    try {
-        mode = fs.statSync(file).mode & 0o777;
-    } catch {
-        /* new file — keep the default */
-    }
-
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.tmp`;
-    fs.writeFileSync(temp, `${stringify(config)}\n`, { mode });
+    // Website credentials may live here, so hooks.json is private even before
+    // the credential template has been filled in.
+    fs.writeFileSync(temp, `${stringify(config)}\n`, { mode: 0o600 });
+    fs.chmodSync(temp, 0o600);
     fs.renameSync(temp, file);
 }
 
@@ -501,7 +497,7 @@ async function createHook(file) {
     console.log(`  ${name}`);
     printRows(describe(hook), '    ');
     console.log('');
-    for (const note of (trigger.afterNotes ? trigger.afterNotes(hook) : [])) console.log(note);
+    for (const note of (trigger.afterNotes ? trigger.afterNotes(hook, { file, show }) : [])) console.log(note);
     console.log(`Edit ${show(file)} for anything else — see \`gift help ${trigger.name}-trigger\` for the fields.`);
     console.log('');
 

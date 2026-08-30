@@ -119,11 +119,11 @@ groups arrive as `GIFT_MATCH_1`, `GIFT_MATCH_2`. Needs `pbpaste`, `wl-paste`,
 Asks for the URL, whether to fire on `change` (the page came back different),
 `match` (it says something in particular) or `always`, and how often to poll. A
 poll that fails is logged and fires nothing: a hook cannot tell "the site is
-down" from "this machine's network is down". It also asks whether to extract an
-access token from auth-state JSON and send it in a request header, and whether
-to keep the latest response body under `logs/hooks/<hook name>/`. Browser
-`localStorage` cannot be read directly by the Node service; its JSON value must
-be copied or synced through the configured secret environment variable.
+down" from "this machine's network is down". It also asks whether the request
+uses credentials. Answering yes to "Use credentials?" adds a `hooks.json`
+template for localStorage, sessionStorage, cookies and headers; fill it manually
+and restart gift. Every website hook keeps its latest response body under
+`logs/hooks/<hook name>/` by default; set `saveLastResponse` to false to opt out.
 
 **file** — run a script when a file or folder changes.  
 Asks for the path, a pattern (`*.yml`, `**/*.js`), whether to watch subfolders,
@@ -182,6 +182,10 @@ neither is guessed, because a relative path would depend on where the server
 happened to be started from. `cwd` defaults to the script's own folder. `enabled`
 is on unless it says `false`. Everything inside `trigger` belongs to the trigger
 type; see `gift help <type>`.
+
+`hooks.json` is git-ignored and written with `0600` permissions because website
+hooks may contain plaintext cookies, storage values and request headers. The
+dashboard redacts each `credentials` object; edit the file itself to change one.
 
 A hook written before triggers existed — with `repo`, `events` and `branches` at
 the top level and no `trigger` — is read as a GitHub trigger, so an older

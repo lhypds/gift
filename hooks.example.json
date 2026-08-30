@@ -41,7 +41,23 @@
         "matchType": "any",
         "interval": 60000,
         "timeout": 10000,
-        "saveLastResponse": false
+        "credentials": {
+          "localStorage": {
+            "sampe_auth_store": {
+              "accessToken": "xxx"
+            }
+          },
+          "sessionStorage": {},
+          "cookies": {},
+          "headers": {
+            "x-sample-authorization": {
+              "from": "localStorage",
+              "key": "sample_auth_store",
+              "field": "accessToken"
+            }
+          }
+        },
+        "saveLastResponse": true
       },
       "run": "/opt/myapp/alert.sh",
       "args": [],

@@ -182,6 +182,18 @@ function sendText(res, status, body) {
     res.status(status).set('content-type', 'text/plain; charset=utf-8').send(body);
 }
 
+/** Keep credential material out of the dashboard's otherwise-readable config. */
+function redactHooksJson(text) {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed.hooks)) {
+        for (const hook of parsed.hooks) {
+            if (!hook || !hook.trigger || hook.trigger.credentials === undefined) continue;
+            hook.trigger.credentials = '[redacted — edit hooks.json on disk]';
+        }
+    }
+    return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
 // --------------------------------------------------------------- dashboard ---
 //
 // The read-only data behind GET /api/status. web/dist (built by `pnpm run
@@ -260,8 +272,9 @@ function createApp(config, options, runtime) {
         res.json(dashboardData(config, runtime));
     });
 
-    // The raw hooks.json for the dashboard's info panel — read fresh on every
-    // request so it reflects edits made without restarting the server.
+    // Read fresh so the panel reflects edits made without restarting. Website
+    // credentials are deliberately redacted: this endpoint is for inspecting
+    // hook structure, not moving cookies and access tokens into a browser.
     app.get('/api/hooks.json', (req, res) => {
         res.set('cache-control', 'no-store');
         fs.readFile(options.configFile, 'utf8', (err, data) => {
@@ -269,7 +282,11 @@ function createApp(config, options, runtime) {
                 sendText(res, 404, `${path.basename(options.configFile)} not found`);
                 return;
             }
-            res.set('content-type', 'application/json; charset=utf-8').send(data);
+            try {
+                res.set('content-type', 'application/json; charset=utf-8').send(redactHooksJson(data));
+            } catch {
+                sendText(res, 500, `${path.basename(options.configFile)} is not valid JSON`);
+            }
         });
     });
 
@@ -504,6 +521,7 @@ module.exports = {
     loadConfig,
     hooksOfType,
     dashboardData,
+    redactHooksJson,
     openLog,
     openRequestLog,
     main,

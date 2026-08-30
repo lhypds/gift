@@ -4,7 +4,7 @@
 # fresh checkout: the root hooks server plus bin/, commands/, functions/,
 # triggers/ and utils/.
 # Local settings and state (config.json, hooks.json, logs) are never shipped —
-# config.json holds the webhook secret.
+# config.json and hooks.json may both hold secrets.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -231,7 +231,7 @@ cp "$ROOT_DIR/VERSION"      "$STAGING_DIR/"
 [ -f "$ROOT_DIR/pnpm-lock.yaml" ]      && cp "$ROOT_DIR/pnpm-lock.yaml"      "$STAGING_DIR/" || true
 [ -f "$ROOT_DIR/pnpm-workspace.yaml" ] && cp "$ROOT_DIR/pnpm-workspace.yaml" "$STAGING_DIR/" || true
 
-# Optional dotfiles worth shipping (never config.json — that holds the secret).
+# Optional dotfiles worth shipping (never config.json or hooks.json — both may hold secrets).
 [ -f "$ROOT_DIR/.gitignore" ] && cp "$ROOT_DIR/.gitignore" "$STAGING_DIR/" || true
 
 # Strip anything machine-specific that a function folder may contain.

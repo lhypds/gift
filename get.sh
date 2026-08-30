@@ -115,9 +115,9 @@ mkdir -p "$NEW_DIR"
 unzip -qo "$TMP_DIR/gift.zip" -d "$NEW_DIR"
 [ -f "$NEW_DIR/bin/gift.js" ] || die "the release zip does not look like gift (no bin/gift.js)."
 
-# Local state is deliberately not in the zip — config.json holds the webhook
-# secret and hooks.json holds the user's hooks — so an upgrade has to bring it
-# over by hand. node_modules comes too, to save a reinstall.
+# Local state is deliberately not in the zip — config.json and hooks.json may
+# hold secrets — so an upgrade has to bring it over by hand. node_modules comes
+# too, to save a reinstall.
 if [ "$UPGRADE" = true ]; then
     echo "==> Carrying settings, hooks and logs over from the current install"
     for file in config.json hooks.json; do

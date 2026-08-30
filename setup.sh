@@ -175,6 +175,7 @@ EOF
 else
     echo "==> Keeping existing hooks.json"
 fi
+chmod 600 hooks.json
 
 chmod +x ./*.sh bin/gift.js 2>/dev/null || true
 find . -path ./.git -prune -o -name "*.sh" -print0 2>/dev/null | xargs -0 chmod +x 2>/dev/null || true

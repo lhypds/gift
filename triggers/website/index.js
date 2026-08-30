@@ -36,13 +36,10 @@ const DEFAULT_INTERVAL_MS = 60000;
 const MIN_INTERVAL_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 10000;
 const WHEN = ['change', 'match', 'always'];
-const DEFAULT_AUTH_STATE_ENV = 'ER_AUTH_STATE_STORE';
-const DEFAULT_AUTH_TOKEN_FIELD = 'accessToken';
-const DEFAULT_AUTH_HEADER = 'x-even-authorization';
 const DEFAULT_RESPONSE_LOG_DIR = path.join(ROOT, 'logs', 'hooks');
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const RESPONSE_SUFFIXES = ['.json', '.xml', '.txt', '.csv', '.html'];
+const STORAGE_NAMES = ['localStorage', 'sessionStorage'];
 let responseWriteCounter = 0;
 
 // ----------------------------------------------------------------- contract ---
@@ -83,21 +80,7 @@ function normalize(trigger) {
         throw new Error(`has a "timeout" of ${trigger.timeout} — it must be a number of milliseconds`);
     }
 
-    const authStateEnv = trigger.authStateEnv ? String(trigger.authStateEnv).trim() : '';
-    if (authStateEnv && !ENV_NAME.test(authStateEnv)) {
-        throw new Error(`has an "authStateEnv" of '${trigger.authStateEnv}' — use an environment-variable name such as ${DEFAULT_AUTH_STATE_ENV}`);
-    }
-    if (!authStateEnv && (trigger.authTokenField || trigger.authHeader)) {
-        throw new Error('sets an auth token field or header but has no "authStateEnv"');
-    }
-
-    const authTokenField = String(trigger.authTokenField || DEFAULT_AUTH_TOKEN_FIELD).trim();
-    if (authStateEnv && !authTokenField) throw new Error('has an empty "authTokenField"');
-
-    const authHeader = String(trigger.authHeader || DEFAULT_AUTH_HEADER).trim().toLowerCase();
-    if (authStateEnv && !HEADER_NAME.test(authHeader)) {
-        throw new Error(`has an "authHeader" of '${trigger.authHeader}' — it is not a valid HTTP header name`);
-    }
+    const credentials = trigger.credentials === undefined ? null : normalizeCredentials(trigger.credentials);
 
     if (trigger.saveLastResponse !== undefined && typeof trigger.saveLastResponse !== 'boolean') {
         throw new Error('has a "saveLastResponse" that is not true or false');
@@ -110,10 +93,10 @@ function normalize(trigger) {
         ...spec,
         interval: Math.round(interval),
         timeout: Math.round(timeout),
-        authStateEnv,
-        authTokenField,
-        authHeader,
-        saveLastResponse: trigger.saveLastResponse === true,
+        credentials,
+        // Keeping the latest response is the normal website-hook behavior.
+        // An explicit false is the manual opt-out.
+        saveLastResponse: trigger.saveLastResponse !== false,
     };
 }
 
@@ -129,9 +112,7 @@ function describe(trigger) {
         ['fires', FIRES[trigger.on]],
     ];
     if (trigger.matchType !== 'any') rows.push(['match', match.describe(trigger)]);
-    if (trigger.authStateEnv) {
-        rows.push(['auth', `${trigger.authTokenField} from ${trigger.authStateEnv} → ${trigger.authHeader}`]);
-    }
+    if (trigger.credentials) rows.push(['credentials', 'stored privately in hooks.json']);
     if (trigger.saveLastResponse) rows.push(['response', 'save latest under logs/hooks/<hook name>']);
     rows.push(['polled', `every ${trigger.interval} ms`]);
     return rows;
@@ -176,40 +157,12 @@ async function ask({ askText, askYesNo }) {
     });
     if (interval === null) return null;
 
-    const useAuth = await askYesNo(
-        `Send ${DEFAULT_AUTH_TOKEN_FIELD} from auth-state JSON as ${DEFAULT_AUTH_HEADER}?`,
-        false,
-    );
-    if (useAuth === null) return null;
-
-    let auth = {};
-    if (useAuth) {
-        const authStateEnv = await askText('Environment variable containing the localStorage auth-state JSON', {
-            fallback: DEFAULT_AUTH_STATE_ENV,
-            validate: (value) => (ENV_NAME.test(value) ? null : 'Type a valid environment-variable name.'),
-        });
-        if (authStateEnv === null) return null;
-
-        const authTokenField = await askText('Property holding the access token', {
-            fallback: DEFAULT_AUTH_TOKEN_FIELD,
-            validate: (value) => (value ? null : 'A token property is needed.'),
-        });
-        if (authTokenField === null) return null;
-
-        const authHeader = await askText('Request header to receive the token', {
-            fallback: DEFAULT_AUTH_HEADER,
-            validate: (value) => (HEADER_NAME.test(value) ? null : 'Type a valid HTTP header name.'),
-        });
-        if (authHeader === null) return null;
-
-        auth = { authStateEnv, authTokenField, authHeader: authHeader.toLowerCase() };
+    const useCredentials = await askYesNo('Use credentials for this website?', false);
+    if (useCredentials === null) return null;
+    if (useCredentials) {
+        console.log('  A credential template will be added to hooks.json.');
+        console.log('  Finish creating the hook, then edit its localStorage, sessionStorage, cookies and headers manually.');
     }
-
-    const saveLastResponse = await askYesNo(
-        'Save every latest successful response under logs/hooks/<hook name>?',
-        false,
-    );
-    if (saveLastResponse === null) return null;
 
     return {
         trigger: {
@@ -221,14 +174,14 @@ async function ask({ askText, askYesNo }) {
             matchType: text ? 'contains' : 'any',
             interval: Math.round(Number(interval)),
             timeout: DEFAULT_TIMEOUT_MS,
-            ...auth,
-            saveLastResponse,
+            credentials: useCredentials ? credentialTemplate() : undefined,
+            saveLastResponse: true,
         },
         label: url,
     };
 }
 
-function afterNotes(hook) {
+function afterNotes(hook, context = {}) {
     const trigger = hook && hook.trigger ? hook.trigger : {};
     const notes = [];
     if (trigger.saveLastResponse) {
@@ -236,48 +189,119 @@ function afterNotes(hook) {
             `Latest responses will replace ${path.join(DEFAULT_RESPONSE_LOG_DIR, safeHookName(hook.name), 'last_response.*')}.`,
         );
     }
-    if (!trigger.authStateEnv) return notes;
-
-    const auth = authHeaders(trigger);
-    if (!auth.ok) {
+    if (trigger.credentials) {
+        const file = context.file && context.show ? context.show(context.file) : 'hooks.json';
         notes.push(
-            `warning: ${auth.error}.`,
-            `         Put the JSON value copied from localStorage in ${trigger.authStateEnv}; the token is never written to hooks.json or the log.`,
+            `Credentials are enabled but still empty — edit ${file} manually before relying on this hook.`,
+            'Fill the localStorage, sessionStorage, cookies and headers entries, then run `gift restart`.',
         );
     }
-    notes.push(`note: ${trigger.authStateEnv} is loaded when gift starts; restart gift after replacing a rotated token.`);
     return notes;
 }
 
 // ---------------------------------------------------------- auth / response ---
 
-/** Build the one secret header without ever returning or logging the auth state. */
-function authHeaders(trigger, env = process.env) {
-    if (!trigger.authStateEnv) return { ok: true, headers: {} };
+function plainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
-    const raw = env[trigger.authStateEnv];
-    if (!raw) return { ok: false, error: `${trigger.authStateEnv} is not set` };
+function credentialTemplate() {
+    return {
+        localStorage: { sampe_auth_store: { accessToken: 'xxx' } },
+        sessionStorage: {},
+        cookies: {},
+        headers: {
+            'x-sample-authorization': {
+                from: 'localStorage',
+                key: 'sample_auth_store',
+                field: 'accessToken',
+            },
+        },
+    };
+}
 
-    let state;
-    try {
-        state = JSON.parse(raw);
-    } catch {
-        return { ok: false, error: `${trigger.authStateEnv} does not contain valid JSON` };
+function normalizeCredentials(credentials) {
+    if (!plainObject(credentials)) throw new Error('has "credentials" that is not a JSON object');
+
+    const normalized = {};
+    for (const name of [...STORAGE_NAMES, 'cookies', 'headers']) {
+        const value = credentials[name] === undefined ? {} : credentials[name];
+        if (!plainObject(value)) throw new Error(`has "credentials.${name}" that is not a JSON object`);
+        normalized[name] = { ...value };
     }
 
-    if (!state || typeof state !== 'object' || Array.isArray(state)) {
-        return { ok: false, error: `${trigger.authStateEnv} does not contain a JSON object` };
+    for (const [name, value] of Object.entries(normalized.cookies)) {
+        if (!HEADER_NAME.test(name)) throw new Error(`has an invalid cookie name '${name}'`);
+        if (typeof value !== 'string') throw new Error(`has a cookie '${name}' whose value is not a string`);
+        if (/[\r\n;]/.test(value)) throw new Error(`has a cookie '${name}' with an unsafe value`);
     }
 
-    const token = state[trigger.authTokenField];
-    if (typeof token !== 'string' || !token.trim()) {
-        return { ok: false, error: `${trigger.authStateEnv} has no non-empty ${trigger.authTokenField}` };
+    const headers = {};
+    for (const [writtenName, value] of Object.entries(normalized.headers)) {
+        const name = writtenName.toLowerCase();
+        if (!HEADER_NAME.test(name)) throw new Error(`has an invalid credential header name '${writtenName}'`);
+        if (typeof value === 'string') {
+            if (/[\r\n]/.test(value)) throw new Error(`has credential header '${writtenName}' with an unsafe value`);
+            headers[name] = value;
+            continue;
+        }
+        if (!plainObject(value) || !STORAGE_NAMES.includes(value.from) || !value.key) {
+            throw new Error(`has credential header '${writtenName}' that must be a string or a localStorage/sessionStorage reference`);
+        }
+        headers[name] = {
+            from: value.from,
+            key: String(value.key),
+            field: value.field === undefined ? '' : String(value.field),
+        };
     }
-    if (/[\r\n]/.test(token)) {
-        return { ok: false, error: `${trigger.authStateEnv}.${trigger.authTokenField} is not a safe HTTP header value` };
+    if (Object.keys(normalized.cookies).length && headers.cookie !== undefined) {
+        throw new Error('sets both "credentials.cookies" and a credential Cookie header');
+    }
+    normalized.headers = headers;
+    return normalized;
+}
+
+function valueAtField(value, field) {
+    let current = value;
+    if (field && typeof current === 'string') {
+        try {
+            current = JSON.parse(current);
+        } catch {
+            return undefined;
+        }
+    }
+    for (const part of String(field || '').split('.').filter(Boolean)) {
+        if (!plainObject(current) || !Object.prototype.hasOwnProperty.call(current, part)) return undefined;
+        current = current[part];
+    }
+    return current;
+}
+
+/** Resolve static strings and storage references without ever logging their values. */
+function credentialHeaders(trigger) {
+    if (!trigger.credentials) return { ok: true, headers: {} };
+
+    const credentials = trigger.credentials;
+    const headers = {};
+    for (const [name, spec] of Object.entries(credentials.headers)) {
+        const value = typeof spec === 'string'
+            ? spec
+            : valueAtField(credentials[spec.from][spec.key], spec.field);
+        if (!['string', 'number', 'boolean'].includes(typeof value)
+            || ['', 'xxx'].includes(String(value).trim().toLowerCase())) {
+            return { ok: false, error: `credential header ${name} has no value` };
+        }
+        const text = String(value);
+        if (/[\r\n]/.test(text)) return { ok: false, error: `credential header ${name} has an unsafe value` };
+        headers[name] = text;
     }
 
-    return { ok: true, headers: { [trigger.authHeader]: token } };
+    const cookies = Object.entries(credentials.cookies).map(([name, value]) => `${name}=${value}`);
+    if (cookies.length) headers.cookie = cookies.join('; ');
+    if (Object.keys(headers).length === 0) {
+        return { ok: false, error: 'credentials are enabled but no headers or cookies are filled in' };
+    }
+    return { ok: true, headers };
 }
 
 function contentSuffix(url, contentType = '') {
@@ -348,9 +372,9 @@ function start({ hooks, runtime, options }) {
             if (polling || stopped) return;
             polling = true;
             try {
-                const auth = authHeaders(trigger);
-                if (!auth.ok) {
-                    log('warn', `poll skipped: ${auth.error}`, { hook: hook.name, url: trigger.url });
+                const credentials = credentialHeaders(trigger);
+                if (!credentials.ok) {
+                    log('warn', `poll skipped: ${credentials.error}`, { hook: hook.name, url: trigger.url });
                     return;
                 }
 
@@ -358,7 +382,7 @@ function start({ hooks, runtime, options }) {
                     method: trigger.method,
                     timeout: trigger.timeout,
                     userAgent: process.env.GIFT_WEBSITE_USER_AGENT || options.userAgent,
-                    headers: auth.headers,
+                    headers: credentials.headers,
                 });
                 if (stopped) return;
 
@@ -453,7 +477,7 @@ function start({ hooks, runtime, options }) {
             hook: hook.name,
             every: `${trigger.interval}ms`,
             on: trigger.on,
-            auth: trigger.authStateEnv ? `${trigger.authStateEnv} → ${trigger.authHeader}` : undefined,
+            credentials: trigger.credentials ? 'hooks.json' : undefined,
             saves: trigger.saveLastResponse
                 ? path.join(options.responseLogDir || DEFAULT_RESPONSE_LOG_DIR, safeHookName(hook.name))
                 : undefined,
@@ -491,16 +515,15 @@ module.exports = {
     prompt: 'a page changes, or starts saying something',
     WHEN,
     DEFAULT_INTERVAL_MS,
-    DEFAULT_AUTH_STATE_ENV,
-    DEFAULT_AUTH_TOKEN_FIELD,
-    DEFAULT_AUTH_HEADER,
     DEFAULT_RESPONSE_LOG_DIR,
     normalize,
     describe,
     line,
     ask,
     afterNotes,
-    authHeaders,
+    credentialTemplate,
+    normalizeCredentials,
+    credentialHeaders,
     contentSuffix,
     safeHookName,
     saveLastResponse,

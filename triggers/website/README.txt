@@ -38,9 +38,24 @@ hooks.json
             "matchType": "contains",
             "interval": 60000,
             "timeout": 10000,
-            "authStateEnv": "ER_AUTH_STATE_STORE",
-            "authTokenField": "accessToken",
-            "authHeader": "x-even-authorization",
+            "credentials": {
+                "localStorage": {
+                    "sampe_auth_store": {
+                        "accessToken": "xxx"
+                    }
+                },
+                "sessionStorage": {},
+                "cookies": {
+                    "session_id": "replace-with-cookie-value"
+                },
+                "headers": {
+                    "x-sample-authorization": {
+                        "from": "localStorage",
+                        "key": "sample_auth_store",
+                        "field": "accessToken"
+                    }
+                }
+            },
             "saveLastResponse": true
         },
         "run": "/home/me/bin/alert.sh",
@@ -54,54 +69,45 @@ match       text the page must contain for the hook to fire. Empty means any.
 matchType   any, contains (case-insensitive), exact, or regex.
 interval    how often to poll, in milliseconds. At least 1000.
 timeout     how long to wait for the page, in milliseconds. 10000 by default.
-authStateEnv
-            optional environment variable containing a JSON auth-state object.
-            When set, a missing or invalid value skips the poll instead of
-            accidentally making an unauthenticated request.
-authTokenField
-            property to take from that object. accessToken by default.
-authHeader  request header that receives the token. x-even-authorization by
-            default. The auth state and token are never written to hooks.json
-            or the activity log.
+credentials optional localStorage, sessionStorage, cookies and headers kept in
+            hooks.json. `gift create` adds an empty template when "Use
+            credentials?" is answered yes; edit the file manually and restart.
 saveLastResponse
             true saves the body of every completed HTTP response under
             logs/hooks/<hook name>/last_response.ext. The file is replaced
             atomically and written 0600. Its extension follows Content-Type,
             falling back to the URL, and the same 5 MB response cap applies.
+            true is the default; set it to false manually to opt out.
 
 Each website hook polls on its own timer, staggered a second apart at startup so
 that ten of them are ten requests over ten seconds rather than ten at once.
 
 
-Browser localStorage authentication
------------------------------------
+Credentials from browser storage
+--------------------------------
 
-The hook runs in Node, outside the browser, so browser security prevents it from
-reading an origin's localStorage directly. It can instead read the JSON value
-copied or synced from localStorage through an environment variable. For the
-common er_auth_state_store shape, put its JSON value in ER_AUTH_STATE_STORE
-(under triggers.website.auth_state_store in config.json, or in the real
-environment), then configure the three auth fields shown above.
+The hook runs in Node, so it cannot load a browser profile or directly populate
+a page's localStorage/sessionStorage. The two storage objects in hooks.json are
+credential sources: a header can point to a storage key and field, as
+x-sample-authorization does above. A storage value may be pasted as a JSON object
+or as the JSON string returned by localStorage.getItem(). Headers may also be
+literal strings:
 
-config.json may hold the value as a JSON object; it is a git-ignored 0600 file:
-
-    {
-        "triggers": {
-            "website": {
-                "auth_state_store": {
-                    "accessToken": "replace-with-the-current-token"
-                }
-            }
-        }
+    "headers": {
+        "x-api-key": "replace-with-key"
     }
 
-Only accessToken is needed in this example. Leave refreshToken and unrelated
-account fields out when preparing the JSON by hand; gift does not use them.
+Cookies are sent as one HTTP Cookie header. Put them in the cookies object as
+name/value strings. If credentials are enabled but a referenced field is empty,
+the poll is skipped instead of making an unauthenticated request.
+Credential headers and cookies follow same-origin redirects, but are stripped
+before following a redirect to another origin.
 
-This is a snapshot, not a live connection to the browser. If the site rotates a
-short-lived access token, update the value and restart gift, or provide another
-environment variable whose current value is present when gift starts. Never
-paste a real access or refresh token into hooks.json.
+hooks.json is written 0600 and credentials are redacted from the dashboard's
+/api/hooks.json view, but it still contains plaintext secrets on disk. Keep it
+out of source control, include only the fields the request needs, and rotate any
+value that is exposed. Storage and cookies are snapshots; edit hooks.json and
+run `gift restart` after the browser rotates them.
 
 
 What the script is given
@@ -130,5 +136,3 @@ Settings
 
 interval     the interval `gift create` suggests (60000 ms)
 user_agent   the User-Agent sent with each poll (gift)
-auth_state_store
-             optional secret JSON exposed to hooks as ER_AUTH_STATE_STORE
