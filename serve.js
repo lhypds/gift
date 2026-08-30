@@ -25,7 +25,7 @@ const path = require('node:path');
 const express = require('express');
 
 const {
-    log, openLog, openRequestLog, openErrorLog, openHookErrorLogs,
+    log, openLog, openRequestLog, openErrorLog, openHookLogs,
     appendRequestLog, appendErrorLog,
     logFile, requestLogFile, errorLogFile, formatFields, stamp,
 } = require('./utils/log.js');
@@ -416,7 +416,7 @@ function main(argv) {
     // failure most in need of somewhere to be written down. hooks.log cannot
     // take it: which file that is comes out of the config that just failed.
     openErrorLog(DEFAULT_ERROR_LOG);
-    openHookErrorLogs(DEFAULT_HOOK_LOG_DIR);
+    openHookLogs(DEFAULT_HOOK_LOG_DIR);
 
     const configFile = path.resolve(options.config || process.env.GIFT_SERVE_CONFIG || DEFAULT_CONFIG);
     let config;

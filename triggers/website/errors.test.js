@@ -18,7 +18,7 @@ const path = require('node:path');
 
 const website = require('./index.js');
 const hookRecord = require('../../utils/hook.js');
-const { openLog, openErrorLog, openHookErrorLogs } = require('../../utils/log.js');
+const { openLog, openErrorLog, openHookLogs } = require('../../utils/log.js');
 
 const INTERVAL = 1000;
 
@@ -45,14 +45,14 @@ function scratch(t) {
 
     openLog(activity);
     openErrorLog(path.join(hookDir, 'error.log'));
-    openHookErrorLogs(hookDir);
+    openHookLogs(hookDir);
 
     t.after(() => {
         console.log = out;
         console.error = err;
         openLog(null);
         openErrorLog(null);
-        openHookErrorLogs(null);
+        openHookLogs(null);
         fs.rmSync(root, { recursive: true, force: true });
     });
 

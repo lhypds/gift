@@ -92,6 +92,23 @@ A hook that has never failed has no file at all, which is what makes one showing
 up worth noticing. Everything in either is also in `hooks.log`, in sequence with
 whatever led up to it.
 
+Beside a hook's errors, one more file records what it has been doing:
+
+    logs/hooks/<hook name>/hook.log    one line per request the hook made
+
+Each line is the time it asked, whether the script ran — `fired`, `quiet` or
+`failed`, in a column of its own — and why:
+
+    2026-08-30T14:47:06.704Z  quiet   the page has not changed  url=… status=200 ms=138
+    2026-08-30T14:48:06.912Z  fired   the page came back different  url=… status=200 ms=142
+    2026-08-30T14:49:07.031Z  failed  poll failed: connect ECONNREFUSED  url=…
+
+This is the file for the hook that fires twice a month. `error.log` stays empty
+while it is working and `hooks.log` says nothing between the firings, so "is it
+still asking, and is the answer simply the same as yesterday's" had nowhere to be
+read. Its lines are deliberately not copied into `hooks.log`: a poll that changed
+nothing is exactly what the activity log leaves out.
+
 The split is not tidiness. A per-hook folder is chosen by hook name, and hook
 names come out of `hooks.json` — so the failure most in need of recording, a
 `hooks.json` the server refuses, has no name to file under. That is why the

@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-    log, openLog, openErrorLog, openHookErrorLogs, appendErrorLog, errorLogFile, safeHookName,
+    log, logHook, openLog, openErrorLog, openHookLogs, appendErrorLog, errorLogFile, safeHookName,
 } = require('./log.js');
 
 /** Every log pointed at fresh files, with the console kept quiet. */
@@ -29,7 +29,7 @@ function scratch(t) {
         console.error = err;
         openLog(null);
         openErrorLog(null);
-        openHookErrorLogs(null);
+        openHookLogs(null);
         fs.rmSync(dir, { recursive: true, force: true });
     });
 
@@ -39,9 +39,11 @@ function scratch(t) {
         activity,
         errors,
         hookErrors: (name) => path.join(hookDir, safeHookName(name), 'error.log'),
+        hookRequests: (name) => path.join(hookDir, safeHookName(name), 'hook.log'),
         readActivity: () => fs.readFileSync(activity, 'utf8'),
         readErrors: () => fs.readFileSync(errors, 'utf8'),
         readHookErrors: (name) => fs.readFileSync(path.join(hookDir, safeHookName(name), 'error.log'), 'utf8'),
+        readHookRequests: (name) => fs.readFileSync(path.join(hookDir, safeHookName(name), 'hook.log'), 'utf8'),
     };
 }
 
@@ -49,7 +51,7 @@ test('only error lines reach error.log, and all of them reach hooks.log', (t) =>
     const files = scratch(t);
     openLog(files.activity);
     openErrorLog(files.errors);
-    openHookErrorLogs(files.hookDir);
+    openHookLogs(files.hookDir);
 
     log('info', 'polling something');
     log('warn', 'poll skipped: credential header has no value');
@@ -72,7 +74,7 @@ test("an error naming a hook goes to that hook's folder, not the shared file", (
     const files = scratch(t);
     openLog(files.activity);
     openErrorLog(files.errors);
-    openHookErrorLogs(files.hookDir);
+    openHookLogs(files.hookDir);
 
     log('error', 'hook error: spawn ENOEXEC', { hook: 'hook-clipboard.gochaichai' });
 
@@ -83,10 +85,31 @@ test("an error naming a hook goes to that hook's folder, not the shared file", (
     assert.match(files.readActivity(), /spawn ENOEXEC/);
 });
 
+test("a hook's requests go to its own hook.log, and nowhere else", (t) => {
+    const files = scratch(t);
+    openLog(files.activity);
+    openErrorLog(files.errors);
+    openHookLogs(files.hookDir);
+
+    logHook('hook-clipboard.gochaichai', 'quiet', 'the page has not changed', { status: 200, ms: 42 });
+    logHook('hook-clipboard.gochaichai', 'fired', 'the page came back different', { status: 200, ms: 51 });
+
+    const requests = files.readHookRequests('hook-clipboard.gochaichai').trim().split('\n');
+    assert.strictEqual(requests.length, 2);
+    assert.match(requests[0], /^\d{4}-\d\d-\d\dT[\d:.]+Z {2}quiet {3}the page has not changed {2}status=200 ms=42$/);
+    assert.match(requests[1], /fired {3}the page came back different/);
+
+    // hooks.log is the story of what the server did; a poll that changed
+    // nothing is not part of it, and neither file has an error to report.
+    assert.strictEqual(files.readActivity(), '');
+    assert.strictEqual(files.readErrors(), '');
+    assert.strictEqual(fs.existsSync(files.hookErrors('hook-clipboard.gochaichai')), false);
+});
+
 test('a hook that has never failed has no error log at all', (t) => {
     const files = scratch(t);
     openLog(files.activity);
-    openHookErrorLogs(files.hookDir);
+    openHookLogs(files.hookDir);
 
     log('info', 'polling', { hook: 'quiet-hook' });
     log('warn', 'poll skipped', { hook: 'quiet-hook' });
@@ -97,7 +120,7 @@ test('a hook that has never failed has no error log at all', (t) => {
 test('a hook name that is not a filename still gets a folder', (t) => {
     const files = scratch(t);
     openErrorLog(files.errors);
-    openHookErrorLogs(files.hookDir);
+    openHookLogs(files.hookDir);
 
     log('error', 'went wrong', { hook: '../../etc/passwd' });
 
@@ -122,7 +145,7 @@ test('a refusal to start is written even with no hooks.log open', (t) => {
     const files = scratch(t);
     openLog(null);
     openErrorLog(files.errors);
-    openHookErrorLogs(files.hookDir);
+    openHookLogs(files.hookDir);
 
     appendErrorLog('2026-01-01T00:00:00.000Z  error  hooks.json: not valid JSON\n');
 

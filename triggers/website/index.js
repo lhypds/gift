@@ -28,7 +28,7 @@ const { ROOT } = require('../../functions.js');
 // safeHookName is shared rather than repeated: it decides the folder a hook's
 // responses are saved in, and the folder its error log is opened in. Two copies
 // that drifted would put the pair in two different places.
-const { forTrigger, safeHookName } = require('../../utils/log.js');
+const { forTrigger, logHook, safeHookName } = require('../../utils/log.js');
 const { INLINE_LIMIT } = require('../runtime.js');
 const match = require('../match.js');
 const { fetchPage } = require('./poll.js');
@@ -114,6 +114,14 @@ const FIRES = {
     change: 'when the page comes back different',
     match: 'every poll the page matches',
     always: 'every poll',
+};
+
+// Why the poll that fired, fired — the second half of a `fired` line in the
+// hook's own hook.log.
+const FIRED_BECAUSE = {
+    change: 'the page came back different',
+    match: 'the page matches',
+    always: 'every poll fires this hook',
 };
 
 function describe(trigger) {
@@ -413,16 +421,30 @@ function start({ hooks, runtime, options }) {
         const refresh = trigger.credentials && trigger.credentials.refresh;
 
         /**
+         * One line in this hook's hook.log, for the poll that just finished:
+         * when it asked, and whether it ran the script. Every poll writes one,
+         * including the ordinary ones that changed nothing — a file of those is
+         * how "this hook is still asking" is checked without a running terminal.
+         */
+        const record = (outcome, message, fields = {}) => {
+            logHook(hook.name, outcome, message, { url: trigger.url, ...fields });
+        };
+
+        /**
          * A poll that did not work. The first one, and any change of reason, is
          * an error — a hook that cannot reach its URL is not doing its job, and
          * that belongs in the hook's error.log. While the same thing keeps
          * happening it drops to a warning: repeating it into the error log once
          * a minute would bury the next real problem under an old one.
+         *
+         * hook.log takes every one of them, at full volume: there the point is
+         * that no poll is missing from the sequence, and each line is one line.
          */
         const trouble = (message, fields = {}) => {
             const first = message !== failure;
             failure = message;
             log(first ? 'error' : 'warn', message, { hook: hook.name, ...fields });
+            record('failed', message);
         };
 
         /** A poll that worked after one that did not. */
@@ -555,20 +577,30 @@ function start({ hooks, runtime, options }) {
                 const was = previous;
                 previous = { state, status: result.status };
 
+                const seen = { status: result.status, ms: result.ms };
+
                 const found = match.test(result.body, trigger);
-                if (trigger.matchType !== 'any' && !found) return;
+                if (trigger.matchType !== 'any' && !found) {
+                    record('quiet', 'the page does not match', seen);
+                    return;
+                }
 
                 const fires = trigger.on === 'always'
                     || (trigger.on === 'match' && found)
                     || (trigger.on === 'change' && changed);
                 if (!fires) {
-                    if (first && trigger.on === 'change') {
+                    // Only `change` reaches here: `always` fires on every poll,
+                    // and `match` has already returned above when it did not match.
+                    if (first) {
                         log('info', 'first poll — nothing to compare against yet', {
                             hook: hook.name, url: trigger.url, status: result.status,
                         });
                     }
+                    record('quiet', first ? 'first poll, nothing to compare against yet' : 'the page has not changed', seen);
                     return;
                 }
+
+                record('fired', FIRED_BECAUSE[trigger.on], seen);
 
                 runtime.dispatch([hook], {
                     trigger: 'website',

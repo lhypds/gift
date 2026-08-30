@@ -20,6 +20,20 @@
 //                                   config it refused, a port already taken, a
 //                                   trigger that would not start.
 //
+// Beside the first of those, one more file per hook:
+//
+//     logs/hooks/<hook>/hook.log    one line per request the hook made: when it
+//                                   asked, what came back, and whether the
+//                                   script ran.
+//
+// That last file answers the question the other two cannot. A website hook that
+// polls every minute and fires twice a month writes nothing to error.log while
+// it is working and nothing to hooks.log between the firings, so "is it still
+// asking, and is the answer simply the same as yesterday's" had no file to read.
+// Its lines are deliberately not copied into hooks.log: a poll that changed
+// nothing is exactly what the activity log leaves out, and sixty of them an hour
+// per hook would bury what it is for.
+//
 // The split is not tidiness. A per-hook folder is chosen by hook name, and hook
 // names come out of hooks.json, so the one failure most in need of recording —
 // a hooks.json that will not parse — has no name to file under. That is why the
@@ -43,10 +57,12 @@ const requestLogFile = { path: null, bytes: 0, disabled: false };
 const errorLogFile = { path: null, bytes: 0, disabled: false };
 
 // The folder holding one directory per hook, and the files opened under it so
-// far. Opened on a hook's first error rather than at startup: a folder full of
-// empty error.log files is a folder that teaches you to ignore them.
+// far. Both kinds are opened on a hook's first line rather than at startup: a
+// folder full of empty error.log files is a folder that teaches you to ignore
+// them, and a hook.log is created by the first request whether or not it fired.
 let hookLogDir = null;
 const hookErrorLogs = new Map();
+const hookRequestLogs = new Map();
 
 function stamp() {
     return new Date().toISOString();
@@ -94,30 +110,53 @@ function openErrorLog(file) {
 }
 
 /**
- * Point the per-hook error logs at the folder that already holds each hook's
- * saved responses. Nothing is created here; a hook's file is opened the first
- * time that hook has something to put in it.
+ * Point the per-hook logs at the folder that already holds each hook's saved
+ * responses. Nothing is created here; a hook's file is opened the first time
+ * that hook has something to put in it.
  */
-function openHookErrorLogs(dir) {
+function openHookLogs(dir) {
     hookLogDir = dir || null;
     hookErrorLogs.clear();
+    hookRequestLogs.clear();
+}
+
+/** One of a hook's own files, opened on its first line and remembered after. */
+function hookFile(opened, name, file) {
+    if (!hookLogDir || !name) return null;
+    const safe = safeHookName(name);
+    let target = opened.get(safe);
+    if (!target) {
+        target = { path: null, bytes: 0, disabled: false };
+        openLogFile(target, path.join(hookLogDir, safe, file));
+        opened.set(safe, target);
+    }
+    return target;
 }
 
 /**
- * The error log for one hook, opened on demand. Null when the line names no
- * hook — which is what sends server-level failures to the shared file rather
- * than inventing a folder called 'unknown' for them.
+ * The error log for one hook. Null when the line names no hook — which is what
+ * sends server-level failures to the shared file rather than inventing a folder
+ * called 'unknown' for them.
  */
 function hookErrorLog(name) {
-    if (!hookLogDir || !name) return null;
-    const safe = safeHookName(name);
-    let target = hookErrorLogs.get(safe);
-    if (!target) {
-        target = { path: null, bytes: 0, disabled: false };
-        openLogFile(target, path.join(hookLogDir, safe, 'error.log'));
-        hookErrorLogs.set(safe, target);
-    }
-    return target;
+    return hookFile(hookErrorLogs, name, 'error.log');
+}
+
+/** The request log for one hook, beside its errors and its saved responses. */
+function hookLog(name) {
+    return hookFile(hookRequestLogs, name, 'hook.log');
+}
+
+/**
+ * One request a hook made, in that hook's own hook.log. `outcome` is the column
+ * the file exists for — fired, quiet or failed — so whether the script ran is
+ * readable down the left of the file rather than out of the message.
+ */
+function logHook(name, outcome, message, fields = {}) {
+    const target = hookLog(name);
+    if (!target) return;
+    const extra = formatFields(fields);
+    appendLogFile(target, `${stamp()}  ${outcome.padEnd(6)}  ${message}${extra ? '  ' + extra : ''}\n`);
 }
 
 function rotateLog(target) {
@@ -197,10 +236,12 @@ module.exports = {
     openLog,
     openRequestLog,
     openErrorLog,
-    openHookErrorLogs,
+    openHookLogs,
     hookErrorLog,
+    hookLog,
     safeHookName,
     log,
+    logHook,
     forTrigger,
     appendRequestLog,
     appendErrorLog,

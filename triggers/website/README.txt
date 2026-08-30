@@ -108,6 +108,16 @@ saveLastResponse
 Each website hook polls on its own timer, staggered a second apart at startup so
 that ten of them are ten requests over ten seconds rather than ten at once.
 
+Every poll writes one line to logs/hooks/<hook name>/hook.log — the time it
+asked, whether the script ran (fired, quiet or failed), and why:
+
+    2026-08-30T14:47:06.704Z  quiet   the page has not changed  url=… status=200 ms=138
+    2026-08-30T14:48:06.912Z  fired   the page came back different  url=… status=200 ms=142
+
+A hook that fires twice a month says nothing in hooks.log in between and has an
+empty error.log while it works, so this is where "it is still polling, the answer
+is just the same" is read.
+
 
 Credentials from browser storage
 --------------------------------
