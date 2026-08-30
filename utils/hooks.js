@@ -22,6 +22,7 @@ const { spawnSync } = require('node:child_process');
 
 const { ROOT } = require('../functions.js');
 const { ask } = require('./pick.js');
+const { hookLogDirFor, safeHookName } = require('./log.js');
 const { SERVER_DIR } = require('./service.js');
 const hookRecord = require('./hook.js');
 const triggers = require('../triggers/index.js');
@@ -347,16 +348,27 @@ function listHooks(file) {
 /**
  * A descriptive unused default name for the new hook, out of whatever the
  * trigger called itself: a repository, a URL, a folder.
+ *
+ * A trigger that knows what its hook should be called says so — `ask` returns a
+ * `name` beside its label — and that is taken as written. The general rule
+ * below cannot be told to leave such a name alone: `hub.example.com` would lose
+ * its `.com` exactly the way `status.json` loses its `.json`.
+ *
+ * @param {string} type  the trigger type, for a label that leaves nothing usable
+ * @param {{label?: string, name?: string}} asked  what the trigger's ask returned
  */
-function defaultName(type, label, taken) {
-    let stem = String(label || '')
-        .replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '')
-        .replace(/[?#].*$/, '')
-        .replace(/\/+$/, '');
-    stem = stem.split('/').filter(Boolean).pop() || '';
-    // `status.json` and `nginx.conf` name the thing watched; the extension is
-    // not part of what to call the hook.
-    stem = stem.replace(/\.[A-Za-z0-9]{1,5}$/, '');
+function defaultName(type, asked, taken) {
+    let stem = String((asked && asked.name) || '');
+    if (!stem) {
+        stem = String((asked && asked.label) || '')
+            .replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '')
+            .replace(/[?#].*$/, '')
+            .replace(/\/+$/, '');
+        stem = stem.split('/').filter(Boolean).pop() || '';
+        // `status.json` and `nginx.conf` name the thing watched; the extension
+        // is not part of what to call the hook.
+        stem = stem.replace(/\.[A-Za-z0-9]{1,5}$/, '');
+    }
     stem = stem.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
 
     const base = stem && stem !== '*' ? `hook-${stem}` : `hook-${type}`;
@@ -408,7 +420,7 @@ async function createHook(file) {
     console.log('');
 
     const name = await askText('Hook name — the label it appears under in the log', {
-        fallback: defaultName(trigger.name, asked.label, taken),
+        fallback: defaultName(trigger.name, asked, taken),
         validate: (value) => {
             if (!VALID_HOOK_NAME.test(value)) return 'Letters, digits, dot, dash and underscore only.';
             if (taken.has(value)) return `A hook named '${value}' already exists — choose a unique name.`;
@@ -544,6 +556,42 @@ async function pickHook(hooks) {
     }
 }
 
+/**
+ * Take away the folder a deleted hook was writing to — its error.log, its
+ * hook.log, the last response it saved. A deleted hook that keeps a folder of
+ * logs is a folder nothing will ever add to and nothing will ever explain, and
+ * `gift status` reads those files to decide what to report as broken.
+ *
+ * The folder is kept when a hook another line of hooks.json still configures
+ * would answer to it: hook names are labels and may be repeated, and the folder
+ * is chosen by name, so two hooks called the same thing write to one folder and
+ * only the last of them to go may take it away.
+ *
+ * @param {string} name      the deleted hook's name
+ * @param {string[]} others  the names of the hooks that remain
+ * @param {string} dir       the folder to remove; the hook's own by default
+ */
+function removeHookLogs(name, others, dir = hookLogDirFor(name)) {
+    if (others.some((other) => safeHookName(other) === safeHookName(name))) return { kept: true, dir };
+
+    let removed;
+    try {
+        removed = fs.readdirSync(dir);
+    } catch (err) {
+        // Nothing to remove is the ordinary case, not a failure: a hook that
+        // never failed and saved no response was never given a folder.
+        if (err.code === 'ENOENT') return { missing: true, dir };
+        return { error: err.message, dir };
+    }
+
+    try {
+        fs.rmSync(dir, { recursive: true });
+    } catch (err) {
+        return { error: err.message, dir };
+    }
+    return { removed, dir };
+}
+
 async function deleteHook(file, options, positionals) {
     const { config, missing } = readConfig(file);
     if (missing) {
@@ -606,6 +654,12 @@ async function deleteHook(file, options, positionals) {
         }
     }
 
+    // Taken before the splice, so an unnamed hook is still the `hook-N` its
+    // folder was named after rather than the one it becomes when this one goes.
+    const others = config.hooks
+        .map((other, position) => String(other.name || `hook-${position + 1}`))
+        .filter((_, position) => position !== index);
+
     config.hooks.splice(index, 1);
     writeConfig(file, config);
 
@@ -619,11 +673,24 @@ async function deleteHook(file, options, positionals) {
     console.log('');
 
     const restartResult = restartServer();
+
+    // After the restart rather than before it: until the old process is gone it
+    // is still polling this hook, and one poll landing in between would put the
+    // folder back — leaving logs behind for a hook that no longer exists.
+    const logs = removeHookLogs(name, others);
+    if (logs.removed) {
+        console.log(`Removed ${show(logs.dir)} — ${logs.removed.sort().join(', ')}.`);
+    } else if (logs.kept) {
+        console.log(`${show(logs.dir)} is kept — another hook is called '${name}' too.`);
+    } else if (logs.error) {
+        console.error(`gift delete: the hook is gone, but ${show(logs.dir)} could not be removed: ${logs.error}`);
+    }
+
     if (!restartResult.ok) {
         console.error(`gift delete: the hook was deleted, but the server could not be restarted: ${restartResult.message}`);
         return 1;
     }
-    return 0;
+    return logs.error ? 1 : 0;
 }
 
 // ---------------------------------------------------------------- dispatch ---
@@ -676,6 +743,8 @@ function deleteUsage() {
     console.log('  -h, --help      Show this help');
     console.log('');
     console.log('The server is restarted automatically after the hook is deleted.');
+    console.log("The hook's folder under logs/hooks — its errors, its requests and the");
+    console.log('last response it saved — goes with it, unless another hook shares its name.');
     console.log('A GitHub webhook the hook was delivered by is left in place.');
 }
 
@@ -783,6 +852,7 @@ module.exports = {
     deleteUsage,
     listMain,
     listUsage,
+    removeHookLogs,
     restartServer,
     // Configuration and path helpers shared with `gift log` and `gift status`.
     readConfig,

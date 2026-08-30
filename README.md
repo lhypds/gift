@@ -61,8 +61,11 @@ Status
 Hooks  
 `gift list` shows the configured hooks.  
 `gift create` adds one.  
+`gift delete` removes one, along with its folder under `logs/hooks` — the errors
+it recorded, the requests it made and the last response it saved go with it.  
 `gift triggers` lists the trigger types.  
-Hook names are labels and may be reused; delete same-named hooks by their list position.
+Hook names are labels and may be reused; delete same-named hooks by their list
+position, and a folder two of them share is kept until the last one is deleted.
 When an existing hook script is not executable, `gift create` warns and offers
 to add execute permission before saving the hook.
 
@@ -108,6 +111,10 @@ while it is working and `hooks.log` says nothing between the firings, so "is it
 still asking, and is the answer simply the same as yesterday's" had nowhere to be
 read. Its lines are deliberately not copied into `hooks.log`: a poll that changed
 nothing is exactly what the activity log leaves out.
+
+A hook's folder is removed by `gift delete`, after the restart that stops the
+hook writing to it — so what is left in `logs/hooks` is the hooks that are still
+configured, and `logs/hooks/error.log`, which belongs to the server.
 
 The split is not tidiness. A per-hook folder is chosen by hook name, and hook
 names come out of `hooks.json` — so the failure most in need of recording, a
@@ -157,7 +164,9 @@ groups arrive as `GIFT_MATCH_1`, `GIFT_MATCH_2`. Needs `pbpaste`, `wl-paste`,
 
 **website** — poll a URL and run a script when the page changes or matches.  
 Asks for the URL, whether to fire on `change` (the page came back different),
-`match` (it says something in particular) or `always`, and how often to poll. A
+`match` (it says something in particular) or `always`, and how often to poll. The
+name it offers is the site — `hook-hub.example.com` for
+`https://hub.example.com/api/v1/status`, and type over it for anything else. A
 poll that fails is logged and fires nothing: a hook cannot tell "the site is
 down" from "this machine's network is down". It also asks whether the request
 uses credentials. Answering yes to "Use credentials?" adds a `hooks.json`

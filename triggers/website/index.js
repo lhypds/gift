@@ -200,7 +200,26 @@ async function ask({ askText, askYesNo }) {
             saveLastResponse: true,
         },
         label: url,
+        name: siteName(url),
     };
+}
+
+/**
+ * What to call a hook that watches this URL: hook-hub.example.com. The site,
+ * not the last part of the path — half the pages worth polling are called
+ * /status or /api/v1/state, and a name out of those says nothing about which
+ * service is being watched. The path is also the part most likely to be edited
+ * later, and a hook named after it would then be named after nothing.
+ */
+function siteName(url) {
+    try {
+        // `www.` is not which site this is, only how it was typed.
+        return new URL(url).hostname.replace(/^www\./i, '');
+    } catch {
+        // ask() validated the URL, so this is unreachable from there; a caller
+        // that passes something else falls back to the general rule.
+        return '';
+    }
 }
 
 function afterNotes(hook, context = {}) {
@@ -693,5 +712,6 @@ module.exports = {
     contentSuffix,
     safeHookName,
     saveLastResponse,
+    siteName,
     start,
 };

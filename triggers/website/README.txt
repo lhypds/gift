@@ -105,6 +105,12 @@ saveLastResponse
             falling back to the URL, and the same 5 MB response cap applies.
             true is the default; set it to false manually to opt out.
 
+`gift create` offers hook-<site> as the name: hook-hub.example.com for
+https://hub.example.com/api/v1/publish-reviews/status. The site rather than the
+last part of the path, because half the pages worth polling are called /status,
+and the path is the part most likely to be edited after the hook exists. A
+leading www. is dropped, and any other name may be typed over it.
+
 Each website hook polls on its own timer, staggered a second apart at startup so
 that ten of them are ten requests over ten seconds rather than ten at once.
 

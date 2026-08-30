@@ -49,8 +49,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { ROOT } = require('../functions.js');
+
 // Rotate past this size, keeping one previous file (hooks.log.1).
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+// Where the per-hook folders live. The server opens them through openHookLogs,
+// but `gift delete` and `gift status` have to find one with no server running,
+// so which folder belongs to which hook is decided here rather than in each.
+const HOOK_LOG_DIR = path.join(ROOT, 'logs', 'hooks');
 
 const logFile = { path: null, bytes: 0, disabled: false };
 const requestLogFile = { path: null, bytes: 0, disabled: false };
@@ -71,6 +78,15 @@ function stamp() {
 /** A hook name as a directory name: the same one the saved responses use. */
 function safeHookName(name) {
     return String(name || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 128) || 'unknown';
+}
+
+/**
+ * The folder one hook's logs and saved responses live in. Always inside
+ * logs/hooks — the name is sanitized, so a hook called `../../etc` is a folder
+ * called `.._.._etc` rather than a path out of here.
+ */
+function hookLogDirFor(name) {
+    return path.join(HOOK_LOG_DIR, safeHookName(name));
 }
 
 function openLogFile(target, file) {
@@ -230,6 +246,8 @@ function appendErrorLog(line) {
 
 module.exports = {
     LOG_MAX_BYTES,
+    HOOK_LOG_DIR,
+    hookLogDirFor,
     logFile,
     requestLogFile,
     errorLogFile,
