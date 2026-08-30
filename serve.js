@@ -399,6 +399,7 @@ function main(argv) {
         only: options.only,
         configFile,
         eventsFile: DEFAULT_EVENTS_FILE,
+        responseLogDir: path.join(HERE, 'logs', 'hooks'),
     };
     if (!settings.path.startsWith('/')) settings.path = `/${settings.path}`;
 

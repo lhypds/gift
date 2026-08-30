@@ -11,7 +11,8 @@
   "packageManager": "pnpm@11.22.0",
   "scripts": {
     "build": "vite build --config web/vite.config.js",
-    "dev": "vite --config web/vite.config.js"
+    "dev": "vite --config web/vite.config.js",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.2"

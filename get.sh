@@ -127,6 +127,7 @@ if [ "$UPGRADE" = true ]; then
     for log in "$INSTALL_DIR"/*.log "$INSTALL_DIR"/*.log.[0-9]; do
         [ -f "$log" ] && cp -p "$log" "$NEW_DIR/" || true
     done
+    [ -d "$INSTALL_DIR/logs" ] && cp -Rp "$INSTALL_DIR/logs" "$NEW_DIR/logs" || true
     [ -d "$INSTALL_DIR/node_modules" ] && mv "$INSTALL_DIR/node_modules" "$NEW_DIR/node_modules" || true
 fi
 

@@ -18,6 +18,7 @@ dist/
 # Logs, the hooks server's hooks.log and its rotated hooks.log.1 included
 *.log
 *.log.[0-9]
+logs/
 
 # Recent-events state, mirrored to disk so a restart doesn't lose it.
 # deliveries.json is what it was called before the server watched anything but

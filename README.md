@@ -119,7 +119,11 @@ groups arrive as `GIFT_MATCH_1`, `GIFT_MATCH_2`. Needs `pbpaste`, `wl-paste`,
 Asks for the URL, whether to fire on `change` (the page came back different),
 `match` (it says something in particular) or `always`, and how often to poll. A
 poll that fails is logged and fires nothing: a hook cannot tell "the site is
-down" from "this machine's network is down".
+down" from "this machine's network is down". It also asks whether to extract an
+access token from auth-state JSON and send it in a request header, and whether
+to keep the latest response body under `logs/hooks/<hook name>/`. Browser
+`localStorage` cannot be read directly by the Node service; its JSON value must
+be copied or synced through the configured secret environment variable.
 
 **file** — run a script when a file or folder changes.  
 Asks for the path, a pattern (`*.yml`, `**/*.js`), whether to watch subfolders,

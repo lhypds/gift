@@ -37,7 +37,11 @@ hooks.json
             "match": "degraded",
             "matchType": "contains",
             "interval": 60000,
-            "timeout": 10000
+            "timeout": 10000,
+            "authStateEnv": "ER_AUTH_STATE_STORE",
+            "authTokenField": "accessToken",
+            "authHeader": "x-even-authorization",
+            "saveLastResponse": true
         },
         "run": "/home/me/bin/alert.sh",
         "cwd": "/home/me/bin"
@@ -50,9 +54,54 @@ match       text the page must contain for the hook to fire. Empty means any.
 matchType   any, contains (case-insensitive), exact, or regex.
 interval    how often to poll, in milliseconds. At least 1000.
 timeout     how long to wait for the page, in milliseconds. 10000 by default.
+authStateEnv
+            optional environment variable containing a JSON auth-state object.
+            When set, a missing or invalid value skips the poll instead of
+            accidentally making an unauthenticated request.
+authTokenField
+            property to take from that object. accessToken by default.
+authHeader  request header that receives the token. x-even-authorization by
+            default. The auth state and token are never written to hooks.json
+            or the activity log.
+saveLastResponse
+            true saves the body of every completed HTTP response under
+            logs/hooks/<hook name>/last_response.ext. The file is replaced
+            atomically and written 0600. Its extension follows Content-Type,
+            falling back to the URL, and the same 5 MB response cap applies.
 
 Each website hook polls on its own timer, staggered a second apart at startup so
 that ten of them are ten requests over ten seconds rather than ten at once.
+
+
+Browser localStorage authentication
+-----------------------------------
+
+The hook runs in Node, outside the browser, so browser security prevents it from
+reading an origin's localStorage directly. It can instead read the JSON value
+copied or synced from localStorage through an environment variable. For the
+common er_auth_state_store shape, put its JSON value in ER_AUTH_STATE_STORE
+(under triggers.website.auth_state_store in config.json, or in the real
+environment), then configure the three auth fields shown above.
+
+config.json may hold the value as a JSON object; it is a git-ignored 0600 file:
+
+    {
+        "triggers": {
+            "website": {
+                "auth_state_store": {
+                    "accessToken": "replace-with-the-current-token"
+                }
+            }
+        }
+    }
+
+Only accessToken is needed in this example. Leave refreshToken and unrelated
+account fields out when preparing the JSON by hand; gift does not use them.
+
+This is a snapshot, not a live connection to the browser. If the site rotates a
+short-lived access token, update the value and restart gift, or provide another
+environment variable whose current value is present when gift starts. Never
+paste a real access or refresh token into hooks.json.
 
 
 What the script is given
@@ -81,3 +130,5 @@ Settings
 
 interval     the interval `gift create` suggests (60000 ms)
 user_agent   the User-Agent sent with each poll (gift)
+auth_state_store
+             optional secret JSON exposed to hooks as ER_AUTH_STATE_STORE

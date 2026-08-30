@@ -15,6 +15,12 @@
             "type": "string",
             "default": "gift",
             "description": "User-Agent sent with each poll. Some sites answer differently, or not at all, without a recognisable one."
+        },
+        {
+            "key": "auth_state_store",
+            "env": "ER_AUTH_STATE_STORE",
+            "type": "secret",
+            "description": "Optional JSON value copied or synced from browser localStorage. An authenticated website hook can extract its accessToken without storing the secret in hooks.json."
         }
     ]
 }

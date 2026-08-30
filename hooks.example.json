@@ -40,7 +40,8 @@
         "match": "",
         "matchType": "any",
         "interval": 60000,
-        "timeout": 10000
+        "timeout": 10000,
+        "saveLastResponse": false
       },
       "run": "/opt/myapp/alert.sh",
       "args": [],

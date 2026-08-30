@@ -16,10 +16,10 @@ const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 /**
  * @returns {Promise<{ok: true, status: number, body: string, truncated: boolean,
- *                     digest: string, ms: number}
+ *                     contentType: string, digest: string, ms: number}
  *                  | {ok: false, error: string, ms: number}>}
  */
-async function fetchPage(url, { method = 'GET', timeout = 10000, userAgent } = {}) {
+async function fetchPage(url, { method = 'GET', timeout = 10000, userAgent, headers = {} } = {}) {
     if (typeof fetch !== 'function') {
         return { ok: false, error: 'this Node has no fetch — website hooks need Node 18 or newer', ms: 0 };
     }
@@ -33,7 +33,7 @@ async function fetchPage(url, { method = 'GET', timeout = 10000, userAgent } = {
             method,
             redirect: 'follow',
             signal: controller.signal,
-            headers: { 'user-agent': userAgent || 'gift', accept: '*/*' },
+            headers: { 'user-agent': userAgent || 'gift', accept: '*/*', ...headers },
         });
 
         const body = await readCapped(response, controller);
@@ -42,6 +42,7 @@ async function fetchPage(url, { method = 'GET', timeout = 10000, userAgent } = {
             status: response.status,
             body: body.text,
             truncated: body.truncated,
+            contentType: response.headers.get('content-type') || '',
             // What "did it change" is answered with. Comparing digests rather
             // than the bodies keeps a megabyte of HTML out of memory between
             // polls, and out of events.json entirely.
