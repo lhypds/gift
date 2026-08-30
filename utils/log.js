@@ -1,4 +1,4 @@
-// The server's two logs, shared by everything that writes to them.
+// The server's three logs, shared by everything that writes to them.
 //
 // hooks.log   the activity log: every event a trigger noticed, which hooks
 //             matched, exactly what was executed, whatever the script printed,
@@ -6,8 +6,18 @@
 //             `pm2 logs` alone does not give you.
 // server.log  one line per HTTP request, for the GitHub trigger's endpoint and
 //             the dashboard.
+// error.log   nothing but the error lines, so "did anything go wrong" is a
+//             question answered by a file's length rather than by reading a
+//             megabyte of ordinary activity. Every line in it is also in
+//             hooks.log — except the ones written before hooks.log is open.
 //
-// This lives outside serve.js because the triggers write to the same log: a
+// That exception is the point of having it. hooks.log's path comes out of
+// hooks.json, so a hooks.json that will not parse leaves nowhere to record why:
+// before this, a config the server refused went to stderr and PM2's log, and
+// `gift log` showed a server that had simply stopped saying anything. error.log
+// is opened first, at a fixed path, so a refusal to start has somewhere to go.
+//
+// This lives outside serve.js because the triggers write to the same logs: a
 // clipboard watcher and a webhook delivery belong in one file, in the order
 // they happened, or `gift log` stops being the place to look.
 'use strict';
@@ -20,6 +30,7 @@ const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 const logFile = { path: null, bytes: 0, disabled: false };
 const requestLogFile = { path: null, bytes: 0, disabled: false };
+const errorLogFile = { path: null, bytes: 0, disabled: false };
 
 function stamp() {
     return new Date().toISOString();
@@ -51,6 +62,14 @@ function openLog(file) {
 /** Start the access log that receives exactly one line per HTTP request. */
 function openRequestLog(file) {
     openLogFile(requestLogFile, file);
+}
+
+/**
+ * Start the error log. Opened before the config is read, so that the config
+ * being unreadable is itself something that gets written down.
+ */
+function openErrorLog(file) {
+    openLogFile(errorLogFile, file);
 }
 
 function rotateLog(target) {
@@ -92,6 +111,9 @@ function log(level, message, fields = {}) {
     if (level === 'error' || level === 'warn') console.error(line);
     else console.log(line);
     appendLogFile(logFile, line + '\n');
+    // Errors go to both. The copy in hooks.log keeps them in sequence with what
+    // led up to them; the copy in error.log is the one you can read all of.
+    if (level === 'error') appendLogFile(errorLogFile, line + '\n');
 }
 
 /**
@@ -106,15 +128,27 @@ function appendRequestLog(line) {
     appendLogFile(requestLogFile, line);
 }
 
+/**
+ * For the failures that happen before there is a running server to log them —
+ * a hooks.json that will not parse, a hook the triggers refuse. Everything
+ * after startup reaches error.log through log('error', …) instead.
+ */
+function appendErrorLog(line) {
+    appendLogFile(errorLogFile, line);
+}
+
 module.exports = {
     LOG_MAX_BYTES,
     logFile,
     requestLogFile,
+    errorLogFile,
     openLog,
     openRequestLog,
+    openErrorLog,
     log,
     forTrigger,
     appendRequestLog,
+    appendErrorLog,
     formatFields,
     stamp,
 };

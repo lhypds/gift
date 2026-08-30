@@ -25,7 +25,8 @@ const path = require('node:path');
 const express = require('express');
 
 const {
-    log, openLog, openRequestLog, appendRequestLog, logFile, requestLogFile, formatFields, stamp,
+    log, openLog, openRequestLog, openErrorLog, appendRequestLog, appendErrorLog,
+    logFile, requestLogFile, errorLogFile, formatFields, stamp,
 } = require('./utils/log.js');
 const hookRecord = require('./utils/hook.js');
 const triggers = require('./triggers/index.js');
@@ -38,6 +39,10 @@ const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
 const DEFAULT_LOG = path.join(HERE, 'hooks.log');
 const DEFAULT_REQUEST_LOG = path.join(HERE, 'server.log');
+// Beside the per-hook response folders, and deliberately not configurable: the
+// whole point of it is to have somewhere to write when the config is the thing
+// that is broken.
+const DEFAULT_ERROR_LOG = path.join(HERE, 'logs', 'hooks', 'error.log');
 const DEFAULT_EVENTS_FILE = path.join(HERE, 'events.json');
 
 const DEFAULTS = {
@@ -372,6 +377,16 @@ function startTriggers(config, options, runtime, mounted) {
 
 // -------------------------------------------------------------------- main ---
 
+/**
+ * A refusal to start. Said plainly on the terminal, where somebody typing
+ * `gift serve` is watching, and written to error.log, where somebody wondering
+ * why PM2 keeps restarting a server that logs nothing will look.
+ */
+function refuseToStart(message) {
+    console.error(`gift serve: ${message}`);
+    appendErrorLog(`${stamp()}  error  ${message}\n`);
+}
+
 function main(argv) {
     let options;
     try {
@@ -394,12 +409,17 @@ function main(argv) {
         /* running outside the repo — rely on the real environment */
     }
 
+    // Before the config is read, because a config that cannot be read is the
+    // failure most in need of somewhere to be written down. hooks.log cannot
+    // take it: which file that is comes out of the config that just failed.
+    openErrorLog(DEFAULT_ERROR_LOG);
+
     const configFile = path.resolve(options.config || process.env.GIFT_SERVE_CONFIG || DEFAULT_CONFIG);
     let config;
     try {
         config = loadConfig(configFile);
     } catch (err) {
-        console.error(`gift serve: ${err.message}`);
+        refuseToStart(err.message);
         return 1;
     }
 
@@ -458,6 +478,7 @@ function main(argv) {
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
         log('info', `request log ${requestLogFile.path}`);
+        if (errorLogFile.path) log('info', `error log ${errorLogFile.path}`);
         log('info', `events ${settings.eventsFile}`);
         if (settings.dryRun) log('warn', 'dry run — hook scripts will not be executed');
         if (settings.only.length) log('warn', `only the ${settings.only.join(', ')} trigger(s) will start`);

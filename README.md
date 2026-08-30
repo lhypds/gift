@@ -79,6 +79,19 @@ Log
 and then keeps watching, printing each line as the server writes it. Ctrl-C
 stops. `gift log --no-follow` prints the lines and exits.  
 
+There are three files. `hooks.log` is the activity log `gift log` reads,
+`server.log` is one line per HTTP request, and `logs/hooks/error.log` holds
+nothing but the error lines — so "did anything go wrong" is answered by a file's
+length rather than by reading a megabyte of ordinary activity. Every error is in
+both, except the ones that happen before `hooks.log` can be opened: which file
+that is comes out of `hooks.json`, so a `hooks.json` the server refuses has
+nowhere else to be recorded. `error.log` is opened first, at a fixed path, which
+is why a server that will not start is no longer a server that says nothing.
+
+If `gift status` reports *not answering, though PM2 says the process is online*,
+that is a server dying at startup and being restarted: `logs/hooks/error.log`
+says why.  
+
 Dashboard  
 `http://127.0.0.1:3999` lists what has happened in the last 24 hours, whichever
 trigger noticed it, and what each hook printed.

@@ -457,6 +457,11 @@ function printReport(state) {
         ['hooks', hooksRow(state.settings.hooks, state.settings.config)],
         ['log', logRow(state.log)],
     ];
+    // Only once there is something in it. An empty error log is the normal
+    // state, and a row saying so every time trains people to stop reading it.
+    if (state.errorLog && state.errorLog.bytes > 0) {
+        rows.push(['errors', logRow(state.errorLog)]);
+    }
     // Only when something delivers to it: on a gift watching only files and the
     // clipboard, the webhook endpoint is a line about a door nobody uses.
     if (state.settings.hooks.some((hook) => hookRecord.typeOf(hook) === 'github')) {
@@ -538,6 +543,13 @@ function asJson(state) {
                 modified: state.log.modified ? state.log.modified.toISOString() : undefined,
                 missing: state.log.missing || undefined,
             },
+        errorLog: state.errorLog && !state.errorLog.missing
+            ? {
+                path: state.errorLog.path,
+                bytes: state.errorLog.bytes,
+                modified: state.errorLog.modified ? state.errorLog.modified.toISOString() : undefined,
+            }
+            : undefined,
         missingSecrets: state.missingSecrets,
         secrets: state.secrets,
         version: version(),
@@ -608,6 +620,7 @@ async function main(argv) {
             pm2: pm2State(pm2Name),
             settings,
             log: logState(settings.log),
+            errorLog: logState(path.join(SERVER_DIR, 'logs', 'hooks', 'error.log')),
             missingSecrets: missingSecrets(settings.hooks),
             secrets: secretFingerprints(settings.hooks),
             health: await health(settings.host, settings.port, options.timeout),
