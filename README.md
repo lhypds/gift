@@ -63,6 +63,8 @@ Hooks
 `gift create` adds one.  
 `gift triggers` lists the trigger types.  
 Hook names are labels and may be reused; delete same-named hooks by their list position.
+When an existing hook script is not executable, `gift create` warns and offers
+to add execute permission before saving the hook.
 
 One process watches everything. Whichever trigger notices something, the same
 things follow: one run at a time per hook with a burst coalesced into a single
@@ -293,4 +295,3 @@ anything saves the file. Nothing has to be edited by hand.
 
 A value already in the environment always wins, so `GIFT_REPOS=... gift
 weekly-prs` still overrides what is configured for one run.  
-

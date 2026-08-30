@@ -435,7 +435,25 @@ async function createHook(file) {
     });
     if (runAnswer === null) return cancelled();
     const run = resolveTyped(runAnswer);
-    for (const note of scriptNotes(run)) console.log(`  note: ${note}`);
+    if (fs.existsSync(run)) {
+        try {
+            fs.accessSync(run, fs.constants.X_OK);
+        } catch {
+            console.log(`  warning: ${run} is not executable.`);
+            const makeExecutable = await askYesNo('Make it executable now?', false);
+            if (makeExecutable === null) return cancelled();
+            if (makeExecutable) {
+                try {
+                    fs.chmodSync(run, fs.statSync(run).mode | 0o111);
+                    console.log(`  Made ${run} executable.`);
+                } catch (err) {
+                    console.error(`  warning: could not make ${run} executable: ${err.message}`);
+                }
+            }
+        }
+    } else {
+        for (const note of scriptNotes(run)) console.log(`  note: ${note}`);
+    }
 
     const cwdAnswer = await askText('Working directory the script runs in', {
         fallback: path.dirname(run),
@@ -627,6 +645,7 @@ function createUsage() {
     console.log('branches, a URL and how often to poll, a folder and a pattern — and then');
     console.log('three that are the same for every type: the hook name, the bash script to');
     console.log('run and the working directory it runs in.');
+    console.log('If the script exists but is not executable, create offers to make it so.');
     console.log('');
     console.log('The rest takes the common answer — no arguments, not detached, on. Edit');
     console.log('hooks.json to change them; `gift help <type>-trigger` lists every field.');
