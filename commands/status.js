@@ -126,6 +126,21 @@ function logState(logPath) {
     }
 }
 
+/**
+ * The hooks that have written something to their own error log. A hook that has
+ * never failed has no file at all, so this is normally empty.
+ */
+function hookErrorState(hooks) {
+    const found = [];
+    (Array.isArray(hooks) ? hooks : []).forEach((hook, index) => {
+        const name = String(hook.name || `hook-${index + 1}`);
+        const safe = name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 128) || 'unknown';
+        const state = logState(path.join(SERVER_DIR, 'logs', 'hooks', safe, 'error.log'));
+        if (!state.missing && state.bytes > 0) found.push({ name, ...state });
+    });
+    return found;
+}
+
 /** Only the GitHub hooks are signed, so only they have a secret to be missing. */
 function githubSecretNames(hooks) {
     const names = new Set();
@@ -457,10 +472,15 @@ function printReport(state) {
         ['hooks', hooksRow(state.settings.hooks, state.settings.config)],
         ['log', logRow(state.log)],
     ];
-    // Only once there is something in it. An empty error log is the normal
+    // Only once there is something in one. An empty error log is the normal
     // state, and a row saying so every time trains people to stop reading it.
     if (state.errorLog && state.errorLog.bytes > 0) {
         rows.push(['errors', logRow(state.errorLog)]);
+    }
+    // Labelled the same as the shared one: the path already names the hook, and
+    // a label carrying it too widens every other row in the table to match.
+    for (const hook of state.hookErrors || []) {
+        rows.push(['errors', logRow(hook)]);
     }
     // Only when something delivers to it: on a gift watching only files and the
     // clipboard, the webhook endpoint is a line about a door nobody uses.
@@ -550,6 +570,12 @@ function asJson(state) {
                 modified: state.errorLog.modified ? state.errorLog.modified.toISOString() : undefined,
             }
             : undefined,
+        hookErrors: (state.hookErrors || []).map((hook) => ({
+            name: hook.name,
+            path: hook.path,
+            bytes: hook.bytes,
+            modified: hook.modified ? hook.modified.toISOString() : undefined,
+        })),
         missingSecrets: state.missingSecrets,
         secrets: state.secrets,
         version: version(),
@@ -621,6 +647,7 @@ async function main(argv) {
             settings,
             log: logState(settings.log),
             errorLog: logState(path.join(SERVER_DIR, 'logs', 'hooks', 'error.log')),
+            hookErrors: hookErrorState(settings.hooks),
             missingSecrets: missingSecrets(settings.hooks),
             secrets: secretFingerprints(settings.hooks),
             health: await health(settings.host, settings.port, options.timeout),

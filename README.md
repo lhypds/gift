@@ -79,18 +79,28 @@ Log
 and then keeps watching, printing each line as the server writes it. Ctrl-C
 stops. `gift log --no-follow` prints the lines and exits.  
 
-There are three files. `hooks.log` is the activity log `gift log` reads,
-`server.log` is one line per HTTP request, and `logs/hooks/error.log` holds
-nothing but the error lines — so "did anything go wrong" is answered by a file's
-length rather than by reading a megabyte of ordinary activity. Every error is in
-both, except the ones that happen before `hooks.log` can be opened: which file
-that is comes out of `hooks.json`, so a `hooks.json` the server refuses has
-nowhere else to be recorded. `error.log` is opened first, at a fixed path, which
-is why a server that will not start is no longer a server that says nothing.
+`hooks.log` is the activity log `gift log` reads, and `server.log` is one line
+per HTTP request. Alongside them the error lines are kept on their own, so "did
+anything go wrong" is answered by a file's length rather than by reading a
+megabyte of ordinary activity — filed by what the error is about:
+
+    logs/hooks/<hook name>/error.log   what went wrong for one hook, beside the
+                                       responses it saved
+    logs/hooks/error.log               what went wrong for the server itself
+
+A hook that has never failed has no file at all, which is what makes one showing
+up worth noticing. Everything in either is also in `hooks.log`, in sequence with
+whatever led up to it.
+
+The split is not tidiness. A per-hook folder is chosen by hook name, and hook
+names come out of `hooks.json` — so the failure most in need of recording, a
+`hooks.json` the server refuses, has no name to file under. That is why the
+server-level file exists and is opened before the config is read: a server that
+will not start is no longer a server that says nothing.
 
 If `gift status` reports *not answering, though PM2 says the process is online*,
-that is a server dying at startup and being restarted: `logs/hooks/error.log`
-says why.  
+that is a server dying at startup and being restarted; `logs/hooks/error.log`
+says why. `gift status` also lists any error log that has something in it.  
 
 Dashboard  
 `http://127.0.0.1:3999` lists what has happened in the last 24 hours, whichever

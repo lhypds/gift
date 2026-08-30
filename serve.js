@@ -25,7 +25,8 @@ const path = require('node:path');
 const express = require('express');
 
 const {
-    log, openLog, openRequestLog, openErrorLog, appendRequestLog, appendErrorLog,
+    log, openLog, openRequestLog, openErrorLog, openHookErrorLogs,
+    appendRequestLog, appendErrorLog,
     logFile, requestLogFile, errorLogFile, formatFields, stamp,
 } = require('./utils/log.js');
 const hookRecord = require('./utils/hook.js');
@@ -39,10 +40,12 @@ const DEFAULT_CONFIG = path.join(HERE, 'hooks.json');
 const EXAMPLE_CONFIG = path.join(HERE, 'hooks.example.json');
 const DEFAULT_LOG = path.join(HERE, 'hooks.log');
 const DEFAULT_REQUEST_LOG = path.join(HERE, 'server.log');
-// Beside the per-hook response folders, and deliberately not configurable: the
-// whole point of it is to have somewhere to write when the config is the thing
-// that is broken.
-const DEFAULT_ERROR_LOG = path.join(HERE, 'logs', 'hooks', 'error.log');
+// One folder per hook, holding that hook's saved responses and its error log.
+const DEFAULT_HOOK_LOG_DIR = path.join(HERE, 'logs', 'hooks');
+// The errors that belong to no hook, beside those folders — and deliberately
+// not configurable: the whole point of it is to have somewhere to write when
+// the config is the thing that is broken.
+const DEFAULT_ERROR_LOG = path.join(DEFAULT_HOOK_LOG_DIR, 'error.log');
 const DEFAULT_EVENTS_FILE = path.join(HERE, 'events.json');
 
 const DEFAULTS = {
@@ -413,6 +416,7 @@ function main(argv) {
     // failure most in need of somewhere to be written down. hooks.log cannot
     // take it: which file that is comes out of the config that just failed.
     openErrorLog(DEFAULT_ERROR_LOG);
+    openHookErrorLogs(DEFAULT_HOOK_LOG_DIR);
 
     const configFile = path.resolve(options.config || process.env.GIFT_SERVE_CONFIG || DEFAULT_CONFIG);
     let config;
@@ -436,7 +440,7 @@ function main(argv) {
         only: options.only,
         configFile,
         eventsFile: DEFAULT_EVENTS_FILE,
-        responseLogDir: path.join(HERE, 'logs', 'hooks'),
+        responseLogDir: DEFAULT_HOOK_LOG_DIR,
     };
     if (!settings.path.startsWith('/')) settings.path = `/${settings.path}`;
 
@@ -478,7 +482,9 @@ function main(argv) {
         log('info', `config ${configFile}`);
         log('info', logFile.path ? `log ${logFile.path}` : 'log console only (--no-log)');
         log('info', `request log ${requestLogFile.path}`);
-        if (errorLogFile.path) log('info', `error log ${errorLogFile.path}`);
+        if (errorLogFile.path) {
+            log('info', `error log ${errorLogFile.path}, and ${path.join(DEFAULT_HOOK_LOG_DIR, '<hook>', 'error.log')}`);
+        }
         log('info', `events ${settings.eventsFile}`);
         if (settings.dryRun) log('warn', 'dry run — hook scripts will not be executed');
         if (settings.only.length) log('warn', `only the ${settings.only.join(', ')} trigger(s) will start`);

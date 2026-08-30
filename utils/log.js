@@ -11,11 +11,21 @@
 //             megabyte of ordinary activity. Every line in it is also in
 //             hooks.log — except the ones written before hooks.log is open.
 //
-// That exception is the point of having it. hooks.log's path comes out of
-// hooks.json, so a hooks.json that will not parse leaves nowhere to record why:
-// before this, a config the server refused went to stderr and PM2's log, and
-// `gift log` showed a server that had simply stopped saying anything. error.log
-// is opened first, at a fixed path, so a refusal to start has somewhere to go.
+// There are two of that last one, filed by what the error is about:
+//
+//     logs/hooks/<hook>/error.log   what went wrong for one hook, beside the
+//                                   responses it saved. Written lazily, so a
+//                                   hook that has never failed has no file.
+//     logs/hooks/error.log          what went wrong for the server itself — a
+//                                   config it refused, a port already taken, a
+//                                   trigger that would not start.
+//
+// The split is not tidiness. A per-hook folder is chosen by hook name, and hook
+// names come out of hooks.json, so the one failure most in need of recording —
+// a hooks.json that will not parse — has no name to file under. That is why the
+// server-level file exists and is opened first, at a fixed path: before this, a
+// config the server refused went only to stderr and PM2's log, and `gift log`
+// showed a server that had simply stopped saying anything.
 //
 // This lives outside serve.js because the triggers write to the same logs: a
 // clipboard watcher and a webhook delivery belong in one file, in the order
@@ -32,8 +42,19 @@ const logFile = { path: null, bytes: 0, disabled: false };
 const requestLogFile = { path: null, bytes: 0, disabled: false };
 const errorLogFile = { path: null, bytes: 0, disabled: false };
 
+// The folder holding one directory per hook, and the files opened under it so
+// far. Opened on a hook's first error rather than at startup: a folder full of
+// empty error.log files is a folder that teaches you to ignore them.
+let hookLogDir = null;
+const hookErrorLogs = new Map();
+
 function stamp() {
     return new Date().toISOString();
+}
+
+/** A hook name as a directory name: the same one the saved responses use. */
+function safeHookName(name) {
+    return String(name || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 128) || 'unknown';
 }
 
 function openLogFile(target, file) {
@@ -65,11 +86,38 @@ function openRequestLog(file) {
 }
 
 /**
- * Start the error log. Opened before the config is read, so that the config
- * being unreadable is itself something that gets written down.
+ * Start the server-level error log. Opened before the config is read, so that
+ * the config being unreadable is itself something that gets written down.
  */
 function openErrorLog(file) {
     openLogFile(errorLogFile, file);
+}
+
+/**
+ * Point the per-hook error logs at the folder that already holds each hook's
+ * saved responses. Nothing is created here; a hook's file is opened the first
+ * time that hook has something to put in it.
+ */
+function openHookErrorLogs(dir) {
+    hookLogDir = dir || null;
+    hookErrorLogs.clear();
+}
+
+/**
+ * The error log for one hook, opened on demand. Null when the line names no
+ * hook — which is what sends server-level failures to the shared file rather
+ * than inventing a folder called 'unknown' for them.
+ */
+function hookErrorLog(name) {
+    if (!hookLogDir || !name) return null;
+    const safe = safeHookName(name);
+    let target = hookErrorLogs.get(safe);
+    if (!target) {
+        target = { path: null, bytes: 0, disabled: false };
+        openLogFile(target, path.join(hookLogDir, safe, 'error.log'));
+        hookErrorLogs.set(safe, target);
+    }
+    return target;
 }
 
 function rotateLog(target) {
@@ -111,9 +159,13 @@ function log(level, message, fields = {}) {
     if (level === 'error' || level === 'warn') console.error(line);
     else console.log(line);
     appendLogFile(logFile, line + '\n');
-    // Errors go to both. The copy in hooks.log keeps them in sequence with what
-    // led up to them; the copy in error.log is the one you can read all of.
-    if (level === 'error') appendLogFile(errorLogFile, line + '\n');
+    // Errors go to two files. hooks.log keeps them in sequence with what led up
+    // to them; the error log is the one you can read all of. Which error log
+    // depends on whether the line names a hook — a failing poll belongs beside
+    // that hook's responses, a port already in use belongs to the server.
+    if (level === 'error') {
+        appendLogFile(hookErrorLog(fields.hook) || errorLogFile, line + '\n');
+    }
 }
 
 /**
@@ -145,6 +197,9 @@ module.exports = {
     openLog,
     openRequestLog,
     openErrorLog,
+    openHookErrorLogs,
+    hookErrorLog,
+    safeHookName,
     log,
     forTrigger,
     appendRequestLog,

@@ -25,7 +25,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { ROOT } = require('../../functions.js');
-const { forTrigger } = require('../../utils/log.js');
+// safeHookName is shared rather than repeated: it decides the folder a hook's
+// responses are saved in, and the folder its error log is opened in. Two copies
+// that drifted would put the pair in two different places.
+const { forTrigger, safeHookName } = require('../../utils/log.js');
 const { INLINE_LIMIT } = require('../runtime.js');
 const match = require('../match.js');
 const { fetchPage } = require('./poll.js');
@@ -354,10 +357,6 @@ function contentSuffix(url, contentType = '') {
     return bodySuffix(url);
 }
 
-function safeHookName(name) {
-    return String(name || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 128) || 'unknown';
-}
-
 /** Replace the prior response atomically and keep exactly one recognised suffix. */
 function saveLastResponse(root, hookName, url, result) {
     const folder = path.join(root, safeHookName(hookName));
@@ -407,8 +406,31 @@ function start({ hooks, runtime, options }) {
         let previous = null;
         let polling = false;
         let saveError = '';
+        // The reason the last poll did not work, so that an hour of a host that
+        // will not resolve is one line in the hook's error log rather than sixty.
+        let failure = '';
 
         const refresh = trigger.credentials && trigger.credentials.refresh;
+
+        /**
+         * A poll that did not work. The first one, and any change of reason, is
+         * an error — a hook that cannot reach its URL is not doing its job, and
+         * that belongs in the hook's error.log. While the same thing keeps
+         * happening it drops to a warning: repeating it into the error log once
+         * a minute would bury the next real problem under an old one.
+         */
+        const trouble = (message, fields = {}) => {
+            const first = message !== failure;
+            failure = message;
+            log(first ? 'error' : 'warn', message, { hook: hook.name, ...fields });
+        };
+
+        /** A poll that worked after one that did not. */
+        const recovered = () => {
+            if (!failure) return;
+            log('info', 'polling again', { hook: hook.name, url: trigger.url });
+            failure = '';
+        };
 
         /** Renew the credential, say so, and answer whether the poll can go on. */
         const tryRenew = async (why) => {
@@ -418,18 +440,16 @@ function start({ hooks, runtime, options }) {
             });
             if (stopped) return false;
             if (!renewed.ok) {
-                log('warn', `poll skipped: ${why} and could not be renewed — ${renewed.error}`, {
-                    hook: hook.name, url: trigger.url,
-                });
+                trouble(`poll skipped: ${why} and could not be renewed — ${renewed.error}`, { url: trigger.url });
                 return false;
             }
             if (renewed.persisted) {
                 log('info', `credential renewed: ${renewed.changed.join(', ')}`, { hook: hook.name });
             } else {
-                // Worth a warning rather than a note: the token still in the
-                // file has been spent, so a restart before the next successful
-                // write is a restart with nothing left to refresh with.
-                log('warn', `credential renewed but not saved: ${renewed.error}`, {
+                // An error rather than a note: the token still in the file has
+                // been spent, so a restart before the next successful write is
+                // a restart with nothing left to refresh with.
+                log('error', `credential renewed but not saved: ${renewed.error}`, {
                     hook: hook.name, hint: 'the new credential is lost when the server restarts',
                 });
             }
@@ -447,13 +467,13 @@ function start({ hooks, runtime, options }) {
                     // already been spent. Ask for another rather than skipping
                     // every poll from here to the next manual paste.
                     if (!refresh) {
-                        log('warn', `poll skipped: ${credentials.error}`, { hook: hook.name, url: trigger.url });
+                        trouble(`poll skipped: ${credentials.error}`, { url: trigger.url });
                         return;
                     }
                     if (!await tryRenew(credentials.error)) return;
                     credentials = credentialHeaders(trigger);
                     if (!credentials.ok) {
-                        log('warn', `poll skipped: ${credentials.error}`, { hook: hook.name, url: trigger.url });
+                        trouble(`poll skipped: ${credentials.error}`, { url: trigger.url });
                         return;
                     }
                 }
@@ -476,7 +496,7 @@ function start({ hooks, runtime, options }) {
                     if (!await tryRenew(`the page answered ${result.status}`)) return;
                     const renewed = credentialHeaders(trigger);
                     if (!renewed.ok) {
-                        log('warn', `poll skipped: ${renewed.error}`, { hook: hook.name, url: trigger.url });
+                        trouble(`poll skipped: ${renewed.error}`, { url: trigger.url });
                         return;
                     }
                     result = await fetchOnce(renewed.headers);
@@ -485,21 +505,26 @@ function start({ hooks, runtime, options }) {
                         // A fresh credential the page still refuses is a broken
                         // hook, not a changed page. Firing a script on it would
                         // run a deploy over an authentication problem.
-                        log('warn', `poll skipped: the page still answered ${result.status} with a renewed credential`, {
-                            hook: hook.name, url: trigger.url,
-                        });
+                        trouble(
+                            `poll skipped: the page still answered ${result.status} with a renewed credential`,
+                            { url: trigger.url },
+                        );
                         return;
                     }
                 }
 
                 if (!result.ok) {
-                    // Logged, never fired on: a hook cannot tell "the site is
+                    // Recorded, never fired on: a hook cannot tell "the site is
                     // down" from "this machine's DNS is down", and running a
                     // deploy script over the second is worse than missing the
-                    // first.
-                    log('warn', `poll failed: ${result.error}`, { hook: hook.name, url: trigger.url });
+                    // first. Not firing is not the same as not saying so, though
+                    // — a hook that has stopped reaching its URL is broken, and
+                    // the first poll to fail says that in the hook's error.log.
+                    trouble(`poll failed: ${result.error}`, { url: trigger.url });
                     return;
                 }
+
+                recovered();
 
                 if (trigger.saveLastResponse) {
                     try {
@@ -516,7 +541,7 @@ function start({ hooks, runtime, options }) {
                     } catch (err) {
                         const message = err && err.message ? err.message : String(err);
                         if (message !== saveError) {
-                            log('warn', `cannot save latest response: ${message}`, { hook: hook.name });
+                            log('error', `cannot save latest response: ${message}`, { hook: hook.name });
                             saveError = message;
                         }
                     }
