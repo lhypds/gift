@@ -1,19 +1,22 @@
 import styles from "./link.module.css";
 
-// A repository name, linked to GitHub when the server could resolve a URL for
-// it (see repositoryLink/repositoryHooksLink in server.js), plain text otherwise.
-export default function RepoLink({ repo }) {
-  if (!repo.href) return repo.label;
+// What an event happened to: a repository, a URL, a file path, a snatch of
+// copied text. The server resolves a link for the ones that have somewhere to
+// go (see repositoryLink in triggers/github/serve.js, and the website trigger's
+// own); everything else is a label, and renders as plain text.
+export default function SourceLink({ source }) {
+  if (!source) return null;
+  if (!source.href) return source.label;
   return (
     <a
       className={styles.repoLink}
-      href={repo.href}
+      href={source.href}
       target="_blank"
       rel="noopener noreferrer"
-      title={repo.title}
+      title={source.title}
       onClick={(event) => event.stopPropagation()}
     >
-      {repo.label}
+      {source.label}
     </a>
   );
 }

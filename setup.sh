@@ -33,8 +33,10 @@ config_get() {
     "$NODE" "$ROOT_DIR/utils/config.js" get "$1"
 }
 
+# The target a setting belongs to — `gift` for its own, or a trigger type for
+# one of theirs. The webhook secret is the GitHub trigger's, not gift's.
 config_set() {
-    "$NODE" "$ROOT_DIR/utils/config.js" set gift "$1" "$2"
+    "$NODE" "$ROOT_DIR/utils/config.js" set "$1" "$2" "$3"
 }
 
 valid_webhook_url() {
@@ -76,6 +78,24 @@ for tool in git gh jq; do
     fi
 done
 
+# The clipboard trigger needs one of these, and there is no portable way to read
+# a clipboard without one. A headless server has none, which is usually the right
+# answer — there is nothing there to watch.
+CLIPBOARD_TOOL=""
+for tool in pbpaste wl-paste xclip xsel powershell; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        CLIPBOARD_TOOL="$tool"
+        break
+    fi
+done
+if [ -n "$CLIPBOARD_TOOL" ]; then
+    echo "    ok       $CLIPBOARD_TOOL  (clipboard hooks)"
+else
+    echo "    missing  a clipboard tool — clipboard hooks will not fire"
+    echo "             install one of: pbpaste (macOS), wl-paste, xclip, xsel"
+fi
+unset CLIPBOARD_TOOL
+
 # Installed is not enough for gh: `gift create` creates the repository webhook
 # through `gh api`, so a signed-out gh means the hook is written to hooks.json
 # while GitHub is never told about it — the one failure worth naming here.
@@ -109,8 +129,8 @@ unset STALE_ENV
 SECRET="$(config_get GITHUB_WEBHOOK_SECRET)"
 if [ -z "$SECRET" ] || [ "$SECRET" = '""' ] || [ "$SECRET" = "''" ]; then
     SECRET="$("$NODE" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-    config_set github_webhook_secret "$SECRET"
-    echo "==> Generated github_webhook_secret in config.json"
+    config_set github github_webhook_secret "$SECRET"
+    echo "==> Generated github_webhook_secret in config.json (under triggers.github)"
 else
     echo "==> Keeping existing github_webhook_secret"
 fi
@@ -134,8 +154,8 @@ if [ -t 0 ]; then
         echo "Invalid URL — use a complete public http:// or https:// URL without credentials or a fragment." >&2
     done
     if [ -n "$WEBHOOK_URL" ]; then
-        config_set webhook_url "$WEBHOOK_URL"
-        echo "==> Saved webhook_url in config.json"
+        config_set github webhook_url "$WEBHOOK_URL"
+        echo "==> Saved webhook_url in config.json (under triggers.github)"
     else
         echo "==> webhook_url left empty"
     fi

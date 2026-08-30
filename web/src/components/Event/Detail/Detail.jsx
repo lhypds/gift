@@ -14,12 +14,12 @@ function runStatus(run) {
   return parts.join(" · ");
 }
 
-export default function Detail({ delivery, onClose }) {
-  const runs = delivery?.runs ?? [];
+export default function Detail({ event, onClose }) {
+  const runs = event?.runs ?? [];
 
   return (
-    <Modal isOpen={Boolean(delivery)} onClose={onClose} closeOnOverlay>
-      {runs.length === 0 && <p className={styles.empty}>No hook output for this delivery.</p>}
+    <Modal isOpen={Boolean(event)} onClose={onClose} closeOnOverlay>
+      {runs.length === 0 && <p className={styles.empty}>No hook ran for this event.</p>}
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>
           <div className={styles.runHeader}>

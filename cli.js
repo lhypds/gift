@@ -14,6 +14,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const functions = require('./functions.js');
+const triggers = require('./triggers/index.js');
 // The configuration in config.json — see utils/config.js for the order things
 // are read in.
 const settings = require('./utils/config.js');
@@ -37,21 +38,27 @@ const BUILTINS = {
     serve: SERVE.description,
     restart: RESTART.description,
     stop: STOP.description,
-    status: 'Report whether the webhooks server is running and answering.',
-    list: 'List the configured server hooks.',
-    create: 'Create a local hook and, when gh is authenticated, its GitHub webhook.',
-    delete: 'Delete a server hook.',
+    status: 'Report whether the hooks server is running and answering.',
+    list: 'List the configured hooks.',
+    create: 'Create a hook: pick what triggers it, then what it runs.',
+    delete: 'Delete a hook.',
+    triggers: 'List the trigger types a hook can be built on.',
     log: `Print the last ${log.DEFAULT_LINES} lines of the server log.`,
-    config: 'Read and change gift\'s settings, and each function\'s.',
+    config: 'Read and change gift\'s settings, and each trigger\'s and function\'s.',
     run: 'Choose a helper function from a menu and run it.',
     update: 'Pull the latest gift code, restarting a running server on it.',
-    help: 'Show this help, or a function\'s own documentation.',
+    help: 'Show this help, or a function\'s or trigger\'s own documentation.',
     version: 'Show the installed version.',
 };
 
-// Listed under the webhooks heading in `gift help` rather than with the rest of
+// Listed under the hooks heading in `gift help` rather than with the rest of
 // the built-ins: all of them are about the server.
-const WEBHOOK_NAMES = ['serve', 'restart', 'stop', 'status', 'list', 'create', 'delete', 'log'];
+const HOOK_NAMES = ['serve', 'restart', 'stop', 'status', 'list', 'create', 'delete', 'triggers', 'log'];
+
+// A trigger is documented rather than run, so it is reachable through `gift
+// help` alone — `gift help clipboard`, or `gift help clipboard-trigger` when
+// something else has claimed the bare name.
+const TRIGGER_SUFFIX = '-trigger';
 
 // The built-ins with commands or options of their own, so `gift help <name>`
 // has real help to print rather than the one-line description.
@@ -75,7 +82,8 @@ function printHelp() {
     const width = Math.max(...names.map((n) => n.length), 0);
 
     console.log('usage: gift <function> [args...]');
-    console.log('       gift list             List configured server hooks.');
+    console.log('       gift list             List configured hooks.');
+    console.log('       gift create           Add a hook — GitHub, clipboard, website or file.');
     console.log('       gift run [name|no.]   Pick a helper function from a menu, or say which.');
     console.log('       gift -h | --help      Show this help.');
     console.log('       gift -v | --version   Show the installed version.');
@@ -88,18 +96,42 @@ function printHelp() {
         console.log(`  ${pad(fn.name, width)}  ${fn.description}`.trimEnd());
     }
     console.log('');
-    console.log('GitHub webhooks server:');
-    for (const name of WEBHOOK_NAMES) {
+    console.log('hooks server:');
+    for (const name of HOOK_NAMES) {
         console.log(`  ${pad(name, width)}  ${BUILTINS[name]}`);
     }
     console.log('');
     console.log('built-in:');
     for (const [name, description] of Object.entries(BUILTINS)) {
-        if (WEBHOOK_NAMES.includes(name)) continue; // listed above, under their own heading
+        if (HOOK_NAMES.includes(name)) continue; // listed above, under their own heading
         console.log(`  ${pad(name, width)}  ${description}`);
     }
     console.log('');
-    console.log('Run `gift help <function>` for a function\'s full documentation.');
+    console.log('Run `gift help <function>` for a function\'s full documentation, and');
+    console.log('`gift help <trigger>` for a trigger type\'s — `gift triggers` lists them.');
+}
+
+/** `gift triggers` — what a hook can be built on. */
+function printTriggers() {
+    const available = triggers.list();
+    const width = Math.max(...available.map((trigger) => trigger.name.length), 0);
+
+    console.log('A hook fires when its trigger says so, and runs a bash script when it does.');
+    console.log('`gift create` asks which of these it should be.');
+    console.log('');
+    for (const trigger of available) {
+        console.log(`  ${pad(trigger.name, width)}  ${trigger.summary}`);
+    }
+    console.log('');
+    console.log('Run `gift help <trigger>` for its hooks.json fields and the variables it');
+    console.log('hands to the script.');
+    return 0;
+}
+
+/** The trigger a help token names, if it names one. */
+function triggerFor(token) {
+    if (token.endsWith(TRIGGER_SUFFIX)) return triggers.get(token.slice(0, -TRIGGER_SUFFIX.length));
+    return triggers.get(token);
 }
 
 /**
@@ -134,8 +166,23 @@ function resolveToken(token) {
 }
 
 function printFunctionHelp(token) {
+    // Asked for by name, a trigger wins outright: `gift help clipboard-trigger`
+    // can mean nothing else. The bare name is tried only after the functions
+    // and built-ins, so a function may still claim it.
+    if (token.endsWith(TRIGGER_SUFFIX)) {
+        const trigger = triggerFor(token);
+        if (trigger) return printTriggerHelp(trigger);
+        console.error(`gift: no trigger called '${token.slice(0, -TRIGGER_SUFFIX.length)}'`);
+        console.error('Run `gift triggers` to see them.');
+        return 2;
+    }
+
     const result = resolveToken(token);
-    if (result.status !== 'ok') return reportResolveFailure(token, result);
+    if (result.status !== 'ok') {
+        const trigger = triggerFor(token);
+        if (trigger) return printTriggerHelp(trigger);
+        return reportResolveFailure(token, result);
+    }
 
     if (result.builtin) {
         const usage = BUILTIN_USAGE[result.builtin];
@@ -158,6 +205,20 @@ function printFunctionHelp(token) {
 
     console.log(`${fn.name} — ${fn.description || 'no README in this folder'}`);
     console.log(`  runs: ${path.relative(functions.ROOT, fn.entry)}`);
+    return 0;
+}
+
+function printTriggerHelp(trigger) {
+    for (const file of ['README.txt', 'README.md']) {
+        const readme = path.join(trigger.dir, file);
+        if (fs.existsSync(readme)) {
+            process.stdout.write(fs.readFileSync(readme, 'utf8').replace(/\s*$/, '\n'));
+            return 0;
+        }
+    }
+
+    console.log(`${trigger.name} — ${trigger.summary}`);
+    console.log(`  a hook fires on it when: ${trigger.prompt}`);
     return 0;
 }
 
@@ -247,6 +308,8 @@ async function runBuiltin(name, rest) {
             return deleteHook.main(rest);
         case 'list':
             return listHooks.main(rest);
+        case 'triggers':
+            return printTriggers();
         case 'log':
             return log.main(rest);
         case 'status':
@@ -293,7 +356,7 @@ async function main(argv) {
     // up under. `update` needs them to find the server it restarts, as `status`
     // does to report it.
     if (result.builtin) {
-        if (['create', 'delete', 'list', 'log', 'status', 'update'].includes(result.builtin)) {
+        if (['create', 'delete', 'list', 'log', 'status', 'triggers', 'update'].includes(result.builtin)) {
             settings.loadFor(SERVER_DIR);
         } else if (!['run', 'config'].includes(result.builtin)) {
             settings.loadFor();

@@ -1,0 +1,21 @@
+{
+    "description": "The file trigger: watches a file or folder for changes.",
+    "options": [
+        {
+            "key": "debounce",
+            "env": "GIFT_FILE_DEBOUNCE",
+            "type": "number",
+            "min": 0,
+            "default": 500,
+            "description": "How long `gift create` offers to wait for writes to settle before comparing, in milliseconds. Each hook stores its own; this is only the answer suggested."
+        },
+        {
+            "key": "poll",
+            "env": "GIFT_FILE_POLL",
+            "type": "number",
+            "min": 200,
+            "default": 2000,
+            "description": "How often to re-scan when fs.watch cannot be used — a platform without recursive watching, or a folder that does not exist yet."
+        }
+    ]
+}

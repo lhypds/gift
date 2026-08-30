@@ -1,23 +1,11 @@
 {
-    "description": "Shared settings and the webhooks server.",
+    "description": "Shared settings and the hooks server itself. Each trigger's own settings live under triggers.<type>.",
     "options": [
-        {
-            "key": "github_webhook_secret",
-            "env": "GITHUB_WEBHOOK_SECRET",
-            "type": "secret",
-            "description": "Shared secret configured on the GitHub webhook (Settings -> Webhooks -> Secret). ./setup.sh generates one when it is empty."
-        },
-        {
-            "key": "webhook_url",
-            "env": "GIFT_WEBHOOK_URL",
-            "type": "string",
-            "description": "Complete public delivery URL used by `gift create`, the /hooks/github path included."
-        },
         {
             "key": "pm2_name",
             "env": "PM2_NAME",
             "type": "string",
-            "default": "gift-webhooks",
+            "default": "gift",
             "description": "Name the server runs under in PM2."
         },
         {
@@ -26,7 +14,7 @@
             "type": "number",
             "min": 1,
             "default": 3999,
-            "description": "Port the server listens on."
+            "description": "Port the server listens on, for the dashboard and the GitHub endpoint."
         },
         {
             "key": "serve_host",
@@ -34,13 +22,6 @@
             "type": "string",
             "default": "127.0.0.1",
             "description": "Address the server binds."
-        },
-        {
-            "key": "serve_path",
-            "env": "GIFT_SERVE_PATH",
-            "type": "string",
-            "default": "/hooks/github",
-            "description": "Endpoint GitHub delivers to."
         },
         {
             "key": "serve_log",

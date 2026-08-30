@@ -1,13 +1,18 @@
 // The implementation shared by the top-level hook-management commands.
 //
 //   gift list            show what is configured
-//   gift create          add one, asking for the repository, name, script and cwd
+//   gift create          add one, asking what should trigger it and what to run
 //   gift delete [name]   remove one
 //
 // All three work on hooks.json — the file `gift serve` reads at startup
 // (--config=FILE, or GIFT_SERVE_CONFIG, points them somewhere else). The server
 // only reads it when it starts, so create and delete restart the server after
 // writing a change. What the server then writes is read by `gift log`.
+//
+// `create` asks two sorts of question. What should trigger the hook belongs to
+// the trigger — a repository and its branches, a URL and how often to poll, a
+// folder and a pattern — so the trigger module asks those, and nothing in here
+// knows what they are. What to run is the same for every type, and is asked here.
 'use strict';
 
 const fs = require('node:fs');
@@ -18,6 +23,9 @@ const { spawnSync } = require('node:child_process');
 const { ROOT } = require('../functions.js');
 const { ask } = require('./pick.js');
 const { SERVER_DIR } = require('./service.js');
+const hookRecord = require('./hook.js');
+const triggers = require('../triggers/index.js');
+const gh = require('../triggers/github/gh.js');
 
 const DEFAULT_CONFIG = path.join(SERVER_DIR, 'hooks.json');
 
@@ -30,18 +38,7 @@ const DEFAULT_SETTINGS = {
     log: 'hooks.log',
 };
 
-const DEFAULT_SECRET_ENV = 'GITHUB_WEBHOOK_SECRET';
-const WEBHOOK_URL_ENV = 'GIFT_WEBHOOK_URL';
-
-// What the branch question takes when the user just presses Enter: the server
-// matches any name in the list, so offering both spellings of the default branch
-// covers the common case without the user having to know which one the repo uses.
-const DEFAULT_BRANCHES = ['main', 'master'];
-
-const VALID_REPO_PART = /^[A-Za-z0-9._-]+$/;
 const VALID_HOOK_NAME = /^[A-Za-z0-9._-]+$/;
-// Branch names are git refs, so slashes belong in them — release/1.2 is one name.
-const VALID_BRANCH_NAME = /^[A-Za-z0-9._/-]+$/;
 
 // -------------------------------------------------------------------- paths ---
 
@@ -71,7 +68,7 @@ function isDirectory(target) {
 
 /**
  * What is worth saying about a hook's script — the same two things the server
- * warns about at startup, so they surface before a delivery arrives.
+ * warns about at startup, so they surface before anything fires.
  */
 function scriptNotes(run) {
     if (!fs.existsSync(run)) return [`no file at ${run} yet`];
@@ -170,205 +167,18 @@ function restartServer(run = spawnSync) {
     return { ok: true };
 }
 
-// --------------------------------------------------------------- GitHub CLI ---
-
-function webhookUrlProblem(value) {
-    let parsed;
-    try {
-        parsed = new URL(value);
-    } catch {
-        return 'Type the complete public URL, including https://.';
-    }
-    if (!['http:', 'https:'].includes(parsed.protocol)) return 'The webhook URL must use http:// or https://.';
-    if (parsed.username || parsed.password) return 'Do not put credentials in the webhook URL.';
-    return null;
-}
-
-/** What gh said went wrong: its first line of stderr, or why it never ran. */
-function ghProblem(result, fallback) {
-    if (result.error) {
-        return result.error.code === 'ENOENT' ? 'gh is not installed' : result.error.message;
-    }
-    const said = String(result.stderr || '').trim().split('\n').find(Boolean);
-    return said || fallback;
-}
-
-/**
- * Whether gh can act on the user's behalf, as a message or null when it can.
- * Checked before offering the remote webhook: an installed but signed-out gh is
- * the ordinary reason a hook lands in hooks.json while GitHub never hears of it,
- * and finding that out afterwards is finding it out too late.
- */
-function ghAuthProblem(run = spawnSync) {
-    const result = run('gh', ['auth', 'status'], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
-    if (!result.error && result.status === 0) return null;
-    return ghProblem(result, 'gh is not signed in — run: gh auth login');
-}
-
-/** Create a repository webhook without ever placing its secret on the command line. */
-function createGitHubWebhook(repo, url, hook, secret, run = spawnSync) {
-    const body = JSON.stringify({
-        name: 'web',
-        active: true,
-        events: hook.events,
-        config: {
-            url,
-            content_type: 'json',
-            secret,
-            insecure_ssl: '0',
-        },
-    });
-    const result = run(
-        'gh',
-        [
-            'api',
-            '--method', 'POST',
-            `repos/${repo}/hooks`,
-            '--header', 'Accept: application/vnd.github+json',
-            '--input', '-',
-            '--silent',
-        ],
-        { input: body, encoding: 'utf8', maxBuffer: 1024 * 1024 },
-    );
-
-    if (!result.error && result.status === 0) return { ok: true };
-    return { ok: false, message: ghProblem(result, `gh api exited ${result.status}`) };
-}
-
-/** The webhooks GitHub currently lists for the repository, as gh reports them. */
-function readGitHubWebhooks(repo, run = spawnSync) {
-    const result = run(
-        'gh',
-        [
-            'api',
-            `repos/${repo}/hooks`,
-            '--header', 'Accept: application/vnd.github+json',
-            '--paginate',
-        ],
-        { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
-    );
-    if (result.error || result.status !== 0) {
-        return { ok: false, message: ghProblem(result, `gh api exited ${result.status}`) };
-    }
-
-    let parsed;
-    try {
-        parsed = JSON.parse(result.stdout);
-    } catch {
-        return { ok: false, message: 'gh api returned something other than JSON' };
-    }
-    if (!Array.isArray(parsed)) return { ok: false, message: 'gh api did not return a list of webhooks' };
-    return { ok: true, hooks: parsed };
-}
-
-/**
- * Ask GitHub whether the webhook is really there, matching on the delivery URL.
- * `gh api --method POST` exiting 0 is gh's word for it; this is GitHub's — and it
- * is also what tells a webhook that failed to appear from one that was already
- * there before gift asked, which GitHub refuses as a duplicate.
- */
-function verifyGitHubWebhook(repo, url, run = spawnSync) {
-    const listed = readGitHubWebhooks(repo, run);
-    if (!listed.ok) {
-        return { ok: false, message: `the repository's webhooks could not be read: ${listed.message}` };
-    }
-
-    const match = listed.hooks.find((item) => item && item.config && item.config.url === url);
-    if (!match) return { ok: false, message: `GitHub lists no webhook delivering to ${url}` };
-    return {
-        ok: true,
-        id: match.id,
-        active: match.active !== false,
-        events: Array.isArray(match.events) ? match.events : [],
-    };
-}
-
-// ------------------------------------------------------------------- fields ---
-
-/**
- * Pull the owner and repository out of whatever the user pasted: `owner`,
- * `owner/repo`, an HTTPS URL, or an SSH remote.
- */
-function parseRepo(text) {
-    let value = String(text).trim();
-    value = value.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, ''); // https://
-    value = value.replace(/^[^@/\s]+@([^:/\s]+):/, ''); // git@github.com:
-    value = value.replace(/\.git$/i, '');
-    value = value.replace(/^\/+|\/+$/g, '');
-
-    const parts = value.split('/').filter(Boolean);
-    // A first segment with a dot in it is the host, not the owner.
-    if (parts.length > 1 && parts[0].includes('.')) parts.shift();
-
-    return { owner: parts[0] || '', name: parts[1] || '' };
-}
-
-/**
- * The branch list out of one typed answer. Commas or spaces separate, so
- * `main, master` and `main master` both give two branches, and a name repeated
- * only counts once — the server matches any name in the list.
- */
-function parseBranches(text) {
-    const branches = [];
-    for (const part of String(text).split(/[\s,]+/)) {
-        const value = part.trim();
-        if (value && !branches.includes(value)) branches.push(value);
-    }
-    return branches;
-}
-
-/**
- * Whether the answer names branches the server could ever match, as a message or
- * null. The server compares whole branch names, so anything git would not accept
- * as one is a branch that never fires — worth catching while it can still be
- * retyped rather than at the first push that goes missing.
- */
-function branchesProblem(branches) {
-    if (branches.length === 0) return 'Name at least one branch, or * for any.';
-    if (branches.includes('*')) {
-        return branches.length === 1 ? null : '* already covers every branch — list names, or just *.';
-    }
-    for (const branch of branches) {
-        if (!VALID_BRANCH_NAME.test(branch)) return `'${branch}' is not a branch name.`;
-        if (branch.startsWith('/') || branch.endsWith('/')) return `'${branch}' cannot start or end with /.`;
-        if (branch.includes('..') || branch.endsWith('.lock')) return `'${branch}' is not a name git allows.`;
-    }
-    return null;
-}
+// ------------------------------------------------------------------ display ---
 
 /**
  * The rows shown for one hook, by `list` and by the confirmation in `create`.
- * `run` and `cwd` are resolved against the project root — where the server resolves
- * them from, wherever the configuration file itself is.
+ * `run` and `cwd` are resolved against the project root — where the server
+ * resolves them from, wherever the configuration file itself is.
  */
 function describe(hook) {
-    const events = Array.isArray(hook.events) && hook.events.length ? hook.events : ['push'];
-    const branches = Array.isArray(hook.branches) ? hook.branches : [];
-    const run = hook.run ? path.resolve(SERVER_DIR, expandHome(String(hook.run))) : '';
-
-    const rows = [
-        ['repo', hook.repo || '*'],
-        ['events', events.join(', ')],
-        ['branches', branches.length ? branches.join(', ') : 'any'],
-        ['run', run ? show(run) : '(none — this hook cannot run)'],
-    ];
-    if (Array.isArray(hook.args) && hook.args.length) {
-        // Quoted the way it would be typed, so an argument with a space in it
-        // does not read as two.
-        rows.push(['args', hook.args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')]);
-    }
-    rows.push([
-        'cwd',
-        hook.cwd
-            ? show(path.resolve(SERVER_DIR, expandHome(String(hook.cwd))))
-            : run
-                ? `${show(path.dirname(run))} (the script's folder)`
-                : "(the script's folder)",
-    ]);
-    if (hook.detach) rows.push(['detach', 'yes']);
-    if (hook.secretEnv && hook.secretEnv !== DEFAULT_SECRET_ENV) rows.push(['secret', hook.secretEnv]);
-    if (run) for (const note of scriptNotes(run)) rows.push(['note', note]);
-    return rows;
+    return hookRecord.describe(hook, {
+        resolve: (target) => show(path.resolve(SERVER_DIR, target)),
+        notes: (run) => scriptNotes(path.resolve(SERVER_DIR, run)),
+    });
 }
 
 function printRows(rows, indent = '     ') {
@@ -448,6 +258,48 @@ async function askYesNo(question, fallback) {
     }
 }
 
+/**
+ * The first question `gift create` asks: what should set this hook off. Every
+ * later question follows from the answer, which is why it comes before the
+ * hook's own name — a file hook and a webhook have almost nothing else in
+ * common.
+ */
+async function pickTrigger() {
+    const available = triggers.list();
+    const width = Math.max(...available.map((trigger) => trigger.title.length));
+
+    console.log('What should trigger this hook?');
+    console.log('');
+    available.forEach((trigger, index) => {
+        console.log(`  ${index + 1}  ${trigger.title.padEnd(width)}  ${trigger.summary}`);
+    });
+    console.log('');
+
+    for (; ;) {
+        const answer = await ask(`Trigger [1-${available.length}], or q to quit: `);
+        if (answer === null) return null;
+
+        const token = answer.trim().toLowerCase();
+        if (token === '' || token === 'q' || token === 'quit') return null;
+
+        if (/^\d+$/.test(token)) {
+            const index = Number(token) - 1;
+            if (index >= 0 && index < available.length) return available[index];
+            console.log(`There is no ${token} in the list — pick 1 to ${available.length}.`);
+            continue;
+        }
+
+        // A name, or enough of one: `gift create` then `cl` is the clipboard.
+        const matched = available.filter((trigger) => trigger.name.startsWith(token));
+        if (matched.length === 1) return matched[0];
+        if (matched.length > 1) {
+            console.log(`'${token}' matches ${matched.map((t) => t.name).join(' and ')} — type more of the name.`);
+        } else {
+            console.log(`No trigger called '${token}'.`);
+        }
+    }
+}
+
 // -------------------------------------------------------------------- list ---
 
 function listHooks(file) {
@@ -473,20 +325,45 @@ function listHooks(file) {
         printRows(describe(hook), `  ${' '.repeat(numberWidth)}    `);
     });
 
+    // Counted by type: which triggers are in use is the thing worth knowing at
+    // a glance, and the endpoint only matters when something delivers to it.
+    const counts = new Map();
+    for (const hook of hooks) {
+        const type = hookRecord.typeOf(hook);
+        counts.set(type, (counts.get(type) || 0) + 1);
+    }
+    const byType = [...counts].map(([type, count]) => `${count} ${type}`).join(', ');
+
     console.log('');
-    const settings = [
-        `${config.host || DEFAULT_SETTINGS.host}:${config.port || DEFAULT_SETTINGS.port}`,
-        config.path || DEFAULT_SETTINGS.path,
-    ].join('');
-    console.log(`${hooks.length} hook${hooks.length === 1 ? '' : 's'}, served on ${settings}.`);
+    console.log(`${hooks.length} hook${hooks.length === 1 ? '' : 's'} — ${byType}.`);
+    if (counts.has('github')) {
+        const endpoint = [
+            `${config.host || DEFAULT_SETTINGS.host}:${config.port || DEFAULT_SETTINGS.port}`,
+            config.path || DEFAULT_SETTINGS.path,
+        ].join('');
+        console.log(`GitHub deliveries are received on ${endpoint}.`);
+    }
     return 0;
 }
 
 // ------------------------------------------------------------------ create ---
 
-/** A descriptive unused default name for the new hook. */
-function defaultName(repoName, taken) {
-    const base = repoName ? `hook-${repoName.toLowerCase()}` : 'hook';
+/**
+ * A descriptive unused default name for the new hook, out of whatever the
+ * trigger called itself: a repository, a URL, a folder.
+ */
+function defaultName(type, label, taken) {
+    let stem = String(label || '')
+        .replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '')
+        .replace(/[?#].*$/, '')
+        .replace(/\/+$/, '');
+    stem = stem.split('/').filter(Boolean).pop() || '';
+    // `status.json` and `nginx.conf` name the thing watched; the extension is
+    // not part of what to call the hook.
+    stem = stem.replace(/\.[A-Za-z0-9]{1,5}$/, '');
+    stem = stem.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+
+    const base = stem && stem !== '*' ? `hook-${stem}` : `hook-${type}`;
     if (!taken.has(base)) return base;
     for (let n = 2; ; n++) {
         if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
@@ -506,8 +383,8 @@ async function createHook(file) {
     ));
 
     console.log(`Adding a hook to ${show(file)}${missing ? ', which will be created' : ''}.`);
-    console.log('Five questions about the hook, and for one repository whether to create its');
-    console.log('GitHub webhook too. Enter takes the [default], Ctrl-C stops without writing anything.');
+    console.log('First what should trigger it, then what to run when it does.');
+    console.log('Enter takes the [default], Ctrl-C stops without writing anything.');
     console.log('');
 
     const cancelled = () => {
@@ -515,80 +392,27 @@ async function createHook(file) {
         return 130;
     };
 
-    // Which repository may trigger it. The server compares `owner/repo` whole,
-    // so it is either one repository or `*` — an owner on its own cannot match.
-    const repoAnswer = await askText('Repository — owner/repo, * for any', {
-        fallback: '*',
-        validate: (value) => {
-            if (value === '*') return null;
-            const parsed = parseRepo(value);
-            if (!parsed.owner) return 'Type the repository as owner/repo, or * for any.';
-            if (!VALID_REPO_PART.test(parsed.owner)) return `'${parsed.owner}' is not a GitHub owner name.`;
-            if (!parsed.name) return `Name the repository too — ${parsed.owner}/something, or * for any.`;
-            if (!VALID_REPO_PART.test(parsed.name)) return `'${parsed.name}' is not a repository name.`;
-            return null;
-        },
-    });
-    if (repoAnswer === null) return cancelled();
+    const trigger = await pickTrigger();
+    if (trigger === null) return cancelled();
+    console.log('');
 
-    let repo = '*';
-    if (repoAnswer !== '*') {
-        const parsed = parseRepo(repoAnswer);
-        repo = `${parsed.owner}/${parsed.name}`;
+    // Everything about *what* fires the hook belongs to the trigger. It may
+    // also stop outright — the GitHub trigger does, when it was asked to create
+    // a webhook it cannot create — which is a stop rather than a warning: a
+    // hook that looks configured and never fires is worse than no hook.
+    let asked;
+    try {
+        asked = await trigger.ask({ askText, askYesNo, resolveTyped, show });
+    } catch (err) {
+        console.log('');
+        console.error(`gift create: ${err.message}`);
+        return 2;
     }
-
-    // Which branches, asked next because it is the other half of the same
-    // question: together with the repository it is everything the server checks
-    // before running the script. A push to a branch outside the list is a delivery
-    // the server answers with 'No match'.
-    const branchesAnswer = await askText('Branches — comma separated, * for any', {
-        fallback: DEFAULT_BRANCHES.join(', '),
-        validate: (value) => branchesProblem(parseBranches(value)),
-    });
-    if (branchesAnswer === null) return cancelled();
-    const branches = parseBranches(branchesAnswer);
-
-    // Whether GitHub is told about the hook is settled here, before the three
-    // questions about the script and before anything is written. A `*` hook has no
-    // single repository to hang a webhook on, so it is never offered one.
-    //
-    // Asking first, then checking: gh has to be installed and signed in, and the
-    // secret has to be set, or the webhook the user just asked for cannot be made.
-    // That is a stop, not a warning — a local hook GitHub never calls looks exactly
-    // like a working one, and finding out is worth more than a saved hooks.json.
-    let githubUrl = null;
-    const secret = process.env[DEFAULT_SECRET_ENV];
-    if (repo !== '*') {
-        const createRemote = await askYesNo(`Create the GitHub webhook for ${repo} with gh?`, true);
-        if (createRemote === null) return cancelled();
-        if (createRemote) {
-            // ghAuthProblem covers both: a missing gh reports itself as not installed.
-            const problem = ghAuthProblem()
-                || (secret ? null : `${DEFAULT_SECRET_ENV} is not set, and it is what signs the deliveries`);
-            if (problem) {
-                console.log('');
-                console.error(`gift create: the GitHub webhook for ${repo} cannot be created — ${problem}`);
-                console.error('Nothing was written. Fix that and run `gift create` again, or answer n to the');
-                console.error("GitHub question and add the webhook under the repository's Settings > Webhooks.");
-                return 2;
-            }
-
-            const configuredUrl = String(process.env[WEBHOOK_URL_ENV] || '').trim();
-            if (configuredUrl && !webhookUrlProblem(configuredUrl)) {
-                githubUrl = configuredUrl;
-                console.log(`  GitHub webhook URL: ${githubUrl} (from ${WEBHOOK_URL_ENV})`);
-            } else {
-                if (configuredUrl) console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${webhookUrlProblem(configuredUrl)}`);
-                githubUrl = await askText(`Public webhook URL for ${repo} — gh will create the remote webhook`, {
-                    validate: webhookUrlProblem,
-                });
-                if (githubUrl === null) return cancelled();
-            }
-        }
-    }
+    if (asked === null) return cancelled();
+    console.log('');
 
     const name = await askText('Hook name — the label it appears under in the log', {
-        fallback: defaultName(repo === '*' ? '' : repo.split('/')[1], taken),
+        fallback: defaultName(trigger.name, asked.label, taken),
         validate: (value) => {
             if (!VALID_HOOK_NAME.test(value)) return 'Letters, digits, dot, dash and underscore only.';
             if (taken.has(value)) return `A hook named '${value}' already exists — choose a unique name.`;
@@ -599,12 +423,13 @@ async function createHook(file) {
 
     // Absolute only. A relative path would be resolved against wherever the user
     // happens to be standing, which is not what the hook would run months later.
-    const runAnswer = await askText('Script to run — an absolute path', {
+    const runAnswer = await askText('Script to run — an absolute path to a .sh', {
         validate: (value) => {
             if (!value) return 'A script is needed; it is what the hook runs.';
             if (!path.isAbsolute(expandHome(value))) {
                 return 'That path must be absolute, so the hook runs the same script wherever the server was started.';
             }
+            if (!value.endsWith('.sh')) return 'The handler is a bash script — the path must end in .sh.';
             return null;
         },
     });
@@ -619,67 +444,54 @@ async function createHook(file) {
     const cwd = resolveTyped(cwdAnswer);
     if (!isDirectory(cwd)) console.log(`  note: no directory at ${cwd} yet`);
 
-    // Everything not asked about takes the common answer — a push, no arguments,
-    // not detached, the shared secret. Field order matches hooks.example.json, so
-    // hand-written and generated hooks read the same way.
+    // Everything not asked about takes the common answer — no arguments, not
+    // detached, on. Field order matches hooks.example.json, so hand-written and
+    // generated hooks read the same way.
     const hook = {
         name,
-        repo,
-        events: ['push'],
-        branches,
+        trigger: asked.trigger,
         run,
         args: [],
         cwd,
         detach: false,
-        secretEnv: DEFAULT_SECRET_ENV,
+        enabled: true,
     };
 
     config.hooks.push(hook);
     writeConfig(file, config);
 
-    let githubResult = null;
-    let confirmed = null;
-    if (githubUrl) {
-        console.log(`Creating the GitHub webhook for ${repo} with gh...`);
-        githubResult = createGitHubWebhook(repo, githubUrl, hook, secret);
-        // Asked either way. A POST that reported failure may still have landed,
-        // and a webhook GitHub already had is a pass rather than a problem.
-        console.log('Confirming it with gh...');
-        confirmed = verifyGitHubWebhook(repo, githubUrl);
+    // Anything the trigger has to do elsewhere — telling GitHub about the
+    // webhook — happens now the hook is safely on disk, so a failure out there
+    // leaves a hook that can be pointed at a hand-made webhook rather than
+    // nothing at all.
+    let result = null;
+    if (typeof asked.after === 'function') {
+        try {
+            result = asked.after(hook);
+        } catch (err) {
+            result = { ok: false, lines: [], warnings: [err.message] };
+        }
     }
 
     console.log('');
     console.log(`Added '${name}' to ${show(file)}.`);
-    if (confirmed && confirmed.ok) {
-        const events = confirmed.events.length ? confirmed.events.join(', ') : 'no events';
-        const active = confirmed.active ? '' : ', inactive';
-        console.log(`GitHub confirms webhook ${confirmed.id} on ${repo} — ${githubUrl}, ${events}${active}.`);
-        if (!githubResult.ok) {
-            console.log(`  note: gh said '${githubResult.message}', but the webhook is there.`);
-        }
-    } else if (githubResult && githubResult.ok) {
-        console.error(`warning: gh created the GitHub webhook, but GitHub does not confirm it: ${confirmed.message}`);
-        console.error('         Check the repository settings before relying on the hook.');
-    } else if (githubResult) {
-        console.error(`warning: the local hook was added, but GitHub was not updated: ${githubResult.message}`);
-        console.error('         Check the gh account has Webhooks write access, then add it in the repository settings.');
+    if (result) {
+        for (const line of result.lines) console.log(line);
+        for (const warning of result.warnings) console.error(`warning: ${warning}`);
     }
     console.log('');
     console.log(`  ${name}`);
     printRows(describe(hook), '    ');
     console.log('');
-    if (!process.env[DEFAULT_SECRET_ENV]) {
-        console.log(`warning: ${DEFAULT_SECRET_ENV} is not set — the server refuses to start without a secret.`);
-        console.log(`         Add it to config.json with \`gift config\`, the same value as the webhook's Secret on GitHub.`);
-    }
-    console.log(`Edit ${show(file)} for anything else — other events or branches, arguments, detach.`);
+    for (const note of (trigger.afterNotes ? trigger.afterNotes(hook) : [])) console.log(note);
+    console.log(`Edit ${show(file)} for anything else — see \`gift help ${trigger.name}-trigger\` for the fields.`);
     console.log('');
+
     const restartResult = restartServer();
     if (!restartResult.ok) {
         console.error(`gift create: the hook was saved, but the server could not be restarted: ${restartResult.message}`);
     }
-    // The webhook counts as created only once GitHub lists it, not when gh says so.
-    return (githubResult && !(confirmed && confirmed.ok)) || !restartResult.ok ? 1 : 0;
+    return (result && !result.ok) || !restartResult.ok ? 1 : 0;
 }
 
 // ------------------------------------------------------------------ delete ---
@@ -689,14 +501,13 @@ async function pickHook(hooks) {
     const label = (hook, index) => String(hook.name || `hook-${index + 1}`);
     const numberWidth = String(hooks.length).length;
     const nameWidth = Math.max(...hooks.map((hook, index) => label(hook, index).length));
-    const repoWidth = Math.max(...hooks.map((h) => String(h.repo || '*').length));
+    const typeWidth = Math.max(...hooks.map((hook) => hookRecord.typeOf(hook).length));
 
     console.log('hooks:');
     hooks.forEach((hook, index) => {
         const number = String(index + 1).padStart(numberWidth);
-        const events = (Array.isArray(hook.events) && hook.events.length ? hook.events : ['push']).join('|');
-        const repo = String(hook.repo || '*').padEnd(repoWidth);
-        console.log(`  ${number}  ${label(hook, index).padEnd(nameWidth)}  ${repo}  ${events}`);
+        const type = hookRecord.typeOf(hook).padEnd(typeWidth);
+        console.log(`  ${number}  ${label(hook, index).padEnd(nameWidth)}  ${type}  ${hookRecord.line(hook)}`);
     });
     console.log('');
 
@@ -785,7 +596,14 @@ async function deleteHook(file, options, positionals) {
     writeConfig(file, config);
 
     console.log(`Deleted '${name}' from ${show(file)}.`);
+    // The webhook on GitHub's side, if this was one, is left alone: gift did
+    // not necessarily create it, and deleting someone else's webhook because a
+    // local hook was tidied away is not a thing to do without being asked.
+    if (hookRecord.typeOf(hook) === 'github' && hook.trigger && hook.trigger.repo && hook.trigger.repo !== '*') {
+        console.log(`The webhook on ${hook.trigger.repo} is untouched — remove it in Settings > Webhooks if it is now unused.`);
+    }
     console.log('');
+
     const restartResult = restartServer();
     if (!restartResult.ok) {
         console.error(`gift delete: the hook was deleted, but the server could not be restarted: ${restartResult.message}`);
@@ -799,17 +617,19 @@ async function deleteHook(file, options, positionals) {
 function createUsage() {
     console.log('usage: gift create [--config=FILE]');
     console.log('');
-    console.log('Create a server hook, asking five things: the repository, the branches to');
-    console.log('watch, the hook name, the script to run and the working directory it runs in.');
+    console.log('Create a hook. The first question is what should trigger it:');
     console.log('');
-    console.log(`The rest takes the common answer — a push, no arguments, not detached, the secret`);
-    console.log(`in ${DEFAULT_SECRET_ENV}. Edit hooks.json to change them.`);
+    for (const trigger of triggers.list()) {
+        console.log(`  ${trigger.title.padEnd(10)}  ${trigger.summary}`);
+    }
     console.log('');
-    console.log(`For a specific repository, gift asks whether to create its GitHub webhook with gh`);
-    console.log(`before the questions about the script. Answering yes needs gh installed and signed`);
-    console.log(`in and ${DEFAULT_SECRET_ENV} set: without them nothing is written at all. Set`);
-    console.log(`${WEBHOOK_URL_ENV} to the complete public delivery URL, or gift will ask for it.`);
-    console.log(`Afterwards gift asks GitHub to confirm the webhook is really there.`);
+    console.log('The questions that follow are the trigger\'s own — a repository and its');
+    console.log('branches, a URL and how often to poll, a folder and a pattern — and then');
+    console.log('three that are the same for every type: the hook name, the bash script to');
+    console.log('run and the working directory it runs in.');
+    console.log('');
+    console.log('The rest takes the common answer — no arguments, not detached, on. Edit');
+    console.log('hooks.json to change them; `gift help <type>-trigger` lists every field.');
     console.log('');
     console.log('options:');
     console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
@@ -821,7 +641,7 @@ function createUsage() {
 function listUsage() {
     console.log('usage: gift list [--config=FILE]');
     console.log('');
-    console.log('List the configured server hooks and their settings.');
+    console.log('List the configured hooks: what triggers each one, and what it runs.');
     console.log('');
     console.log('options:');
     console.log('  --config=FILE   Hook configuration file (default: hooks.json)');
@@ -831,7 +651,7 @@ function listUsage() {
 function deleteUsage() {
     console.log('usage: gift delete [name] [options]');
     console.log('');
-    console.log('Delete a server hook by name, unique name prefix, or list position.');
+    console.log('Delete a hook by name, unique name prefix, or list position.');
     console.log('For hooks with the same name, use the list position.');
     console.log('With no name, choose from a menu.');
     console.log('');
@@ -841,6 +661,7 @@ function deleteUsage() {
     console.log('  -h, --help      Show this help');
     console.log('');
     console.log('The server is restarted automatically after the hook is deleted.');
+    console.log('A GitHub webhook the hook was delivered by is left in place.');
 }
 
 function parseArgs(argv, command) {
@@ -947,16 +768,22 @@ module.exports = {
     deleteUsage,
     listMain,
     listUsage,
-    // Kept injectable so the gh integration can be verified without network access.
-    createGitHubWebhook,
-    readGitHubWebhooks,
-    verifyGitHubWebhook,
-    ghAuthProblem,
     restartServer,
-    webhookUrlProblem,
     // Configuration and path helpers shared with `gift log` and `gift status`.
     readConfig,
+    writeConfig,
     configFile,
+    describe,
+    printRows,
     show,
     expandHome,
+    resolveTyped,
+    defaultName,
+    // The gh integration moved into the GitHub trigger; re-exported here so
+    // anything that reached for it by this name still finds it.
+    createGitHubWebhook: gh.createGitHubWebhook,
+    readGitHubWebhooks: gh.readGitHubWebhooks,
+    verifyGitHubWebhook: gh.verifyGitHubWebhook,
+    ghAuthProblem: gh.ghAuthProblem,
+    webhookUrlProblem: gh.webhookUrlProblem,
 };

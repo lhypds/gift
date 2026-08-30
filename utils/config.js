@@ -1,20 +1,28 @@
 // gift's configuration: one file, config.json, in the project folder.
 //
 //     {
-//         "github_webhook_secret": "...",     gift's own settings at the top
-//         "port": 3999,
+//         "port": 3999,                       gift's own settings at the top
+//         "pm2_name": "gift",
+//         "triggers": {                       each trigger type's under its name
+//             "github":    { "github_webhook_secret": "...", "serve_path": "…" },
+//             "clipboard": { "interval": 1000 }
+//         },
 //         "functions": {                      each function's under its name
 //             "repo-master": { "repo_root": "/Users/me/projects" },
 //             "weekly-prs":  { "repos": "owner/repo", "author": "octocat" }
 //         }
 //     }
 //
-// What may go in it is declared by a config.schema.json next to the code that
-// reads it — in the project root for `gift` itself, and in the function's own
-// folder for a function. The schema names each setting, the environment
-// variable it is handed to scripts as, its type and its default; it is also what
-// `gift config` writes the file from the first time, so opening the file shows
-// every setting there is rather than an empty page.
+// Three kinds of section, and which one a setting belongs in follows from who
+// reads it: the server's address and PM2 name are gift's, the webhook secret is
+// the GitHub trigger's, a repository root is a function's.
+//
+// What may go in each is declared by a config.schema.json next to the code that
+// reads it — the project root for `gift` itself, the trigger's or function's own
+// folder otherwise. The schema names each setting, the environment variable it
+// is handed to scripts as, its type and its default; it is also what `gift
+// config` writes the file from the first time, so opening the file shows every
+// setting there is rather than an empty page.
 //
 // config.json is git-ignored: it holds the webhook secret. A value already in
 // the real environment wins over it, so a one-off `GIFT_REPOS=... gift
@@ -22,7 +30,7 @@
 //
 // Precedence, highest first:
 //     the real environment
-//     config.json — functions.<name>
+//     config.json — triggers.<type> or functions.<name>
 //     config.json — the top level
 //     the default in the schema
 'use strict';
@@ -32,14 +40,28 @@ const os = require('node:os');
 const path = require('node:path');
 
 const functions = require('../functions.js');
+const triggers = require('../triggers/index.js');
 
-/** The name of the target that holds everything not belonging to one function. */
+/** The name of the target that holds everything belonging to gift itself. */
 const GIFT = 'gift';
 
-/** Where a function's settings sit inside the file. */
+/** Where a function's and a trigger's settings sit inside the file. */
 const FUNCTIONS_KEY = 'functions';
+const TRIGGERS_KEY = 'triggers';
 
 const SCHEMA_FILE = 'config.schema.json';
+
+/**
+ * Settings that used to live at the top level, and the trigger they belong to
+ * now that GitHub is one trigger among four rather than the whole server.
+ *
+ * A config.json written before triggers existed is read as though they had
+ * always been there — see migrate() — and rewritten into the new shape the next
+ * time anything saves it. Nothing is lost and nothing has to be edited by hand.
+ */
+const MOVED = {
+    github: ['github_webhook_secret', 'webhook_url', 'serve_path'],
+};
 
 /** A leading `~` is a literal character until something expands it. */
 function expandHome(value) {
@@ -54,11 +76,22 @@ function file() {
     return path.join(functions.ROOT, 'config.json');
 }
 
-/** Everything that can be configured: gift itself, then the functions. */
+/** Everything that can be configured: gift itself, the triggers, the functions. */
 function targets() {
     return [
-        { name: GIFT, dir: functions.ROOT, description: 'Shared settings and the webhooks server.' },
-        ...functions.list().map((fn) => ({ name: fn.name, dir: fn.dir, description: fn.description })),
+        { name: GIFT, kind: 'gift', dir: functions.ROOT, description: 'Shared settings and the hooks server.' },
+        ...triggers.list().map((trigger) => ({
+            name: trigger.name,
+            kind: 'trigger',
+            dir: trigger.dir,
+            description: trigger.summary,
+        })),
+        ...functions.list().map((fn) => ({
+            name: fn.name,
+            kind: 'function',
+            dir: fn.dir,
+            description: fn.description,
+        })),
     ];
 }
 
@@ -66,14 +99,21 @@ function targetNamed(name) {
     return targets().find((target) => target.name === name) || null;
 }
 
+/** Which of the two named sections a target's settings live in. */
+function keyFor(name) {
+    const target = targetNamed(name);
+    return target && target.kind === 'trigger' ? TRIGGERS_KEY : FUNCTIONS_KEY;
+}
+
 /**
- * Which target a directory belongs to. Function folders configure themselves;
- * anywhere else — the project root, where the server runs — is `gift`.
+ * Which target a directory belongs to. Trigger and function folders configure
+ * themselves; anywhere else — the project root, where the server runs — is
+ * `gift`.
  */
 function targetFor(scopeDir) {
     if (!scopeDir) return GIFT;
     const resolved = path.resolve(scopeDir);
-    const match = functions.list().find((fn) => path.resolve(fn.dir) === resolved);
+    const match = targets().find((target) => target.kind !== 'gift' && path.resolve(target.dir) === resolved);
     return match ? match.name : GIFT;
 }
 
@@ -96,6 +136,31 @@ function schemaFor(name) {
 let warned = false;
 
 /**
+ * Move the settings that predate triggers into the section they belong to now.
+ * Done on the way in rather than by rewriting the file, so a config.json that
+ * has not been touched since keeps working from the first command — and takes
+ * its new shape whenever something next saves it.
+ *
+ * A value already written under the trigger wins: someone who has edited the
+ * new shape by hand meant it, and a stale top-level key must not undo that.
+ */
+function migrate(values) {
+    for (const [trigger, keys] of Object.entries(MOVED)) {
+        for (const key of keys) {
+            if (!(key in values)) continue;
+            const legacy = values[key];
+            delete values[key];
+
+            if (!values[TRIGGERS_KEY] || typeof values[TRIGGERS_KEY] !== 'object') values[TRIGGERS_KEY] = {};
+            const own = values[TRIGGERS_KEY][trigger];
+            if (!own || typeof own !== 'object') values[TRIGGERS_KEY][trigger] = {};
+            if (!(key in values[TRIGGERS_KEY][trigger])) values[TRIGGERS_KEY][trigger][key] = legacy;
+        }
+    }
+    return values;
+}
+
+/**
  * The whole file. A file that will not parse is worth one complaint rather than
  * a crash on every command — a half-typed edit should not stop `gift status`
  * from telling you what is wrong.
@@ -111,7 +176,7 @@ function read() {
 
     try {
         const parsed = JSON.parse(text);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? migrate(parsed) : {};
     } catch (error) {
         if (!warned) {
             warned = true;
@@ -134,13 +199,16 @@ function write(values) {
     return target;
 }
 
-/** One target's slice of the file: the top level for gift, functions.<name> for a function. */
+/**
+ * One target's slice of the file: the top level for gift, with the two named
+ * sections lifted out, and `triggers.<type>` or `functions.<name>` otherwise.
+ */
 function section(values, name) {
     if (name === GIFT) {
-        const { [FUNCTIONS_KEY]: _functions, ...rest } = values;
+        const { [FUNCTIONS_KEY]: _functions, [TRIGGERS_KEY]: _triggers, ...rest } = values;
         return rest;
     }
-    const all = values[FUNCTIONS_KEY];
+    const all = values[keyFor(name)];
     const own = all && typeof all === 'object' ? all[name] : null;
     return own && typeof own === 'object' ? own : {};
 }
@@ -199,17 +267,28 @@ function applyTo(values, name) {
 }
 
 /**
- * Load the configuration for one run: the function's own settings, then gift's.
+ * Load the configuration for one run: the target's own settings, then gift's.
  * This is the single entry point — the dispatcher calls it before running
  * anything, and the server calls it at startup.
  *
- * @param {string} [scopeDir] Folder of the function about to run, if any.
+ * Loading for gift itself loads every trigger too. One process runs all four of
+ * them, and `gift create` asks all four their questions, so from gift's side a
+ * trigger's settings are not a separate scope the way a function's are — they
+ * are simply where the server's own settings now live.
+ *
+ * @param {string} [scopeDir] Folder of the function or trigger about to run.
  */
 function loadFor(scopeDir) {
     const values = read();
     const target = targetFor(scopeDir);
 
-    if (target !== GIFT) applyTo(values, target);
+    if (target !== GIFT) {
+        applyTo(values, target);
+    } else {
+        for (const candidate of targets()) {
+            if (candidate.kind === 'trigger') applyTo(values, candidate.name);
+        }
+    }
     applyTo(values, GIFT);
 }
 
@@ -260,12 +339,11 @@ function place(values, name, key, value) {
         return values;
     }
 
-    if (!values[FUNCTIONS_KEY] || typeof values[FUNCTIONS_KEY] !== 'object') values[FUNCTIONS_KEY] = {};
-    if (!values[FUNCTIONS_KEY][name] || typeof values[FUNCTIONS_KEY][name] !== 'object') {
-        values[FUNCTIONS_KEY][name] = {};
-    }
-    if (value === null) delete values[FUNCTIONS_KEY][name][key];
-    else values[FUNCTIONS_KEY][name][key] = value;
+    const where = keyFor(name);
+    if (!values[where] || typeof values[where] !== 'object') values[where] = {};
+    if (!values[where][name] || typeof values[where][name] !== 'object') values[where][name] = {};
+    if (value === null) delete values[where][name][key];
+    else values[where][name][key] = value;
     return values;
 }
 
@@ -313,22 +391,30 @@ function skeleton(existing = {}) {
         return own;
     };
 
-    // Written in reading order: gift's settings, then the functions, which is
-    // why `functions` is built last rather than kept wherever it happened to be.
-    const values = fill(section(existing, GIFT), GIFT);
+    /** One named section — `triggers` or `functions` — as it would be written. */
+    const build = (kind, key) => {
+        const stored = existing[key] && typeof existing[key] === 'object' ? existing[key] : {};
+        const sections = {};
+        for (const target of targets()) {
+            if (target.kind !== kind) continue;
+            const own = stored[target.name] && typeof stored[target.name] === 'object' ? stored[target.name] : {};
+            sections[target.name] = fill(own, target.name);
+        }
+        // A section for a trigger or function that is no longer installed stays
+        // where it is: deleting it would throw away settings the next update
+        // might want back.
+        for (const [name, own] of Object.entries(stored)) {
+            if (!(name in sections)) sections[name] = own;
+        }
+        return sections;
+    };
 
-    const sections = {};
-    const stored = existing[FUNCTIONS_KEY] && typeof existing[FUNCTIONS_KEY] === 'object' ? existing[FUNCTIONS_KEY] : {};
-    for (const target of targets()) {
-        if (target.name === GIFT) continue;
-        sections[target.name] = fill(stored[target.name] && typeof stored[target.name] === 'object' ? stored[target.name] : {}, target.name);
-    }
-    // A section for a function that is no longer installed stays where it is:
-    // deleting it would throw away settings the next update might want back.
-    for (const [name, own] of Object.entries(stored)) {
-        if (!(name in sections)) sections[name] = own;
-    }
-    values[FUNCTIONS_KEY] = sections;
+    // Written in reading order: gift's own settings, then the triggers, then the
+    // functions — which is why the two named sections are built last rather
+    // than kept wherever they happened to be.
+    const values = fill(section(existing, GIFT), GIFT);
+    values[TRIGGERS_KEY] = build('trigger', TRIGGERS_KEY);
+    values[FUNCTIONS_KEY] = build('function', FUNCTIONS_KEY);
 
     return values;
 }
@@ -344,10 +430,14 @@ function ensure() {
 module.exports = {
     GIFT,
     FUNCTIONS_KEY,
+    TRIGGERS_KEY,
+    MOVED,
+    migrate,
     file,
     targets,
     targetNamed,
     targetFor,
+    keyFor,
     schemaFor,
     read,
     write,

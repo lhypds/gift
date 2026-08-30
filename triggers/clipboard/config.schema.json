@@ -1,0 +1,13 @@
+{
+    "description": "The clipboard trigger: watches the clipboard for content that matches.",
+    "options": [
+        {
+            "key": "interval",
+            "env": "GIFT_CLIPBOARD_INTERVAL",
+            "type": "number",
+            "min": 200,
+            "default": 1000,
+            "description": "How often `gift create` offers to read the clipboard, in milliseconds. Each hook stores its own; this is only the answer suggested."
+        }
+    ]
+}

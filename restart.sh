@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pull the latest code, then restart the webhooks server under PM2.
+# Pull the latest code, then restart the hooks server under PM2.
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

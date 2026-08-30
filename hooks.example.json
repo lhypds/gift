@@ -2,15 +2,67 @@
   "log": "hooks.log",
   "hooks": [
     {
-      "name": "restart-example",
-      "repo": "YOUR_NAME/YOUR_REPOSITORY",
-      "events": ["push"],
-      "branches": ["main"],
-      "run": "/opt/myapp/some.sh",
+      "name": "restart-on-push",
+      "trigger": {
+        "type": "github",
+        "repo": "YOUR_NAME/YOUR_REPOSITORY",
+        "events": ["push"],
+        "branches": ["main"],
+        "secretEnv": "GITHUB_WEBHOOK_SECRET"
+      },
+      "run": "/opt/myapp/restart.sh",
       "args": [],
       "cwd": "/opt/myapp",
       "detach": false,
-      "secretEnv": "GITHUB_WEBHOOK_SECRET"
+      "enabled": true
+    },
+    {
+      "name": "save-copied-todo",
+      "trigger": {
+        "type": "clipboard",
+        "match": "^TODO:",
+        "matchType": "regex",
+        "interval": 1000
+      },
+      "run": "/opt/myapp/save-todo.sh",
+      "args": [],
+      "cwd": "/opt/myapp",
+      "detach": false,
+      "enabled": false
+    },
+    {
+      "name": "status-page-changed",
+      "trigger": {
+        "type": "website",
+        "url": "https://example.com/status.json",
+        "method": "GET",
+        "on": "change",
+        "match": "",
+        "matchType": "any",
+        "interval": 60000,
+        "timeout": 10000
+      },
+      "run": "/opt/myapp/alert.sh",
+      "args": [],
+      "cwd": "/opt/myapp",
+      "detach": false,
+      "enabled": false
+    },
+    {
+      "name": "reload-config",
+      "trigger": {
+        "type": "file",
+        "path": "/opt/myapp/conf",
+        "pattern": "*.yml",
+        "events": ["add", "change"],
+        "recursive": true,
+        "debounce": 500
+      },
+      "run": "/opt/myapp/reload.sh",
+      "args": [],
+      "cwd": "/opt/myapp",
+      "detach": false,
+      "enabled": false
     }
   ]
 }

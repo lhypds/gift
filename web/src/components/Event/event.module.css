@@ -14,8 +14,12 @@
 .relativeTime { opacity: .7; }
 .title { font-size: .8rem; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
 
-.deliveryState { position: absolute; top: 0; right: 0; display: inline-block; padding: 4px 8px; border: 1px solid var(--line); font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-.deliveryState.ready { background: var(--fill); color: var(--fill-ink); }
-.deliveryState.warning { background: var(--surface); color: var(--ink); border-style: dashed; }
-.deliveryState.neutral { background: var(--soft); color: var(--muted); border-color: var(--line-soft); }
-.deliveryDetail { font-size: .76rem; color: var(--muted); overflow-wrap: anywhere; }
+/* Which trigger the event came from. Quiet on purpose: it is the column you
+   scan down, not the thing you read. */
+.trigger { color: var(--muted); }
+
+.eventState { position: absolute; top: 0; right: 0; display: inline-block; padding: 4px 8px; border: 1px solid var(--line); font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.eventState.ready { background: var(--fill); color: var(--fill-ink); }
+.eventState.warning { background: var(--surface); color: var(--ink); border-style: dashed; }
+.eventState.neutral { background: var(--soft); color: var(--muted); border-color: var(--line-soft); }
+.eventDetail { font-size: .76rem; color: var(--muted); overflow-wrap: anywhere; }

@@ -1,5 +1,5 @@
-import RepoLink from "../RepoLink/RepoLink.jsx";
-import styles from "./delivery.module.css";
+import SourceLink from "../SourceLink/SourceLink.jsx";
+import styles from "./event.module.css";
 
 function pad(value) {
   return String(value).padStart(2, "0");
@@ -28,14 +28,14 @@ function formatRelativeTime(timestamp) {
   return null;
 }
 
-export default function Delivery({ delivery, onSelect }) {
-  const handleKeyDown = (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onSelect(delivery);
+export default function Event({ event, onSelect }) {
+  const handleKeyDown = (keyEvent) => {
+    if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
+    keyEvent.preventDefault();
+    onSelect(event);
   };
 
-  const relativeTime = formatRelativeTime(delivery.timestamp);
+  const relativeTime = formatRelativeTime(event.timestamp);
   // Highlighted only while it reads "just now" — the next poll clears it.
   const fresh = relativeTime === "just now";
 
@@ -44,20 +44,22 @@ export default function Delivery({ delivery, onSelect }) {
       className={`${styles.item} ${styles.clickable}${fresh ? ` ${styles.fresh}` : ""}`}
       role="button"
       tabIndex={0}
-      onClick={() => onSelect(delivery)}
+      onClick={() => onSelect(event)}
       onKeyDown={handleKeyDown}
     >
       <div className={styles.itemTop}>
         <span className={styles.timestamp}>
-          {formatTimestamp(delivery.timestamp)}
+          {formatTimestamp(event.timestamp)}
           {relativeTime && <span className={styles.relativeTime}> ({relativeTime})</span>}
         </span>
-        <span className={`${styles.deliveryState} ${styles[delivery.tone]}`}>{delivery.outcome}</span>
+        <span className={`${styles.eventState} ${styles[event.tone]}`}>{event.outcome}</span>
       </div>
       <div className={styles.title}>
-        [{delivery.event.toUpperCase()}] <RepoLink repo={delivery.repo} />
+        {/* Which trigger noticed it, since the list mixes all four. */}
+        <span className={styles.trigger}>{event.trigger}</span>{" "}
+        [{String(event.event).toUpperCase()}] <SourceLink source={event.source} />
       </div>
-      {delivery.detail && <div className={styles.deliveryDetail}>{delivery.detail}</div>}
+      {event.detail && <div className={styles.eventDetail}>{event.detail}</div>}
     </div>
   );
 }

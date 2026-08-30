@@ -1,4 +1,4 @@
-// The webhooks server as the CLI drives it.
+// The hooks server as the CLI drives it.
 //
 // The server is not one of the functions/ folders — it is a service that happens
 // to be driven from this CLI — so `serve`, `restart` and `stop` are named here
@@ -27,21 +27,21 @@ const SERVER_DIR = ROOT;
 
 const SERVE = {
     name: 'serve',
-    description: 'Pull, rebuild the dashboard, and (re)start the webhooks server under PM2.',
+    description: 'Pull, rebuild the dashboard, and (re)start the hooks server under PM2.',
     dir: SERVER_DIR,
     entry: path.join(SERVER_DIR, 'restart.sh'),
 };
 
 const RESTART = {
     name: 'restart',
-    description: '(Re)start the webhooks server under PM2, without pulling or rebuilding.',
+    description: '(Re)start the hooks server under PM2, without pulling or rebuilding.',
     dir: SERVER_DIR,
     entry: path.join(SERVER_DIR, 'start.sh'),
 };
 
 const STOP = {
     name: 'stop',
-    description: 'Stop the webhooks server running under PM2.',
+    description: 'Stop the hooks server running under PM2.',
     dir: SERVER_DIR,
     entry: path.join(SERVER_DIR, 'stop.sh'),
 };

@@ -20,20 +20,22 @@ Open gift's configuration in $EDITOR. Everything lives in one file:
 
     ${config.file()}
 
-gift's own settings are at the top level and each function's are under
-functions.<name>:
+gift's own settings are at the top level, each trigger type's under
+triggers.<type>, and each function's under functions.<name>:
 
     {
-        "github_webhook_secret": "...",
         "port": 3999,
+        "triggers": {
+            "github": { "github_webhook_secret": "..." }
+        },
         "functions": {
             "repo-master": { "repo_root": "/Users/me/projects" }
         }
     }
 
-The file is created the first time with every setting the functions declare, at
-its default, so there is a list to work from rather than a blank page. It is
-git-ignored and written 0600 — it holds the webhook secret.
+The file is created the first time with every setting the triggers and functions
+declare, at its default, so there is a list to work from rather than a blank
+page. It is git-ignored and written 0600 — it holds the webhook secret.
 
   --path    Print the path and exit, without opening anything
 

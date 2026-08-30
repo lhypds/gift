@@ -1,0 +1,24 @@
+{
+    "description": "The GitHub trigger: the endpoint that receives webhook deliveries.",
+    "options": [
+        {
+            "key": "github_webhook_secret",
+            "env": "GITHUB_WEBHOOK_SECRET",
+            "type": "secret",
+            "description": "Shared secret configured on the GitHub webhook (Settings -> Webhooks -> Secret). ./setup.sh generates one when it is empty."
+        },
+        {
+            "key": "webhook_url",
+            "env": "GIFT_WEBHOOK_URL",
+            "type": "string",
+            "description": "Complete public delivery URL used by `gift create`, the /hooks/github path included."
+        },
+        {
+            "key": "serve_path",
+            "env": "GIFT_SERVE_PATH",
+            "type": "string",
+            "default": "/hooks/github",
+            "description": "Endpoint GitHub delivers to."
+        }
+    ]
+}

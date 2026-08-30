@@ -1,4 +1,4 @@
-// `gift log` — the tail of the webhook server's log, followed as it is written.
+// `gift log` — the tail of the hooks server's log, followed as it is written.
 //
 //   gift log [lines]
 //
@@ -177,7 +177,7 @@ function follow(logPath, count) {
 function usage() {
     console.log('usage: gift log [lines]');
     console.log('');
-    console.log(`Print the last ${DEFAULT_LINES} lines of the webhook server's log — or as many`);
+    console.log(`Print the last ${DEFAULT_LINES} lines of the hooks server's log — or as many`);
     console.log('as are asked for, `gift log 20` — and then keep printing what the server');
     console.log('appends, until Ctrl-C. A rotation at 5 MB is followed into the new file.');
     console.log('');

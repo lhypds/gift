@@ -15,11 +15,15 @@ node_modules/
 release/
 dist/
 
-# Logs, the webhook server's hooks.log and its rotated hooks.log.1 included
+# Logs, the hooks server's hooks.log and its rotated hooks.log.1 included
 *.log
 *.log.[0-9]
 
-# Recent-deliveries state, mirrored to disk so a restart doesn't lose it
+# Recent-events state, mirrored to disk so a restart doesn't lose it.
+# deliveries.json is what it was called before the server watched anything but
+# GitHub; the line stays so a leftover cannot be committed by accident.
+events.json
+events.json.tmp
 deliveries.json
 deliveries.json.tmp
 

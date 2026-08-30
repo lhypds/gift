@@ -1,11 +1,11 @@
-// `gift status` — is the webhooks server running, and answering?
+// `gift status` — is the hooks server running, and answering?
 //
 //   gift status
 //
 // Three questions answered in one place: what PM2 says about the process, what
 // the server says for itself when asked (`GET /health`), and what it is set up to
-// serve — the endpoint, the hooks, the log. Nothing is started or stopped here;
-// `gift serve` and `gift stop` do that.
+// watch — the triggers, the hooks, the endpoint, the log. Nothing is started or
+// stopped here; `gift serve` and `gift stop` do that.
 //
 // The verdict is the health check, not PM2: a server that answers is up, however
 // it was started, and a PM2 entry that says `online` while nothing answers is the
@@ -24,12 +24,14 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { readConfig, configFile, show, expandHome } = require('../utils/hooks.js');
+const hookRecord = require('../utils/hook.js');
+const triggers = require('../triggers/index.js');
 const { version } = require('./version.js');
 const { SERVER_DIR } = require('../utils/service.js');
 
 const DEFAULTS = { host: '127.0.0.1', port: 3999, path: '/hooks/github' };
 const DEFAULT_LOG = 'hooks.log';
-const DEFAULT_PM2_NAME = 'gift-webhooks';
+const DEFAULT_PM2_NAME = 'gift';
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_SECRET_ENV = 'GITHUB_WEBHOOK_SECRET';
 
@@ -124,14 +126,24 @@ function logState(logPath) {
     }
 }
 
+/** Only the GitHub hooks are signed, so only they have a secret to be missing. */
+function githubSecretNames(hooks) {
+    const names = new Set();
+    for (const hook of hooks) {
+        if (hookRecord.typeOf(hook) !== 'github') continue;
+        const trigger = hook.trigger || (hookRecord.isLegacy(hook) ? hookRecord.legacyTrigger(hook) : {});
+        names.add(String(trigger.secretEnv || DEFAULT_SECRET_ENV));
+    }
+    return [...names];
+}
+
 /**
- * Hook secrets that are not set. The server refuses to start without one, so an
- * empty variable here is usually the answer to "why is it not running".
+ * GitHub hook secrets that are not set. Deliveries signed with a secret the
+ * server does not hold are all rejected, so an empty variable here is usually
+ * the answer to "why did that push do nothing".
  */
 function missingSecrets(hooks) {
-    const names = new Set(hooks.map((hook) => String(hook.secretEnv || DEFAULT_SECRET_ENV)));
-    if (names.size === 0) names.add(DEFAULT_SECRET_ENV);
-    return [...names].filter((name) => !process.env[name]);
+    return githubSecretNames(hooks).filter((name) => !process.env[name]);
 }
 
 /**
@@ -147,9 +159,7 @@ function missingSecrets(hooks) {
  * does not read.
  */
 function secretFingerprints(hooks) {
-    const names = new Set(hooks.map((hook) => String(hook.secretEnv || DEFAULT_SECRET_ENV)));
-    if (names.size === 0) names.add(DEFAULT_SECRET_ENV);
-    return [...names]
+    return githubSecretNames(hooks)
         .filter((name) => process.env[name])
         .map((name) => ({
             name,
@@ -401,7 +411,32 @@ function hooksRow(hooks, config) {
     const names = hooks.map((hook, index) => String(hook.name || `hook-${index + 1}`));
     const shown = names.slice(0, 6);
     const rest = names.length - shown.length;
-    return `${names.length} — ${shown.join(', ')}${rest ? `, +${rest} more` : ''}`;
+    const off = hooks.filter((hook) => hook.enabled === false).length;
+    return `${names.length} — ${shown.join(', ')}${rest ? `, +${rest} more` : ''}${off ? ` (${off} turned off)` : ''}`;
+}
+
+/**
+ * Which triggers are actually doing something. A type with no hooks is not
+ * started at all, so listing the four every time would say nothing — this says
+ * what is being watched.
+ */
+function triggersRow(hooks, config) {
+    if (config.unreadable || config.missing || hooks.length === 0) return 'none — nothing is being watched';
+
+    const counts = new Map();
+    for (const hook of hooks) {
+        if (hook.enabled === false) continue;
+        const type = hookRecord.typeOf(hook);
+        counts.set(type, (counts.get(type) || 0) + 1);
+    }
+    if (counts.size === 0) return 'none — every configured hook is turned off';
+
+    return [...counts]
+        .map(([type, count]) => {
+            const module_ = triggers.get(type);
+            return `${type}${module_ ? '' : ' (unknown type)'} ${count}`;
+        })
+        .join(', ');
 }
 
 function logRow(log) {
@@ -413,13 +448,20 @@ function logRow(log) {
 }
 
 function printReport(state) {
+    const base = `http://${authority(state.settings.host, state.settings.port)}`;
     const rows = [
         ['process', pm2Row(state.pm2, state.pm2Name)],
-        ['endpoint', `http://${authority(state.settings.host, state.settings.port)}${state.settings.path}`],
+        ['dashboard', base],
         ['health', healthRow(state.health)],
+        ['triggers', triggersRow(state.settings.hooks, state.settings.config)],
         ['hooks', hooksRow(state.settings.hooks, state.settings.config)],
         ['log', logRow(state.log)],
     ];
+    // Only when something delivers to it: on a gift watching only files and the
+    // clipboard, the webhook endpoint is a line about a door nobody uses.
+    if (state.settings.hooks.some((hook) => hookRecord.typeOf(hook) === 'github')) {
+        rows.splice(2, 0, ['endpoint', `${base}${state.settings.path}`]);
+    }
     // The secret is what a 401 is usually about, so the fingerprint of the
     // configured value belongs in the same picture as the endpoint serving it:
     // the log prints the same fingerprint for the value the server is running
@@ -435,16 +477,17 @@ function printReport(state) {
     // will not start, and beside a server that is already answering it would only
     // contradict what the health row just said. (A running server may well have
     // its secret from somewhere gift does not read — a systemd EnvironmentFile.)
-    if (!state.health.ok) {
-        for (const secret of state.missingSecrets) {
-            rows.push([
-                'note',
-                `${secret} is not configured — the server will not start without a secret (\`gift config\`)`,
-            ]);
-        }
+    // A missing secret no longer stops the server — the other three triggers do
+    // not need one — so it is worth saying whether it is running or not: every
+    // GitHub delivery is being rejected either way.
+    for (const secret of state.missingSecrets) {
+        rows.push([
+            'note',
+            `${secret} is not configured — GitHub deliveries will all be rejected (\`gift config\`)`,
+        ]);
     }
 
-    console.log(`gift webhooks server: ${headline(state)}`);
+    console.log(`gift hooks server: ${headline(state)}`);
     console.log('');
     const width = Math.max(...rows.map(([label]) => label.length));
     for (const [label, value] of rows) {
@@ -481,8 +524,10 @@ function asJson(state) {
             error: state.settings.config.unreadable || undefined,
             hooks: state.settings.hooks.map((hook, index) => ({
                 name: String(hook.name || `hook-${index + 1}`),
-                repo: hook.repo || '*',
-                events: Array.isArray(hook.events) && hook.events.length ? hook.events : ['push'],
+                trigger: hookRecord.typeOf(hook),
+                watches: hookRecord.line(hook),
+                run: hook.run || null,
+                enabled: hook.enabled !== false,
             })),
         },
         log: state.log.off
@@ -504,10 +549,10 @@ function asJson(state) {
 function usage() {
     console.log('usage: gift status');
     console.log('');
-    console.log('Report the webhooks server: what PM2 says about the process, what the');
-    console.log('server answers on GET /health, and what it is set up to serve — the');
-    console.log('endpoint, the hooks, the log, and a fingerprint of the configured secret');
-    console.log('to compare with the one the server logs. Nothing is started or stopped.');
+    console.log('Report the hooks server: what PM2 says about the process, what the server');
+    console.log('answers on GET /health, and what it is set up to watch — the triggers, the');
+    console.log('hooks, the endpoint, the log, and a fingerprint of the configured secret to');
+    console.log('compare with the one the server logs. Nothing is started or stopped.');
     console.log('');
     console.log('options:');
     console.log('  --json          Print the report as JSON, for a script');

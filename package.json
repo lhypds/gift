@@ -1,6 +1,6 @@
 {
   "name": "gift",
-  "description": "GitHub webhook server with additional Git and GitHub helper functions",
+  "description": "Hooks server — GitHub webhooks, the clipboard, a polled website or a watched file, each running a bash script — with Git and GitHub helper functions",
   "license": "MIT",
   "bin": {
     "gift": "bin/gift.js"
@@ -31,6 +31,7 @@
     "functions/**/config.schema.json",
     "functions/**/README.*",
     "functions.js",
+    "triggers",
     "config.schema.json",
     "utils",
     "serve.js",

@@ -1,0 +1,20 @@
+{
+    "description": "The website trigger: polls a URL and watches for a change or for content.",
+    "options": [
+        {
+            "key": "interval",
+            "env": "GIFT_WEBSITE_INTERVAL",
+            "type": "number",
+            "min": 1000,
+            "default": 60000,
+            "description": "How often `gift create` offers to poll, in milliseconds. Each hook stores its own; this is only the answer suggested."
+        },
+        {
+            "key": "user_agent",
+            "env": "GIFT_WEBSITE_USER_AGENT",
+            "type": "string",
+            "default": "gift",
+            "description": "User-Agent sent with each poll. Some sites answer differently, or not at all, without a recognisable one."
+        }
+    ]
+}

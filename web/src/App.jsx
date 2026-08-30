@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Delivery from './components/Delivery/Delivery.jsx';
-import Detail from './components/Delivery/Detail/Detail.jsx';
+import Event from './components/Event/Event.jsx';
+import Detail from './components/Event/Detail/Detail.jsx';
 import EmptyState from './components/EmptyState/EmptyState.jsx';
 import RefreshButton from './components/RefreshButton/RefreshButton.jsx';
 import InfoButton from './components/InfoButton/InfoButton.jsx';
 import { POLL_MS } from './pollInterval.js';
 
-// Replaces the old <meta http-equiv="refresh" content="30">: only the list
-// re-renders, rather than the whole page reloading.
+// One list for all four triggers, newest first: a webhook delivery, a clipboard
+// change, a page that came back different and a file that was written are the
+// same kind of thing here — something happened, and these hooks ran.
 
 export default function App() {
   const [data, setData] = useState(null);
@@ -40,13 +41,13 @@ export default function App() {
     };
   }, [load]);
 
-  const deliveries = data?.deliveries;
-  // Re-read the selected delivery from the latest poll, so output that's
-  // still streaming in appears in an already-open modal. A delivery with no
-  // ID (the "No delivery ID" placeholder) can't be matched back up reliably,
-  // so it just keeps showing the snapshot taken at click time.
-  const selectedDelivery = selected
-    ? (deliveries?.find((d) => d.id === selected.id && d.id !== 'No delivery ID') ?? selected)
+  const events = data?.events;
+  // Re-read the selected event from the latest poll, so output that's still
+  // streaming in appears in an already-open modal. An event with no id (the
+  // "No id" placeholder) can't be matched back up reliably, so it just keeps
+  // showing the snapshot taken at click time.
+  const selectedEvent = selected
+    ? (events?.find((e) => e.id === selected.id && e.id !== 'No id') ?? selected)
     : null;
 
   return (
@@ -59,22 +60,22 @@ export default function App() {
         </div>
       </div>
 
-      <section aria-label="Deliveries">
-        {deliveries && deliveries.length === 0 && (
+      <section aria-label="Events">
+        {events && events.length === 0 && (
           <EmptyState>
-            <p>No deliveries.</p>
+            <p>Nothing has happened yet.</p>
           </EmptyState>
         )}
-        {deliveries && deliveries.length > 0 && (
+        {events && events.length > 0 && (
           <div className="list">
-            {deliveries.map((delivery, index) => (
-              <Delivery key={index} delivery={delivery} onSelect={setSelected} />
+            {events.map((event, index) => (
+              <Event key={index} event={event} onSelect={setSelected} />
             ))}
           </div>
         )}
       </section>
 
-      <Detail delivery={selectedDelivery} onClose={() => setSelected(null)} />
+      <Detail event={selectedEvent} onClose={() => setSelected(null)} />
     </main>
   );
 }

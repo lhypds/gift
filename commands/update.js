@@ -1,5 +1,5 @@
 // `gift update` — pull the latest code into the gift checkout, and put a running
-// webhooks server back on it.
+// hooks server back on it.
 //
 //   gift update
 //   gift update --no-restart
@@ -11,7 +11,7 @@
 // it — but the webhooks dashboard is a built React app, so restarting the server
 // (below) installs dependencies and rebuilds it too.
 //
-// The webhooks server is the one thing that does not pick new code up by itself:
+// The hooks server is the one thing that does not pick new code up by itself:
 // it is a process that started from the old files and keeps running from them. So
 // when the server is up, its normal `gift serve` start path (pull, install,
 // rebuild the dashboard, restart) runs straight after. This is deliberate even
@@ -60,7 +60,7 @@ function hasServer() {
 }
 
 function serveHint() {
-    if (hasServer()) console.log('Run `gift serve` to restart the webhooks server on this code.');
+    if (hasServer()) console.log('Run `gift serve` to restart the hooks server on this code.');
 }
 
 function fileState(file) {
@@ -160,8 +160,8 @@ async function main(argv) {
     console.log('');
     console.log(
         state.answering
-            ? 'The webhooks server is answering, so restarting it on this code:'
-            : 'PM2 has the webhooks server online, so restarting it on this code:',
+            ? 'The hooks server is answering, so restarting it on this code:'
+            : 'PM2 has the hooks server online, so restarting it on this code:',
     );
     console.log('');
 
@@ -179,7 +179,7 @@ async function main(argv) {
     const restarted = await waitForServer();
     if (!restarted.answering) {
         console.error('gift update: PM2 restarted the process, but /health is not answering.');
-        console.error(`Run \`pm2 logs ${process.env.PM2_NAME || 'gift-webhooks'}\` for the startup error.`);
+        console.error(`Run \`pm2 logs ${process.env.PM2_NAME || 'gift'}\` for the startup error.`);
         return 1;
     }
 
@@ -204,7 +204,7 @@ function usage() {
     console.log('Fast-forward only, so nothing is merged and local work is left alone; a');
     console.log('branch that has diverged is reported instead.');
     console.log('');
-    console.log('A running webhooks server is then restarted on the new code, since a');
+    console.log('A running hooks server is then restarted on the new code, since a');
     console.log('running server keeps its old files until it does. Nothing is started that');
     console.log('was not already running. A running server is restarted even when Git is');
     console.log('already up to date, so it cannot remain on older code loaded in memory.');

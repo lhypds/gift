@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a source-tree release zip and hand off to release_gh.sh to publish it on
 # GitHub. The archive contains everything ./setup.sh and ./install.sh need in a
-# fresh checkout: the root webhook server plus bin/, commands/, functions/, and
-# utils/ for the additional CLI functions.
+# fresh checkout: the root hooks server plus bin/, commands/, functions/,
+# triggers/ and utils/.
 # Local settings and state (config.json, hooks.json, logs) are never shipped —
 # config.json holds the webhook secret.
 set -euo pipefail
@@ -191,14 +191,17 @@ echo "Cleared previous release artifacts."
 
 echo "==> Staging release files in $STAGING_DIR"
 
-# The CLI, command modules, shared utilities, and additional functions.
+# The CLI, command modules, shared utilities, the trigger types, and the
+# additional functions. triggers/ is not optional: without it the server has
+# nothing to watch with and every `gift` command that reads hooks.json fails.
 cp -R "$ROOT_DIR/bin"       "$STAGING_DIR/bin"
 cp -R "$ROOT_DIR/commands"  "$STAGING_DIR/commands"
 cp -R "$ROOT_DIR/functions" "$STAGING_DIR/functions"
+cp -R "$ROOT_DIR/triggers"  "$STAGING_DIR/triggers"
 cp -R "$ROOT_DIR/utils"     "$STAGING_DIR/utils"
 cp -R "$ROOT_DIR/web"       "$STAGING_DIR/web"
 
-# Root webhook server, scripts, and project files.
+# Root hooks server, scripts, and project files.
 cp "$ROOT_DIR/serve.js"     "$STAGING_DIR/"
 cp "$ROOT_DIR/ecosystem.config.cjs" "$STAGING_DIR/"
 cp "$ROOT_DIR/hooks.example.json" "$STAGING_DIR/"
