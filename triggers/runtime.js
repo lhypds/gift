@@ -248,12 +248,26 @@ function createRuntime(options = {}) {
         const cwd = hook.cwd || path.dirname(hook.run);
         const startedAt = Date.now();
 
-        const child = spawn(hook.run, hook.args, {
-            cwd,
-            env: childEnv,
-            detached: hook.detach,
-            stdio: hook.detach ? 'ignore' : ['ignore', 'pipe', 'pipe'],
-        });
+        let child;
+        try {
+            child = spawn(hook.run, hook.args, {
+                cwd,
+                env: childEnv,
+                detached: hook.detach,
+                stdio: hook.detach ? 'ignore' : ['ignore', 'pipe', 'pipe'],
+            });
+        } catch (err) {
+            cleanUp();
+            const message = err && err.message ? err.message : String(err);
+            log('error', `hook failed to start: ${message}`, { hook: hook.name, run: hook.run });
+            event.runs.push({
+                hook: hook.name,
+                startedAt: new Date(startedAt).toISOString(),
+                error: message,
+            });
+            persist();
+            return;
+        }
 
         // Logged after the spawn so the pid is part of the same line. A script
         // that does not exist fails asynchronously; that shows up as 'hook
