@@ -122,8 +122,14 @@ poll that fails is logged and fires nothing: a hook cannot tell "the site is
 down" from "this machine's network is down". It also asks whether the request
 uses credentials. Answering yes to "Use credentials?" adds a `hooks.json`
 template for localStorage, sessionStorage, cookies and headers; fill it manually
-and restart gift. Every website hook keeps its latest response body under
-`logs/hooks/<hook name>/` by default; set `saveLastResponse` to false to opt out.
+and restart gift. A credential that expires — an access token pasted out of a
+browser usually lives ten minutes — takes a `credentials.refresh` block saying
+which statuses mean "expired", what request asks for a new one, and where in the
+answer the new values are; gift then renews it, retries the poll, and writes the
+rotated token back to `hooks.json`, so the hook keeps working without anyone
+pasting another. See `triggers/website/README.txt`. Every website hook keeps its
+latest response body under `logs/hooks/<hook name>/` by default; set
+`saveLastResponse` to false to opt out.
 
 **file** — run a script when a file or folder changes.  
 Asks for the path, a pattern (`*.yml`, `**/*.js`), whether to watch subfolders,

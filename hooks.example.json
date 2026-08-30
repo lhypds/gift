@@ -43,8 +43,9 @@
         "timeout": 10000,
         "credentials": {
           "localStorage": {
-            "sampe_auth_store": {
-              "accessToken": "xxx"
+            "sample_auth_store": {
+              "accessToken": "xxx",
+              "refreshToken": "xxx"
             }
           },
           "sessionStorage": {},
@@ -54,6 +55,30 @@
               "from": "localStorage",
               "key": "sample_auth_store",
               "field": "accessToken"
+            }
+          },
+          "refresh": {
+            "url": "https://example.com/api/v1/auth/refresh",
+            "on": [401],
+            "body": {
+              "refresh_token": {
+                "from": "localStorage",
+                "key": "sample_auth_store",
+                "field": "refreshToken"
+              }
+            },
+            "expect": { "code": 0 },
+            "save": {
+              "data.access_token": {
+                "from": "localStorage",
+                "key": "sample_auth_store",
+                "field": "accessToken"
+              },
+              "data.refresh_token": {
+                "from": "localStorage",
+                "key": "sample_auth_store",
+                "field": "refreshToken"
+              }
             }
           }
         },

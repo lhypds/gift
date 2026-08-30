@@ -29,6 +29,15 @@ const { forTrigger } = require('../../utils/log.js');
 const { INLINE_LIMIT } = require('../runtime.js');
 const match = require('../match.js');
 const { fetchPage } = require('./poll.js');
+const {
+    STORAGE_NAMES,
+    HEADER_NAME,
+    plainObject,
+    usable,
+    valueAtField,
+    normalizeRefresh,
+    renew,
+} = require('./credentials.js');
 
 const log = forTrigger('website');
 
@@ -37,9 +46,7 @@ const MIN_INTERVAL_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 10000;
 const WHEN = ['change', 'match', 'always'];
 const DEFAULT_RESPONSE_LOG_DIR = path.join(ROOT, 'logs', 'hooks');
-const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const RESPONSE_SUFFIXES = ['.json', '.xml', '.txt', '.csv', '.html'];
-const STORAGE_NAMES = ['localStorage', 'sessionStorage'];
 let responseWriteCounter = 0;
 
 // ----------------------------------------------------------------- contract ---
@@ -112,7 +119,11 @@ function describe(trigger) {
         ['fires', FIRES[trigger.on]],
     ];
     if (trigger.matchType !== 'any') rows.push(['match', match.describe(trigger)]);
-    if (trigger.credentials) rows.push(['credentials', 'stored privately in hooks.json']);
+    if (trigger.credentials) {
+        rows.push(['credentials', trigger.credentials.refresh
+            ? `stored privately in hooks.json, renewed on ${trigger.credentials.refresh.on.join(', ')}`
+            : 'stored privately in hooks.json']);
+    }
     if (trigger.saveLastResponse) rows.push(['response', 'save latest under logs/hooks/<hook name>']);
     rows.push(['polled', `every ${trigger.interval} ms`]);
     return rows;
@@ -201,13 +212,9 @@ function afterNotes(hook, context = {}) {
 
 // ---------------------------------------------------------- auth / response ---
 
-function plainObject(value) {
-    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
 function credentialTemplate() {
     return {
-        localStorage: { sampe_auth_store: { accessToken: 'xxx' } },
+        localStorage: { sample_auth_store: { accessToken: 'xxx' } },
         sessionStorage: {},
         cookies: {},
         headers: {
@@ -258,23 +265,27 @@ function normalizeCredentials(credentials) {
         throw new Error('sets both "credentials.cookies" and a credential Cookie header');
     }
     normalized.headers = headers;
-    return normalized;
-}
 
-function valueAtField(value, field) {
-    let current = value;
-    if (field && typeof current === 'string') {
-        try {
-            current = JSON.parse(current);
-        } catch {
-            return undefined;
+    // Optional, and the difference between a hook that works for as long as the
+    // pasted token lives and one that keeps working. See credentials.js.
+    // `== null` rather than `=== undefined`: normalize() is called again on its
+    // own output, where an absent refresh has already become null.
+    normalized.refresh = credentials.refresh == null ? null : normalizeRefresh(credentials.refresh);
+    if (normalized.refresh) {
+        // The refresh token has to already be somewhere in the file — a body
+        // pointing at a key nobody pasted is the typo worth catching at startup
+        // rather than at the first 401, ten minutes into a log nobody is reading.
+        for (const [name, value] of Object.entries(normalized.refresh.body)) {
+            if (!plainObject(value)) continue;
+            if (normalized[value.from][value.key] === undefined) {
+                throw new Error(
+                    `has "credentials.refresh.body.${name}" pointing at ${value.from} '${value.key}',`
+                    + ` which is not in "credentials.${value.from}"`,
+                );
+            }
         }
     }
-    for (const part of String(field || '').split('.').filter(Boolean)) {
-        if (!plainObject(current) || !Object.prototype.hasOwnProperty.call(current, part)) return undefined;
-        current = current[part];
-    }
-    return current;
+    return normalized;
 }
 
 /** Resolve static strings and storage references without ever logging their values. */
@@ -287,10 +298,7 @@ function credentialHeaders(trigger) {
         const value = typeof spec === 'string'
             ? spec
             : valueAtField(credentials[spec.from][spec.key], spec.field);
-        if (!['string', 'number', 'boolean'].includes(typeof value)
-            || ['', 'xxx'].includes(String(value).trim().toLowerCase())) {
-            return { ok: false, error: `credential header ${name} has no value` };
-        }
+        if (!usable(value)) return { ok: false, error: `credential header ${name} has no value` };
         const text = String(value);
         if (/[\r\n]/.test(text)) return { ok: false, error: `credential header ${name} has an unsafe value` };
         headers[name] = text;
@@ -302,6 +310,38 @@ function credentialHeaders(trigger) {
         return { ok: false, error: 'credentials are enabled but no headers or cookies are filled in' };
     }
     return { ok: true, headers };
+}
+
+/**
+ * Write renewed credential values back into hooks.json, so a refresh token that
+ * rotated is the one the next start reads rather than the spent one it replaced.
+ *
+ * The file is read fresh instead of remembered: `gift create` and `gift delete`
+ * write it too, and a renewal happens whenever a token happens to expire, which
+ * may be hours after the copy in memory was loaded. Only the stored values that
+ * changed are touched, so an edit made in the meantime survives.
+ */
+function persistCredentials(configFile, hookName, changes) {
+    if (!configFile) throw new Error('there is no hooks.json to write to');
+    // Required here rather than at the top of the file: utils/hooks.js reaches
+    // back through triggers/index.js to this module, and a cycle resolved at
+    // load time would leave one of the two half-built. By the time a poll runs,
+    // both are finished.
+    const { writeConfig } = require('../../utils/hooks.js');
+
+    const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    const hooks = Array.isArray(config.hooks) ? config.hooks : [];
+    const entry = hooks.find((hook, index) => (hook && hook.name ? hook.name : `hook-${index + 1}`) === hookName);
+    if (!entry) throw new Error(`hook '${hookName}' is no longer in the file`);
+
+    const credentials = entry.trigger && entry.trigger.credentials;
+    if (!plainObject(credentials)) throw new Error(`hook '${hookName}' no longer has credentials`);
+
+    for (const change of changes) {
+        if (!plainObject(credentials[change.storage])) credentials[change.storage] = {};
+        credentials[change.storage][change.key] = change.value;
+    }
+    writeConfig(configFile, config);
 }
 
 function contentSuffix(url, contentType = '') {
@@ -368,23 +408,89 @@ function start({ hooks, runtime, options }) {
         let polling = false;
         let saveError = '';
 
+        const refresh = trigger.credentials && trigger.credentials.refresh;
+
+        /** Renew the credential, say so, and answer whether the poll can go on. */
+        const tryRenew = async (why) => {
+            const renewed = await renew(trigger.credentials, {
+                userAgent: process.env.GIFT_WEBSITE_USER_AGENT || options.userAgent,
+                persist: (changes) => persistCredentials(options.configFile, hook.name, changes),
+            });
+            if (stopped) return false;
+            if (!renewed.ok) {
+                log('warn', `poll skipped: ${why} and could not be renewed — ${renewed.error}`, {
+                    hook: hook.name, url: trigger.url,
+                });
+                return false;
+            }
+            if (renewed.persisted) {
+                log('info', `credential renewed: ${renewed.changed.join(', ')}`, { hook: hook.name });
+            } else {
+                // Worth a warning rather than a note: the token still in the
+                // file has been spent, so a restart before the next successful
+                // write is a restart with nothing left to refresh with.
+                log('warn', `credential renewed but not saved: ${renewed.error}`, {
+                    hook: hook.name, hint: 'the new credential is lost when the server restarts',
+                });
+            }
+            return true;
+        };
+
         const poll = async () => {
             if (polling || stopped) return;
             polling = true;
             try {
-                const credentials = credentialHeaders(trigger);
+                let credentials = credentialHeaders(trigger);
                 if (!credentials.ok) {
-                    log('warn', `poll skipped: ${credentials.error}`, { hook: hook.name, url: trigger.url });
-                    return;
+                    // With a refresh configured, an empty access token is not a
+                    // hook somebody forgot to fill in — it is one whose token has
+                    // already been spent. Ask for another rather than skipping
+                    // every poll from here to the next manual paste.
+                    if (!refresh) {
+                        log('warn', `poll skipped: ${credentials.error}`, { hook: hook.name, url: trigger.url });
+                        return;
+                    }
+                    if (!await tryRenew(credentials.error)) return;
+                    credentials = credentialHeaders(trigger);
+                    if (!credentials.ok) {
+                        log('warn', `poll skipped: ${credentials.error}`, { hook: hook.name, url: trigger.url });
+                        return;
+                    }
                 }
 
-                const result = await fetchPage(trigger.url, {
+                const fetchOnce = (headers) => fetchPage(trigger.url, {
                     method: trigger.method,
                     timeout: trigger.timeout,
                     userAgent: process.env.GIFT_WEBSITE_USER_AGENT || options.userAgent,
-                    headers: credentials.headers,
+                    headers,
                 });
+
+                let result = await fetchOnce(credentials.headers);
                 if (stopped) return;
+
+                // A credential that expired between polls is the ordinary life of
+                // a short-lived token, not news: renew it and ask again, and let
+                // the second answer be the one the hook sees. Without this the
+                // 401 itself would read as the page having changed.
+                if (result.ok && refresh && refresh.on.includes(result.status)) {
+                    if (!await tryRenew(`the page answered ${result.status}`)) return;
+                    const renewed = credentialHeaders(trigger);
+                    if (!renewed.ok) {
+                        log('warn', `poll skipped: ${renewed.error}`, { hook: hook.name, url: trigger.url });
+                        return;
+                    }
+                    result = await fetchOnce(renewed.headers);
+                    if (stopped) return;
+                    if (result.ok && refresh.on.includes(result.status)) {
+                        // A fresh credential the page still refuses is a broken
+                        // hook, not a changed page. Firing a script on it would
+                        // run a deploy over an authentication problem.
+                        log('warn', `poll skipped: the page still answered ${result.status} with a renewed credential`, {
+                            hook: hook.name, url: trigger.url,
+                        });
+                        return;
+                    }
+                }
 
                 if (!result.ok) {
                     // Logged, never fired on: a hook cannot tell "the site is
@@ -477,7 +583,9 @@ function start({ hooks, runtime, options }) {
             hook: hook.name,
             every: `${trigger.interval}ms`,
             on: trigger.on,
-            credentials: trigger.credentials ? 'hooks.json' : undefined,
+            credentials: trigger.credentials
+                ? (refresh ? `hooks.json, renewed on ${refresh.on.join('/')}` : 'hooks.json')
+                : undefined,
             saves: trigger.saveLastResponse
                 ? path.join(options.responseLogDir || DEFAULT_RESPONSE_LOG_DIR, safeHookName(hook.name))
                 : undefined,
@@ -524,6 +632,7 @@ module.exports = {
     credentialTemplate,
     normalizeCredentials,
     credentialHeaders,
+    persistCredentials,
     contentSuffix,
     safeHookName,
     saveLastResponse,

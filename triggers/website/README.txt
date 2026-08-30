@@ -40,8 +40,9 @@ hooks.json
             "timeout": 10000,
             "credentials": {
                 "localStorage": {
-                    "sampe_auth_store": {
-                        "accessToken": "xxx"
+                    "sample_auth_store": {
+                        "accessToken": "xxx",
+                        "refreshToken": "xxx"
                     }
                 },
                 "sessionStorage": {},
@@ -53,6 +54,30 @@ hooks.json
                         "from": "localStorage",
                         "key": "sample_auth_store",
                         "field": "accessToken"
+                    }
+                },
+                "refresh": {
+                    "url": "https://example.com/api/v1/auth/refresh",
+                    "on": [401],
+                    "body": {
+                        "refresh_token": {
+                            "from": "localStorage",
+                            "key": "sample_auth_store",
+                            "field": "refreshToken"
+                        }
+                    },
+                    "expect": { "code": 0 },
+                    "save": {
+                        "data.access_token": {
+                            "from": "localStorage",
+                            "key": "sample_auth_store",
+                            "field": "accessToken"
+                        },
+                        "data.refresh_token": {
+                            "from": "localStorage",
+                            "key": "sample_auth_store",
+                            "field": "refreshToken"
+                        }
                     }
                 }
             },
@@ -70,8 +95,9 @@ matchType   any, contains (case-insensitive), exact, or regex.
 interval    how often to poll, in milliseconds. At least 1000.
 timeout     how long to wait for the page, in milliseconds. 10000 by default.
 credentials optional localStorage, sessionStorage, cookies and headers kept in
-            hooks.json. `gift create` adds an empty template when "Use
-            credentials?" is answered yes; edit the file manually and restart.
+            hooks.json, plus an optional `refresh` for credentials that expire.
+            `gift create` adds an empty template when "Use credentials?" is
+            answered yes; edit the file manually and restart.
 saveLastResponse
             true saves the body of every completed HTTP response under
             logs/hooks/<hook name>/last_response.ext. The file is replaced
@@ -106,8 +132,54 @@ before following a redirect to another origin.
 hooks.json is written 0600 and credentials are redacted from the dashboard's
 /api/hooks.json view, but it still contains plaintext secrets on disk. Keep it
 out of source control, include only the fields the request needs, and rotate any
-value that is exposed. Storage and cookies are snapshots; edit hooks.json and
-run `gift restart` after the browser rotates them.
+value that is exposed. Storage and cookies are snapshots; without a `refresh`
+below, edit hooks.json and run `gift restart` after the browser rotates them.
+
+
+Credentials that expire
+-----------------------
+
+An access token pasted out of a browser often lives ten minutes. Poll every
+minute with one and the hook works for ten polls and then answers 401 forever,
+which is not a page that changed and must not run anybody's script.
+
+`credentials.refresh` is what stops that. It says which statuses mean "expired",
+what request asks for a new credential, and where in the answer the new values
+are — see the block in the example above.
+
+    url       the endpoint that issues a new credential.
+    method    POST by default.
+    on        the statuses that mean the credential expired. [401] by default.
+    timeout   how long to wait for it, in milliseconds. 10000 by default.
+    body      the JSON body to send. A value may be a literal, or a
+              { from, key, field } pointer at stored credentials — which is how
+              the refresh token gets sent without being written twice.
+    headers   extra headers, as literals or the same pointers. The poll's own
+              credential headers are NOT sent: a refresh is normally the one
+              request that must work with the access token already expired.
+    expect    fields the answer must equal for the refresh to have worked. An
+              API that reports failure as {"code": 401} under a 200 is common
+              enough that trusting the status alone would store a credential
+              made of nulls.
+    save      where the new values go: a dotted path into the answer, pointing
+              at the stored credential to overwrite. Required.
+
+What `save` writes is kept in memory and written back into hooks.json, because
+refresh tokens usually rotate — the one in the file is spent the moment it is
+used, and a restart that read the spent one would have nothing left to refresh
+with. The write replaces only the stored values that changed, keeps the shape
+they were pasted in, and leaves the file at 0600.
+
+A poll that gets an `on` status renews once and asks again, and the second answer
+is the one the hook sees; a 401 never reaches the script. If the renewal fails,
+or the page still refuses the new credential, the poll is skipped and logged, the
+same as any other failed poll. Nothing fires.
+
+Two things worth knowing before turning it on. A refresh is never followed
+through a redirect, because the request carries the long-lived token in its body.
+And rotating a refresh token invalidates the one the browser is holding, so the
+browser session that produced the credential gets logged out the first time gift
+renews it.
 
 
 What the script is given
