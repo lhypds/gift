@@ -7,7 +7,10 @@
 }
 .fresh { background: rgba(255, 255, 51, 0.4); }
 .clickable { cursor: pointer; }
-.clickable:hover { border-color: var(--ink); }
+.clickable:hover { border-color: var(--ink); background: var(--soft); }
+/* Keyboard (j/k) cursor — same look as mouse hover. Declared after .fresh so
+   the cursor still reads on a just-now item. */
+.hovered { border-color: var(--ink); background: var(--soft); }
 .clickable:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .itemTop { position: relative; }
 .timestamp { font-size: .8rem; color: var(--muted); }

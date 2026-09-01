@@ -14,6 +14,7 @@ export default function App() {
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [cursor, setCursor] = useState(null);
   const cancelledRef = useRef(false);
 
   const load = useCallback(() => {
@@ -50,6 +51,32 @@ export default function App() {
     ? (events?.find((e) => e.id === selected.id && e.id !== 'No id') ?? selected)
     : null;
 
+  // Vim-style list navigation: j starts at the top, j/k move, Enter opens.
+  // Inert while the modal is open, and while a real control has focus so
+  // typing or the items' own Enter/Space handling doesn't collide with it.
+  useEffect(() => {
+    const handleKeyDown = (keyEvent) => {
+      if (selected) return;
+      if (keyEvent.metaKey || keyEvent.ctrlKey || keyEvent.altKey) return;
+      if (keyEvent.target.closest?.('input, textarea, select, button, a, [role="button"]')) return;
+      const count = events?.length ?? 0;
+      if (count === 0) return;
+
+      if (keyEvent.key === 'j') {
+        keyEvent.preventDefault();
+        setCursor((c) => (c === null ? 0 : Math.min(c + 1, count - 1)));
+      } else if (keyEvent.key === 'k') {
+        keyEvent.preventDefault();
+        setCursor((c) => (c === null ? 0 : Math.max(c - 1, 0)));
+      } else if (keyEvent.key === 'Enter' && cursor !== null) {
+        keyEvent.preventDefault();
+        setSelected(events[Math.min(cursor, count - 1)]);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [events, selected, cursor]);
+
   return (
     <main>
       <div className="page-header">
@@ -69,7 +96,7 @@ export default function App() {
         {events && events.length > 0 && (
           <div className="list">
             {events.map((event, index) => (
-              <Event key={index} event={event} onSelect={setSelected} />
+              <Event key={index} event={event} onSelect={setSelected} hovered={index === cursor} />
             ))}
           </div>
         )}

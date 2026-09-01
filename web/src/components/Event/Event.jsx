@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import SourceLink from "../SourceLink/SourceLink.jsx";
 import styles from "./event.module.css";
 
@@ -28,7 +29,14 @@ function formatRelativeTime(timestamp) {
   return null;
 }
 
-export default function Event({ event, onSelect }) {
+export default function Event({ event, onSelect, hovered = false }) {
+  const itemRef = useRef(null);
+
+  // The j/k cursor can land on a row that's scrolled out of sight.
+  useEffect(() => {
+    if (hovered) itemRef.current?.scrollIntoView({ block: "nearest" });
+  }, [hovered]);
+
   const handleKeyDown = (keyEvent) => {
     if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
     keyEvent.preventDefault();
@@ -41,7 +49,8 @@ export default function Event({ event, onSelect }) {
 
   return (
     <div
-      className={`${styles.item} ${styles.clickable}${fresh ? ` ${styles.fresh}` : ""}`}
+      ref={itemRef}
+      className={`${styles.item} ${styles.clickable}${fresh ? ` ${styles.fresh}` : ""}${hovered ? ` ${styles.hovered}` : ""}`}
       role="button"
       tabIndex={0}
       onClick={() => onSelect(event)}
