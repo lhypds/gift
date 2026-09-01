@@ -2,6 +2,17 @@ import { useCallback } from "react";
 import { Modal, TextArea } from "@ui/index.js";
 import styles from "./detail.module.css";
 
+// Hooks run without a TTY, so most tools drop their color on their own — but
+// anything that forces it (FORCE_COLOR, a --color flag) would land here as
+// literal "←[32m" noise, since a textarea renders escapes rather than obeying
+// them. Matches the CSI form colors use, OSC strings (terminated by BEL or
+// ST), and the bare two-character escapes, then drops them all.
+const ANSI_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][\s\S]*?(?:\x07|\x1b\\)|[@-_])/g;
+
+function plainText(output) {
+  return output.replace(ANSI_ESCAPE, "");
+}
+
 function formatDuration(ms) {
   if (typeof ms !== "number") return null;
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -43,7 +54,7 @@ export default function Detail({ event, onClose }) {
             <TextArea
               ref={pinToBottom}
               className={styles.output}
-              value={run.output || "(no output)"}
+              value={run.output ? plainText(run.output) : "(no output)"}
               readOnly
               spellCheck={false}
               wrap="off"
