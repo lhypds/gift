@@ -51,13 +51,22 @@ export default function App() {
     ? (events?.find((e) => e.id === selected.id && e.id !== 'No id') ?? selected)
     : null;
 
-  // Vim-style list navigation: j starts at the top, j/k move, Enter opens.
-  // Inert while the modal is open, and while a real control has focus so
-  // typing or the items' own Enter/Space handling doesn't collide with it.
+  // Vim-style list navigation: j starts at the top, j/k move, Enter or Space
+  // opens, Space closes again. Inert while a real control has focus so typing
+  // or the items' own Enter/Space handling doesn't collide with it.
   useEffect(() => {
     const handleKeyDown = (keyEvent) => {
-      if (selected) return;
       if (keyEvent.metaKey || keyEvent.ctrlKey || keyEvent.altKey) return;
+      if (selected) {
+        // A row opened by click keeps focus, so this can't use the full
+        // control guard below: the row's own Space handler re-selects, but
+        // this close runs in the same batch and wins.
+        if (keyEvent.key === ' ' && !keyEvent.target.closest?.('input, textarea, select')) {
+          keyEvent.preventDefault();
+          setSelected(null);
+        }
+        return;
+      }
       if (keyEvent.target.closest?.('input, textarea, select, button, a, [role="button"]')) return;
       const count = events?.length ?? 0;
       if (count === 0) return;
@@ -68,7 +77,7 @@ export default function App() {
       } else if (keyEvent.key === 'k') {
         keyEvent.preventDefault();
         setCursor((c) => (c === null ? 0 : Math.max(c - 1, 0)));
-      } else if (keyEvent.key === 'Enter' && cursor !== null) {
+      } else if ((keyEvent.key === 'Enter' || keyEvent.key === ' ') && cursor !== null) {
         keyEvent.preventDefault();
         setSelected(events[Math.min(cursor, count - 1)]);
       }
