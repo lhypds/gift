@@ -32,9 +32,10 @@ function formatRelativeTime(timestamp) {
 export default function Event({ event, onSelect, hovered = false }) {
   const itemRef = useRef(null);
 
-  // The j/k cursor can land on a row that's scrolled out of sight.
+  // Keep the j/k cursor centered so the page scrolls along with the
+  // selection, instead of the row hugging the viewport edge.
   useEffect(() => {
-    if (hovered) itemRef.current?.scrollIntoView({ block: "nearest" });
+    if (hovered) itemRef.current?.scrollIntoView({ block: "center" });
   }, [hovered]);
 
   const handleKeyDown = (keyEvent) => {
