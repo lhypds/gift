@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { Modal, TextArea } from "@ui/index.js";
 import styles from "./detail.module.css";
 
@@ -16,6 +17,14 @@ function runStatus(run) {
 
 export default function Detail({ event, onClose }) {
   const runs = event?.runs ?? [];
+  // Output is a log, so the interesting part is the end. Scrolling from the
+  // ref callback lands it at the bottom before the modal is ever painted;
+  // stable identity keeps it a mount-time move, so the list refreshing
+  // underneath (App re-finds the selected event on every poll) can't yank the
+  // view back down while it's being read.
+  const pinToBottom = useCallback((el) => {
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
   // One delivery can fan out to several hooks, so no single hook owns the
   // title: it counts the runs, and every run carries its own name above its
   // message or output — the same shape whether one hook ran or five did.
@@ -32,10 +41,12 @@ export default function Detail({ event, onClose }) {
           </div>
           {!run.error && (
             <TextArea
+              ref={pinToBottom}
               className={styles.output}
               value={run.output || "(no output)"}
               readOnly
               spellCheck={false}
+              wrap="off"
               style={{ minHeight: "min(560px, calc(90vh - 140px))", maxHeight: "calc(90vh - 140px)" }}
             />
           )}

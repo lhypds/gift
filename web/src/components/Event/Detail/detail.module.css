@@ -19,6 +19,8 @@
 
 .output {
   font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
+  /* Terminal output, so lines stay whole and the box scrolls sideways
+     instead — wrapping mid-path turns a diff or a stack trace into mush. */
+  white-space: pre;
+  overflow-x: auto;
 }

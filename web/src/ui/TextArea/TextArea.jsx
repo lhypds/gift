@@ -1,14 +1,20 @@
-import { useRef, forwardRef } from 'react';
+import { useRef, useCallback, forwardRef } from 'react';
 import styles from './textarea.module.css';
 
 const TextArea = forwardRef(function TextArea({ className, minHeight = 80, style, ...props }, forwardedRef) {
   const localRef = useRef(null);
 
-  function setRefs(el) {
-    localRef.current = el;
-    if (typeof forwardedRef === 'function') forwardedRef(el);
-    else if (forwardedRef) forwardedRef.current = el;
-  }
+  // Memoized: a fresh function here would make React detach and re-attach the
+  // ref on every render, so a caller's callback ref would run again on each
+  // one — turning "do this when the textarea appears" into "do it constantly".
+  const setRefs = useCallback(
+    (el) => {
+      localRef.current = el;
+      if (typeof forwardedRef === 'function') forwardedRef(el);
+      else if (forwardedRef) forwardedRef.current = el;
+    },
+    [forwardedRef],
+  );
 
   function onMouseDown(e) {
     e.preventDefault();
