@@ -1,4 +1,4 @@
-// The clipboard trigger — run a script when what is on the clipboard changes.
+// The clipboard trigger — run a command when what is on the clipboard changes.
 //
 //     { "type": "clipboard", "match": "^TODO:", "matchType": "regex" }
 //
@@ -8,7 +8,7 @@
 // that is not a change, and firing on it would mean every restart runs every
 // clipboard hook.
 //
-// What was copied reaches the script as GIFT_CLIPBOARD (and, whole, in the file
+// What was copied reaches the command as GIFT_CLIPBOARD (and, whole, in the file
 // GIFT_CLIPBOARD_FILE). It is never part of a command line: someone who copies
 // `; rm -rf /` has copied a string, and gift treats it as one.
 'use strict';
@@ -59,7 +59,7 @@ function line(trigger) {
 }
 
 async function ask({ askText, askYesNo }) {
-    console.log('The clipboard is read on a timer; a change that matches runs the script.');
+    console.log('The clipboard is read on a timer; a change that matches runs the command.');
     console.log('');
 
     const everything = await askYesNo('Fire on every clipboard change?', false);
@@ -209,7 +209,7 @@ function start({ hooks, runtime }) {
 module.exports = {
     name: 'clipboard',
     title: 'Clipboard',
-    summary: 'Watch the clipboard and run a script when its contents change.',
+    summary: 'Watch the clipboard and run a command when its contents change.',
     prompt: 'something is copied to the clipboard',
     DEFAULT_INTERVAL_MS,
     normalize,

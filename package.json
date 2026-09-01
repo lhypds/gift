@@ -1,6 +1,6 @@
 {
   "name": "gift",
-  "description": "Hooks server — GitHub webhooks, the clipboard, a polled website or a watched file, each running a bash script — with Git and GitHub helper functions",
+  "description": "Hooks server — GitHub webhooks, the clipboard, a polled website or a watched file, each running a command — with Git and GitHub helper functions",
   "license": "MIT",
   "bin": {
     "gift": "bin/gift.js"

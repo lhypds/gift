@@ -1,4 +1,4 @@
-// The website trigger — poll a URL and run a script when the answer is
+// The website trigger — poll a URL and run a command when the answer is
 // interesting.
 //
 //     { "type": "website", "url": "https://example.com/status", "on": "change" }
@@ -145,7 +145,7 @@ function line(trigger) {
 }
 
 async function ask({ askText, askYesNo }) {
-    console.log('The page is fetched on a timer; what comes back decides whether the script runs.');
+    console.log('The page is fetched on a timer; what comes back decides whether the command runs.');
     console.log('');
 
     const url = await askText('URL to poll', { validate: (value) => (value ? urlProblem(value) : 'A URL is needed.') });
@@ -695,7 +695,7 @@ function bodySuffix(url) {
 module.exports = {
     name: 'website',
     title: 'Website',
-    summary: 'Poll a URL and run a script when the page changes or matches.',
+    summary: 'Poll a URL and run a command when the page changes or matches.',
     prompt: 'a page changes, or starts saying something',
     WHEN,
     DEFAULT_INTERVAL_MS,

@@ -1,7 +1,8 @@
 website
 =======
 
-Poll a URL and run a script when the page changes or matches.
+
+Poll a URL and run a command when the page changes or matches.
 
 The page is fetched on a timer. What counts as worth firing for is `on`, and it
 is worth being deliberate about it, because two of the three fire repeatedly:
@@ -115,7 +116,7 @@ Each website hook polls on its own timer, staggered a second apart at startup so
 that ten of them are ten requests over ten seconds rather than ten at once.
 
 Every poll writes one line to logs/hooks/<hook name>/hook.log — the time it
-asked, whether the script ran (fired, quiet or failed), and why:
+asked, whether the command ran (fired, quiet or failed), and why:
 
     2026-08-30T14:47:06.704Z  quiet   the page has not changed  url=… status=200 ms=138
     2026-08-30T14:48:06.912Z  fired   the page came back different  url=… status=200 ms=142
@@ -157,7 +158,7 @@ Credentials that expire
 
 An access token pasted out of a browser often lives ten minutes. Poll every
 minute with one and the hook works for ten polls and then answers 401 forever,
-which is not a page that changed and must not run anybody's script.
+which is not a page that changed and must not run anybody's command.
 
 `credentials.refresh` is what stops that. It says which statuses mean "expired",
 what request asks for a new credential, and where in the answer the new values
@@ -187,7 +188,7 @@ with. The write replaces only the stored values that changed, keeps the shape
 they were pasted in, and leaves the file at 0600.
 
 A poll that gets an `on` status renews once and asks again, and the second answer
-is the one the hook sees; a 401 never reaches the script. If the renewal fails,
+is the one the hook sees; a 401 never reaches the command. If the renewal fails,
 or the page still refuses the new credential, the poll is skipped and logged, the
 same as any other failed poll. Nothing fires.
 
@@ -198,8 +199,8 @@ browser session that produced the credential gets logged out the first time gift
 renews it.
 
 
-What the script is given
-------------------------
+What the command is given
+-------------------------
 
 GIFT_HOOK              the hook's name
 GIFT_TRIGGER           website

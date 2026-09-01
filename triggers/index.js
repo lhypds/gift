@@ -1,6 +1,6 @@
 // Trigger discovery. Every folder in triggers/ holding an index.js is a trigger
 // type — the thing that notices something happened and asks gift to run a hook's
-// script. The folder name is the type name, and it is what a hook's
+// command. The folder name is the type name, and it is what a hook's
 // `"trigger": { "type": ... }` names.
 //
 // Four are shipped:

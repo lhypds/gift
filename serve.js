@@ -2,10 +2,10 @@
 // gift serve — the hooks server.
 //
 // One process watching four kinds of thing. A hook says what has to happen
-// (its `trigger`) and what to run when it does (a bash script), and this is
-// what sits between them: it reads hooks.json, hands each hook to the trigger
-// that owns its type, and gives all of them the same way to run a script, the
-// same log and the same dashboard.
+// (its `trigger`) and what to run when it does (a command), and this is what
+// sits between them: it reads hooks.json, hands each hook to the trigger that
+// owns its type, and gives all of them the same way to run a command, the same
+// log and the same dashboard.
 //
 //     github      an HTTP endpoint receiving GitHub webhook deliveries
 //     clipboard   the clipboard, read on a timer
@@ -30,6 +30,7 @@ const {
     logFile, requestLogFile, errorLogFile, formatFields, stamp,
 } = require('./utils/log.js');
 const hookRecord = require('./utils/hook.js');
+const command = require('./utils/command.js');
 const triggers = require('./triggers/index.js');
 const { createRuntime } = require('./triggers/runtime.js');
 const github = require('./triggers/github/index.js');
@@ -59,7 +60,7 @@ const DEFAULTS = {
 function usage() {
     console.log(`usage: gift serve [options]
 
-Watch for the triggers configured in hooks.json and run their scripts.
+Watch for the triggers configured in hooks.json and run their commands.
 
 options:
   --config=FILE    Hook configuration file (default: hooks.json)
@@ -69,7 +70,7 @@ options:
   --log=FILE       Log file to append to (default: hooks.log)
   --no-log         Log to the console only, writing no file
   --only=TYPE      Start only this trigger type — repeatable, for debugging
-  --dry-run        Notice events and match hooks, but never run a script
+  --dry-run        Notice events and match hooks, but never run a command
   -h, --help       Show this help
 
 trigger types: ${triggers.names().join(', ')}
@@ -464,11 +465,12 @@ function main(argv) {
         });
     }
 
+    // Said once at startup rather than at 3am in the log: a command whose
+    // program is not there, or is there and not executable, will fail every
+    // time it fires and nothing else will mention it until it does.
     for (const hook of config.hooks) {
-        try {
-            fs.accessSync(hook.run, fs.constants.X_OK);
-        } catch {
-            log('warn', 'hook script is missing or not executable', { hook: hook.name, run: hook.run });
+        for (const note of command.notes(hook.run, hook.cwd)) {
+            log('warn', `hook command: ${note}`, { hook: hook.name, run: hook.run });
         }
     }
 
@@ -486,7 +488,7 @@ function main(argv) {
             log('info', `error log ${errorLogFile.path}, and ${path.join(DEFAULT_HOOK_LOG_DIR, '<hook>', 'error.log')}`);
         }
         log('info', `events ${settings.eventsFile}`);
-        if (settings.dryRun) log('warn', 'dry run — hook scripts will not be executed');
+        if (settings.dryRun) log('warn', 'dry run — hook commands will not be executed');
         if (settings.only.length) log('warn', `only the ${settings.only.join(', ')} trigger(s) will start`);
 
         if (config.hooks.length === 0) {

@@ -12,7 +12,8 @@
 // `create` asks two sorts of question. What should trigger the hook belongs to
 // the trigger — a repository and its branches, a URL and how often to poll, a
 // folder and a pattern — so the trigger module asks those, and nothing in here
-// knows what they are. What to run is the same for every type, and is asked here.
+// knows what they are. What to run — the folder to run in and the command line
+// to run there — is the same for every type, and is asked here.
 'use strict';
 
 const fs = require('node:fs');
@@ -25,6 +26,7 @@ const { ask } = require('./pick.js');
 const { hookLogDirFor, safeHookName } = require('./log.js');
 const { SERVER_DIR } = require('./service.js');
 const hookRecord = require('./hook.js');
+const command = require('./command.js');
 const triggers = require('../triggers/index.js');
 const gh = require('../triggers/github/gh.js');
 
@@ -65,20 +67,6 @@ function isDirectory(target) {
     } catch {
         return false;
     }
-}
-
-/**
- * What is worth saying about a hook's script — the same two things the server
- * warns about at startup, so they surface before anything fires.
- */
-function scriptNotes(run) {
-    if (!fs.existsSync(run)) return [`no file at ${run} yet`];
-    try {
-        fs.accessSync(run, fs.constants.X_OK);
-    } catch {
-        return [`${run} is not executable — chmod +x it`];
-    }
-    return [];
 }
 
 // ------------------------------------------------------------------- config ---
@@ -168,13 +156,14 @@ function restartServer(run = spawnSync) {
 
 /**
  * The rows shown for one hook, by `list` and by the confirmation in `create`.
- * `run` and `cwd` are resolved against the project root — where the server
- * resolves them from, wherever the configuration file itself is.
+ * `cwd` is resolved against the project root — where the server resolves it
+ * from, wherever the configuration file itself is. `run` is printed as written,
+ * because a command line is not a path to shorten.
  */
 function describe(hook) {
     return hookRecord.describe(hook, {
         resolve: (target) => show(path.resolve(SERVER_DIR, target)),
-        notes: (run) => scriptNotes(path.resolve(SERVER_DIR, run)),
+        notes: (run, cwd) => command.notes(run, path.resolve(SERVER_DIR, cwd || '.')),
     });
 }
 
@@ -429,46 +418,48 @@ async function createHook(file) {
     });
     if (name === null) return cancelled();
 
-    // Absolute only. A relative path would be resolved against wherever the user
-    // happens to be standing, which is not what the hook would run months later.
-    const runAnswer = await askText('Script to run — an absolute path to a .sh', {
-        validate: (value) => {
-            if (!value) return 'A script is needed; it is what the hook runs.';
-            if (!path.isAbsolute(expandHome(value))) {
-                return 'That path must be absolute, so the hook runs the same script wherever the server was started.';
-            }
-            if (!value.endsWith('.sh')) return 'The handler is a bash script — the path must end in .sh.';
-            return null;
-        },
-    });
-    if (runAnswer === null) return cancelled();
-    const run = resolveTyped(runAnswer);
-    if (fs.existsSync(run)) {
-        try {
-            fs.accessSync(run, fs.constants.X_OK);
-        } catch {
-            console.log(`  warning: ${run} is not executable.`);
-            const makeExecutable = await askYesNo('Make it executable now?', false);
-            if (makeExecutable === null) return cancelled();
-            if (makeExecutable) {
-                try {
-                    fs.chmodSync(run, fs.statSync(run).mode | 0o111);
-                    console.log(`  Made ${run} executable.`);
-                } catch (err) {
-                    console.error(`  warning: could not make ${run} executable: ${err.message}`);
-                }
-            }
-        }
-    } else {
-        for (const note of scriptNotes(run)) console.log(`  note: ${note}`);
-    }
-
-    const cwdAnswer = await askText('Working directory the script runs in', {
-        fallback: path.dirname(run),
+    // The folder comes before the command, so the command can be written
+    // against it — `./deploy.sh` rather than a long path typed twice — and so
+    // there is somewhere to look for the file it names. The default is where
+    // the user is standing, which for someone who has just cd'd into the
+    // project is the answer.
+    const cwdAnswer = await askText('Working directory the command runs in', {
+        fallback: process.cwd(),
+        validate: (value) => (value ? null : 'A directory is needed; the command has to run somewhere.'),
     });
     if (cwdAnswer === null) return cancelled();
     const cwd = resolveTyped(cwdAnswer);
     if (!isDirectory(cwd)) console.log(`  note: no directory at ${cwd} yet`);
+
+    // A command line, run by bash in that folder — a script's path on its own,
+    // an interpreter and a file, or several commands joined with &&.
+    const run = await askText('Command to run — e.g. bash deploy.sh', {
+        validate: (value) => (value ? null : 'A command is needed; it is what the hook runs.'),
+    });
+    if (run === null) return cancelled();
+
+    // Offered rather than done, and only for the program itself: a file handed
+    // to an interpreter is read, not executed, and does not need the bit.
+    const program = command.program(run);
+    const entry = program && command.isPath(program) ? path.resolve(cwd, expandHome(program)) : null;
+    if (entry && fs.existsSync(entry) && !isDirectory(entry)) {
+        try {
+            fs.accessSync(entry, fs.constants.X_OK);
+        } catch {
+            console.log(`  warning: ${entry} is not executable.`);
+            const makeExecutable = await askYesNo('Make it executable now?', false);
+            if (makeExecutable === null) return cancelled();
+            if (makeExecutable) {
+                try {
+                    fs.chmodSync(entry, fs.statSync(entry).mode | 0o111);
+                    console.log(`  Made ${entry} executable.`);
+                } catch (err) {
+                    console.error(`  warning: could not make ${entry} executable: ${err.message}`);
+                }
+            }
+        }
+    }
+    for (const note of command.notes(run, cwd)) console.log(`  note: ${note}`);
 
     // Everything not asked about takes the common answer — no arguments, not
     // detached, on. Field order matches hooks.example.json, so hand-written and
@@ -706,9 +697,12 @@ function createUsage() {
     console.log('');
     console.log('The questions that follow are the trigger\'s own — a repository and its');
     console.log('branches, a URL and how often to poll, a folder and a pattern — and then');
-    console.log('three that are the same for every type: the hook name, the bash script to');
-    console.log('run and the working directory it runs in.');
-    console.log('If the script exists but is not executable, create offers to make it so.');
+    console.log('three that are the same for every type: the hook name, the working');
+    console.log('directory, and the command to run in it. bash reads the command, so');
+    console.log('`bash deploy.sh` is as good an answer as a script\'s path on its own,');
+    console.log('and anything relative in it is relative to that directory.');
+    console.log('If the command starts with a file that is not executable, create offers');
+    console.log('to make it so.');
     console.log('');
     console.log('The rest takes the common answer — no arguments, not detached, on. Edit');
     console.log('hooks.json to change them; `gift help <type>-trigger` lists every field.');

@@ -1,13 +1,12 @@
-// What every trigger shares: running a hook's script, and recording what
+// What every trigger shares: running a hook's command, and recording what
 // happened where `gift log` and the dashboard can see it.
 //
 // A trigger's whole job is to notice something and call `fire`. It never spawns
 // anything itself, so the four of them cannot drift apart on the parts that
-// matter — one run at a time per hook, arguments that come from hooks.json and
-// never from the thing that fired, a child spawned without a shell, output
-// captured into the log and the dashboard, temporary files cleaned up
-// afterwards. A fifth trigger dropped into triggers/ gets all of that by
-// calling the same two functions.
+// matter — one run at a time per hook, a command line and arguments that come
+// from hooks.json and never from the thing that fired, output captured into the
+// log and the dashboard, temporary files cleaned up afterwards. A fifth trigger
+// dropped into triggers/ gets all of that by calling the same two functions.
 'use strict';
 
 const fs = require('node:fs');
@@ -16,6 +15,12 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const { log } = require('../utils/log.js');
+const command = require('../utils/command.js');
+
+// A hook's `run` is a command line, so something has to read it. bash is what
+// the rest of gift already assumes — setup, install and start are all bash —
+// and it is what the command was written for.
+const SHELL = 'bash';
 
 const EVENT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
@@ -197,12 +202,13 @@ function createRuntime(options = {}) {
     }
 
     /**
-     * Run one hook's script for one event.
+     * Run one hook's command for one event.
      *
-     * `event.env` reaches the script as environment variables and `event.files`
-     * as files it is handed the path to — never as arguments, which come from
-     * hooks.json alone. Nothing a trigger observed is ever used to build a
-     * command, so a clipboard holding `; rm -rf /` is a string like any other.
+     * `event.env` reaches the command as environment variables and
+     * `event.files` as files it is handed the path to — never as text pasted
+     * into the command, which is hooks.json's alone. A clipboard holding
+     * `; rm -rf /` is therefore a string like any other: bash does not re-read
+     * what a variable expanded to looking for syntax.
      */
     function fire(hook, event, { env = {}, files = {} } = {}) {
         const status = stateOf(hook);
@@ -245,12 +251,19 @@ function createRuntime(options = {}) {
             ...fileEnv,
         };
 
-        const cwd = hook.cwd || path.dirname(hook.run);
+        const cwd = hook.cwd || command.directory(hook.run) || undefined;
         const startedAt = Date.now();
+
+        // Arguments are handed to bash as positional parameters and referred to
+        // from the command, rather than pasted into its text: an argument with
+        // a space or a quote in it stays one argument, and `run` stays the only
+        // thing bash parses. A command with no arguments is left exactly as
+        // written, so a trailing `&` or `#` still means what it says.
+        const line = hook.args.length ? `${hook.run} "$@"` : hook.run;
 
         let child;
         try {
-            child = spawn(hook.run, hook.args, {
+            child = spawn(SHELL, ['-c', line, hook.name, ...hook.args], {
                 cwd,
                 env: childEnv,
                 detached: hook.detach,
@@ -269,9 +282,10 @@ function createRuntime(options = {}) {
             return;
         }
 
-        // Logged after the spawn so the pid is part of the same line. A script
-        // that does not exist fails asynchronously; that shows up as 'hook
-        // failed to start' below, with no pid here.
+        // Logged after the spawn so the pid is part of the same line. Only bash
+        // itself missing shows up as 'hook failed to start' below, with no pid
+        // here; a command naming a file that is not there is bash's to report,
+        // and arrives as exit 127 with its message in the run's output.
         log('info', 'running hook', {
             hook: hook.name,
             trigger: event.trigger,
@@ -301,9 +315,9 @@ function createRuntime(options = {}) {
         pipeOutput(child.stdout, hook.name, 'info', recorder);
         pipeOutput(child.stderr, hook.name, 'warn', recorder);
 
-        // A script that does not exist emits 'error' and then 'close' as well,
-        // which would otherwise be two entries in the dashboard for one run —
-        // and the second would say `exit null` where the first said why.
+        // A child that cannot be spawned emits 'error' and then 'close' as
+        // well, which would otherwise be two entries in the dashboard for one
+        // run — and the second would say `exit null` where the first said why.
         let done = false;
         const finish = (fields) => {
             if (done) return;

@@ -4,9 +4,11 @@ gift
 
 `gift` is a hooks server and a set of Git and GitHub tools.
 
-A hook is two halves: a **trigger** that says what has to happen, and a **bash
-script** to run when it does. The trigger can be a GitHub webhook delivery, the
-clipboard changing, a website coming back different, or a file being written.
+A hook is two halves: a **trigger** that says what has to happen, and a
+**command** to run when it does. The trigger can be a GitHub webhook delivery,
+the clipboard changing, a website coming back different, or a file being
+written. The command is read by bash, so it can be a script's path on its own,
+an interpreter and a file, or several commands joined with `&&`.
 
 
 Getting started
@@ -66,14 +68,13 @@ it recorded, the requests it made and the last response it saved go with it.
 `gift triggers` lists the trigger types.  
 Hook names are labels and may be reused; delete same-named hooks by their list
 position, and a folder two of them share is kept until the last one is deleted.
-When an existing hook script is not executable, `gift create` warns and offers
-to add execute permission before saving the hook.
+When a hook's command starts with a file that is not executable, `gift create`
+warns and offers to add execute permission before saving the hook.
 
 One process watches everything. Whichever trigger notices something, the same
 things follow: one run at a time per hook with a burst coalesced into a single
-follow-up, arguments that come from `hooks.json` and never from what was
-observed, a child spawned without a shell, and the output captured into
-`hooks.log` and the dashboard.
+follow-up, a command and arguments that come from `hooks.json` and never from
+what was observed, and the output captured into `hooks.log` and the dashboard.
 
 The server restarts automatically after `gift create` or `gift delete`.
 
@@ -155,14 +156,14 @@ either is missing `gift create` says which and stops without writing anything.
 Answer `n` to add the local hook alone and create the webhook under the
 repository's Settings > Webhooks with the same secret.
 
-**clipboard** — run a script when what is on the clipboard changes.  
+**clipboard** — run a command when what is on the clipboard changes.  
 Asks whether every change fires, or only one matching some text (`contains`,
 `exact` or `regex`), and how often to read. What was copied reaches the script as
 `GIFT_CLIPBOARD`, and whole in the file `GIFT_CLIPBOARD_FILE`; a regex's capture
 groups arrive as `GIFT_MATCH_1`, `GIFT_MATCH_2`. Needs `pbpaste`, `wl-paste`,
 `xclip` or `xsel` — a machine with none says so at startup.
 
-**website** — poll a URL and run a script when the page changes or matches.  
+**website** — poll a URL and run a command when the page changes or matches.  
 Asks for the URL, whether to fire on `change` (the page came back different),
 `match` (it says something in particular) or `always`, and how often to poll. The
 name it offers is the site — `hook-hub.example.com` for
@@ -180,7 +181,7 @@ pasting another. See `triggers/website/README.txt`. Every website hook keeps its
 latest response body under `logs/hooks/<hook name>/` by default; set
 `saveLastResponse` to false to opt out.
 
-**file** — run a script when a file or folder changes.  
+**file** — run a command when a file or folder changes.  
 Asks for the path, a pattern (`*.yml`, `**/*.js`), whether to watch subfolders,
 and which of `add`, `change`, `delete` count. One run per settled batch, not one
 per file — a checkout that rewrote four hundred files is one thing that happened,
@@ -225,18 +226,34 @@ hooks.json
         "pattern": "*.yml",
         "events": ["add", "change"]
       },
-      "run": "/opt/myapp/reload.sh",
+      "run": "git -C /opt/myapp pull && bash /opt/myapp/reload.sh",
       "cwd": "/opt/myapp"
     }
   ]
 }
 ```
 
-`run` is an absolute path to a `.sh` script and `cwd` an absolute directory —
-neither is guessed, because a relative path would depend on where the server
-happened to be started from. `cwd` defaults to the script's own folder. `enabled`
-is on unless it says `false`. Everything inside `trigger` belongs to the trigger
-type; see `gift help <type>`.
+`run` is a command line, handed to bash as written and run in `cwd` — what would
+happen if it were typed at a prompt there. A script's path on its own still
+works, and so do `bash deploy.sh`, `node tools/notify.js`, `npm run deploy` and
+`cd elsewhere && ./deploy.sh`. A path with a space in it needs quoting, exactly
+as it would at a prompt — `"/opt/my app/deploy.sh"` — and `gift list` says so
+when it finds one that has not been. `args` are handed to the command as
+positional parameters rather than pasted into its text, so an argument with a
+space in it stays one argument.
+
+`cwd` is an absolute directory and is not guessed, because a relative path would
+depend on where the server happened to be started from. It defaults to the folder
+of the script the command runs — the first absolute path in `run` that is not the
+program itself, or the program's own folder when that is the only path there. A
+command that names no absolute path, like `npm run deploy`, has to say where it
+runs. `enabled` is on unless it says `false`. Everything inside `trigger` belongs
+to the trigger type; see `gift help <type>`.
+
+Nothing a trigger observed is ever pasted into the command: what was copied, what
+changed and what was delivered reach it as `GIFT_*` environment variables and as
+files it is handed the path to. A clipboard holding `; rm -rf /` is a string like
+any other, since bash does not re-read what a variable expanded to as syntax.
 
 `hooks.json` is git-ignored and written with `0600` permissions because website
 hooks may contain plaintext cookies, storage values and request headers. The

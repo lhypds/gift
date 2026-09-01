@@ -1,4 +1,4 @@
-// The file trigger — run a script when a file or folder changes.
+// The file trigger — run a command when a file or folder changes.
 //
 //     { "type": "file", "path": "/etc/myapp", "pattern": "*.yml",
 //       "events": ["add", "change"], "recursive": true }
@@ -83,7 +83,7 @@ function line(trigger) {
 }
 
 async function ask({ askText, askYesNo, resolveTyped }) {
-    console.log('A file or folder is watched; a change to it runs the script.');
+    console.log('A file or folder is watched; a change to it runs the command.');
     console.log('');
 
     const answer = await askText('File or folder to watch — an absolute path', {
@@ -217,7 +217,7 @@ function start({ hooks, runtime }) {
 module.exports = {
     name: 'file',
     title: 'File',
-    summary: 'Watch a file or folder and run a script when it changes.',
+    summary: 'Watch a file or folder and run a command when it changes.',
     prompt: 'a file or folder is written to',
     EVENTS,
     normalize,

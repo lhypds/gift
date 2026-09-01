@@ -1,7 +1,8 @@
 clipboard
 =========
 
-Watch the clipboard and run a script when its contents change.
+
+Watch the clipboard and run a command when its contents change.
 
 The clipboard is read on a timer and compared with what was there last time. A
 change that matches runs the hook; a change that does not is ignored, and so is
@@ -26,14 +27,14 @@ hooks.json
 
 match       the text to look for. Empty means every change fires.
 matchType   any, contains (the default, case-insensitive), exact, or regex.
-            A regex's capture groups reach the script as GIFT_MATCH_1, _2, …
+            A regex's capture groups reach the command as GIFT_MATCH_1, _2, …
 interval    how often to read the clipboard, in milliseconds. At least 200.
             All clipboard hooks share one timer, at the shortest interval any
             of them asked for.
 
 
-What the script is given
-------------------------
+What the command is given
+-------------------------
 
 GIFT_HOOK             the hook's name
 GIFT_TRIGGER          clipboard
@@ -45,7 +46,7 @@ GIFT_MATCH            the text that matched
 GIFT_MATCH_1 …        the regex capture groups, when matchType is regex
 
 What was copied is never part of a command line. Someone who copies `; rm -rf /`
-has copied a string, and it reaches the script as one.
+has copied a string, and it reaches the command as one.
 
 
 Reading the clipboard

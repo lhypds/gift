@@ -24,7 +24,7 @@
         "matchType": "regex",
         "interval": 1000
       },
-      "run": "/opt/myapp/save-todo.sh",
+      "run": "node /opt/myapp/save-todo.js",
       "args": [],
       "cwd": "/opt/myapp",
       "detach": false,
@@ -100,7 +100,7 @@
         "recursive": true,
         "debounce": 500
       },
-      "run": "/opt/myapp/reload.sh",
+      "run": "git -C /opt/myapp pull && bash /opt/myapp/reload.sh",
       "args": [],
       "cwd": "/opt/myapp",
       "detach": false,

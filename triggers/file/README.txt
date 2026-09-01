@@ -1,7 +1,8 @@
 file
 ====
 
-Watch a file or folder and run a script when it changes.
+
+Watch a file or folder and run a command when it changes.
 
 fs.watch is used as the doorbell rather than the answer: it reports 'rename' for
 a file appearing *and* for one disappearing, and 'change' more than once for a
@@ -11,7 +12,7 @@ between the two is what actually happened — this file added, that one changed,
 this one gone.
 
 One run per settled batch, not one per file. Saving a file is one thing that
-happened, and so is a checkout that rewrote four hundred of them; the script is
+happened, and so is a checkout that rewrote four hundred of them; the command is
 told which file through GIFT_FILE and given the whole list in GIFT_FILES_FILE.
 
 What is already on disk when the server starts is never a change. The first
@@ -47,8 +48,8 @@ debounce    how long to wait for writes to settle before comparing, in
 poll        how often to re-scan when fs.watch cannot be used. 2000 ms.
 
 
-What the script is given
-------------------------
+What the command is given
+-------------------------
 
 GIFT_HOOK          the hook's name
 GIFT_TRIGGER       file

@@ -3,7 +3,7 @@
 //     {
 //         "name": "restart-stash",
 //         "trigger": { "type": "github", "repo": "lhypds/stash", … },
-//         "run": "/var/www/stash.gcc3.com/restart.sh",
+//         "run": "bash /var/www/stash.gcc3.com/restart.sh",
 //         "args": [],
 //         "cwd": "/var/www/stash.gcc3.com",
 //         "detach": true,
@@ -14,11 +14,16 @@
 // arriving from GitHub, the clipboard changing, a page coming back different, a
 // file being written — and belongs entirely to one trigger module, which is why
 // nothing in here looks inside it. The other half is the same whichever trigger
-// fired: a bash script, its arguments, and the directory it runs in.
+// fired: a command line, its arguments, and the directory it runs in.
 //
-// Both paths are spelled out in full and neither is guessed. A relative path
-// would depend on where the server happened to be started from, which is not
-// something a deploy should turn on.
+// `run` is a command rather than a script's path because a command can be a
+// script's path — and can also be an interpreter and a file, or two commands
+// joined with `&&`. It is handed to bash exactly as written, so what a hook
+// runs is what would happen if it were typed at a prompt in `cwd`.
+//
+// `cwd` is spelled out in full and is not guessed beyond the folder of the
+// script the command runs. A relative path would depend on where the server
+// happened to be started from, which is not something a deploy should turn on.
 //
 // Older hooks.json files put the GitHub fields at the top level and had no
 // `trigger` at all, because GitHub was the only thing gift listened to. Those
@@ -26,21 +31,17 @@
 // predates the other three keeps working untouched.
 'use strict';
 
-const os = require('node:os');
 const path = require('node:path');
 
 const triggers = require('../triggers/index.js');
+const command = require('./command.js');
+
+const { expandHome } = command;
 
 const DEFAULT_TYPE = 'github';
 
 /** The GitHub fields as they were written before triggers had types. */
 const LEGACY_KEYS = ['repo', 'events', 'branches', 'secretEnv'];
-
-/** A leading `~` is a literal character until something expands it. */
-function expandHome(target) {
-    if (target === '~') return os.homedir();
-    return target.startsWith('~/') ? path.join(os.homedir(), target.slice(2)) : target;
-}
 
 /** Whether a hook is written in the pre-triggers shape. */
 function isLegacy(hook) {
@@ -88,23 +89,28 @@ function normalize(hook, index = 0) {
         throw bad(err.message);
     }
 
-    // The handler is a bash script, whichever trigger fired: one shape of
+    // The handler is a command line, whichever trigger fired: one shape of
     // handler means one set of GIFT_* variables and one way to read the log.
-    if (!hook.run) throw bad('has no "run" script');
-    const run = expandHome(String(hook.run));
-    if (!path.isAbsolute(run)) throw bad(`"run" must be an absolute path, not '${hook.run}'`);
-    if (!run.endsWith('.sh')) throw bad(`"run" must be a .sh script, not '${hook.run}'`);
+    // It is kept exactly as written — bash, not this, is what reads it.
+    if (!hook.run || !String(hook.run).trim()) throw bad('has no "run" command');
+    const run = String(hook.run).trim();
 
-    // `cwd` defaults to the script's own folder rather than being demanded: a
-    // deploy script almost always runs beside itself, and a hook that omits it
-    // is saying so rather than forgetting.
-    const cwd = hook.cwd ? expandHome(String(hook.cwd)) : path.dirname(run);
+    // `cwd` defaults to the folder of the script the command runs rather than
+    // being demanded: a deploy script almost always runs beside itself, and a
+    // hook that omits it is saying so rather than forgetting. A command naming
+    // no absolute path — `npm run deploy` — says nothing about where it belongs
+    // and has to be told, since the alternative is wherever the server started.
+    const folder = command.directory(run);
+    if (!hook.cwd && !folder) {
+        throw bad(`needs a "cwd": nothing in "run" says which folder '${run}' should run in`);
+    }
+    const cwd = hook.cwd ? expandHome(String(hook.cwd)) : folder;
     if (!path.isAbsolute(cwd)) throw bad(`"cwd" must be an absolute path, not '${hook.cwd}'`);
 
     return {
         name,
         trigger,
-        run: path.normalize(run),
+        run,
         args: Array.isArray(hook.args) ? hook.args.map(String) : [],
         cwd: path.normalize(cwd),
         detach: Boolean(hook.detach),
@@ -142,24 +148,28 @@ function describe(hook, { resolve = (p) => p, notes = () => [] } = {}) {
         }
     }
 
-    const run = hook.run ? resolve(expandHome(String(hook.run))) : '';
+    // Printed as written. A command line is not a path and shortening a word of
+    // it would only make it something that could not be run.
+    const run = hook.run ? String(hook.run).trim() : '';
     rows.push(['run', run || '(none — this hook cannot run)']);
     if (Array.isArray(hook.args) && hook.args.length) {
         // Quoted the way it would be typed, so an argument with a space in it
         // does not read as two.
         rows.push(['args', hook.args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')]);
     }
+    const folder = run ? command.directory(run) : null;
+    const cwd = hook.cwd ? expandHome(String(hook.cwd)) : folder;
     rows.push([
         'cwd',
         hook.cwd
-            ? resolve(expandHome(String(hook.cwd)))
-            : run
-                ? `${path.dirname(run)} (the script's folder)`
-                : "(the script's folder)",
+            ? resolve(cwd)
+            : folder
+                ? `${resolve(folder)} (the script's folder)`
+                : '(none — this hook needs a "cwd")',
     ]);
     if (hook.detach) rows.push(['detach', 'yes']);
     if (hook.enabled === false) rows.push(['enabled', 'no — this hook is turned off']);
-    if (run) for (const note of notes(run)) rows.push(['note', note]);
+    if (run) for (const note of notes(run, cwd)) rows.push(['note', note]);
     return rows;
 }
 

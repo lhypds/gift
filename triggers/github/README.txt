@@ -1,6 +1,7 @@
 github
 ======
 
+
 An API endpoint that accepts webhook deliveries from GitHub.
 
 The server listens on GIFT_SERVE_PATH (/hooks/github by default). Every delivery
@@ -37,8 +38,8 @@ secretEnv   which environment variable holds the secret this webhook is signed
             with. Only needed when different repositories use different secrets.
 
 
-What the script is given
-------------------------
+What the command is given
+-------------------------
 
 GIFT_HOOK            the hook's name
 GIFT_TRIGGER         github
