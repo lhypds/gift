@@ -22,7 +22,7 @@ export default function Detail({ event, onClose }) {
   const title = runs.length > 0 ? `${runs.length} hook run${runs.length === 1 ? "" : "s"}` : undefined;
 
   return (
-    <Modal isOpen={Boolean(event)} onClose={onClose} title={title} closeOnOverlay>
+    <Modal isOpen={Boolean(event)} onClose={onClose} title={title} closeOnOverlay className={styles.wide}>
       {runs.length === 0 && <p className={styles.empty}>No hook ran for this event.</p>}
       {runs.map((run, index) => (
         <div key={index} className={styles.run}>

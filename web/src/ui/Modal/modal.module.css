@@ -15,7 +15,9 @@
   color: var(--ink);
   padding: 0;
   min-width: 320px;
-  max-width: 480px;
+  /* Per-modal override: a className setting --modal-max-width on this same
+     element widens just that modal, with no specificity fight over max-width. */
+  max-width: var(--modal-max-width, 480px);
   width: 90%;
   max-height: 90vh;
   display: flex;
