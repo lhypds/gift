@@ -36,7 +36,7 @@ export default function Detail({ event, onClose }) {
               value={run.output || "(no output)"}
               readOnly
               spellCheck={false}
-              style={{ minHeight: "min(420px, 70vh)", maxHeight: "calc(80vh - 140px)" }}
+              style={{ minHeight: "min(560px, calc(90vh - 140px))", maxHeight: "calc(90vh - 140px)" }}
             />
           )}
         </div>

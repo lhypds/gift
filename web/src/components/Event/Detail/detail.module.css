@@ -1,6 +1,6 @@
 /* Hook output is raw terminal text — long, hard-to-wrap lines — so this modal
    gets more room than the shared default. */
-.wide { --modal-max-width: 760px; }
+.wide { --modal-max-width: 960px; }
 
 .empty {
   margin: 0;
