@@ -1,12 +1,27 @@
 /* Hook output is raw terminal text — long, hard-to-wrap lines — so this modal
    gets more room than the shared default. */
-.wide { --modal-max-width: 960px; }
+.wide {
+  --modal-max-width: 960px;
+  /* Defined once here and inherited by everything below: the output box reads
+     it for its own height, and the states that have no output box match it, so
+     the modal is the same size whatever a run left behind. */
+  --output-max-height: calc(90vh - 140px);
+  --output-height: min(560px, var(--output-max-height));
+}
 
 .empty {
   margin: 0;
   color: var(--muted);
   font-size: .85rem;
+  min-height: var(--output-height);
+  display: grid;
+  place-items: center;
 }
+
+/* A run that failed to start renders no output box; without this its block
+   would collapse and leave the modal a wide sliver. Runs that do have output
+   are already taller than this, so the floor never shows. */
+.run { min-height: var(--output-height); }
 
 .run + .run { margin-top: 16px; }
 
