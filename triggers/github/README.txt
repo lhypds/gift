@@ -67,6 +67,16 @@ delivery URL, or gift asks for it.
 Answering no adds the local hook alone; create the webhook under the repository's
 Settings > Webhooks with the same secret.
 
+`gift delete` offers to take the webhook away again with `gh`, and asks GitHub
+to confirm that too. It is found by the delivery URL in webhook_url; when that
+is not set, or names a URL GitHub does not list, the repository's webhooks are
+listed to choose from, since not every webhook on a repository is gift's. One
+webhook feeds every hook on its repository, so it is kept while another hook —
+on the same repository, or on any — still receives its deliveries.
+
+`gift delete --yes` deletes the webhook delivering to webhook_url without asking,
+and leaves everything else alone.
+
 
 Settings
 --------

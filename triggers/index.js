@@ -36,6 +36,13 @@
 //                   elsewhere (GitHub's own webhook). Null if the user backs
 //                   out; throwing stops `gift create` without writing anything.
 //     afterNotes(h) lines to print after a hook of this type is created
+//     askDelete(ctx) optional: the questions `gift delete` asks before a hook
+//                   of this type goes, for anything that exists elsewhere
+//                   because of it (GitHub's own webhook). Given the hook's
+//                   trigger as written and the remaining hooks of the same
+//                   type, as { name, trigger }. Returns { after? } — `after`
+//                   runs once the hook is off the disk. Null if the user
+//                   backs out, which leaves the hook where it was.
 //
 //     mount(ctx)    optional: HTTP routes, as { middleware }. Mounted before
 //                   the server's 404, and only when hooks of this type exist.

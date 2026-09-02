@@ -13,7 +13,9 @@
 // the trigger — a repository and its branches, a URL and how often to poll, a
 // folder and a pattern — so the trigger module asks those, and nothing in here
 // knows what they are. What to run — the folder to run in and the command line
-// to run there — is the same for every type, and is asked here.
+// to run there — is the same for every type, and is asked here. `delete` asks
+// the trigger too, for anything that exists elsewhere because of the hook —
+// GitHub's own webhook — and whether it should go along with it.
 'use strict';
 
 const fs = require('node:fs');
@@ -647,19 +649,52 @@ async function deleteHook(file, options, positionals) {
 
     // Taken before the splice, so an unnamed hook is still the `hook-N` its
     // folder was named after rather than the one it becomes when this one goes.
-    const others = config.hooks
-        .map((other, position) => String(other.name || `hook-${position + 1}`))
+    const remaining = config.hooks
+        .map((other, position) => ({ hook: other, name: String(other.name || `hook-${position + 1}`) }))
         .filter((_, position) => position !== index);
+    const others = remaining.map((other) => other.name);
+
+    // Anything that exists elsewhere because of this hook — GitHub's own
+    // webhook — is the trigger's to ask about, and it sees only the hooks of
+    // its own type that stay behind. It may back out of the whole delete, and
+    // nothing has been written yet when it does.
+    const type = hookRecord.typeOf(hook);
+    const trigger = triggers.get(type);
+    let asked = {};
+    if (trigger && typeof trigger.askDelete === 'function') {
+        asked = await trigger.askDelete({
+            trigger: hookRecord.triggerOf(hook),
+            others: remaining
+                .filter((other) => hookRecord.typeOf(other.hook) === type)
+                .map((other) => ({ name: other.name, trigger: hookRecord.triggerOf(other.hook) })),
+            yes: Boolean(options.yes),
+            askText,
+            askYesNo,
+        });
+        if (asked === null) {
+            console.log('Nothing was deleted.');
+            return 130;
+        }
+    }
 
     config.hooks.splice(index, 1);
     writeConfig(file, config);
 
     console.log(`Deleted '${name}' from ${show(file)}.`);
-    // The webhook on GitHub's side, if this was one, is left alone: gift did
-    // not necessarily create it, and deleting someone else's webhook because a
-    // local hook was tidied away is not a thing to do without being asked.
-    if (hookRecord.typeOf(hook) === 'github' && hook.trigger && hook.trigger.repo && hook.trigger.repo !== '*') {
-        console.log(`The webhook on ${hook.trigger.repo} is untouched — remove it in Settings > Webhooks if it is now unused.`);
+
+    // Now the hook is off the disk, whatever the trigger settled on above
+    // happens: the webhook on GitHub's side goes, or a line says why it stays.
+    let result = null;
+    if (typeof asked.after === 'function') {
+        try {
+            result = asked.after(hook);
+        } catch (err) {
+            result = { ok: false, lines: [], warnings: [err.message] };
+        }
+    }
+    if (result) {
+        for (const line of result.lines) console.log(line);
+        for (const warning of result.warnings) console.error(`warning: ${warning}`);
     }
     console.log('');
 
@@ -681,7 +716,7 @@ async function deleteHook(file, options, positionals) {
         console.error(`gift delete: the hook was deleted, but the server could not be restarted: ${restartResult.message}`);
         return 1;
     }
-    return logs.error ? 1 : 0;
+    return logs.error || (result && !result.ok) ? 1 : 0;
 }
 
 // ---------------------------------------------------------------- dispatch ---
@@ -739,7 +774,11 @@ function deleteUsage() {
     console.log('The server is restarted automatically after the hook is deleted.');
     console.log("The hook's folder under logs/hooks — its errors, its requests and the");
     console.log('last response it saved — goes with it, unless another hook shares its name.');
-    console.log('A GitHub webhook the hook was delivered by is left in place.');
+    console.log('');
+    console.log("A GitHub hook's webhook on the repository is offered for deletion with gh,");
+    console.log('unless another hook still receives its deliveries. It is found by the URL');
+    console.log('in webhook_url; otherwise the repository\'s webhooks are listed to choose');
+    console.log('from. --yes deletes the one webhook_url names and leaves the rest alone.');
 }
 
 function parseArgs(argv, command) {

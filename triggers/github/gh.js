@@ -1,9 +1,12 @@
-// Creating the webhook on GitHub's side, through the `gh` CLI.
+// The webhook on GitHub's side, through the `gh` CLI.
 //
 // A hook in hooks.json is only half of a GitHub trigger: GitHub also has to be
 // told where to deliver. `gift create` offers to do that here, and then asks
 // GitHub to confirm it — `gh api --method POST` exiting 0 is gh's word for it,
 // and a local hook GitHub never calls looks exactly like a working one.
+// `gift delete` takes the webhook away again the same way, and confirms that
+// too: a webhook that outlives its hook keeps delivering to a server that
+// answers 'No match', which is a quiet way to never notice it is still there.
 'use strict';
 
 const { spawnSync } = require('node:child_process');
@@ -116,6 +119,14 @@ function readGitHubWebhooks(repo, run = spawnSync) {
 }
 
 /**
+ * The webhook in a list that delivers to the URL, or undefined. GitHub refuses
+ * a second webhook on the same URL as a duplicate, so there is at most one.
+ */
+function webhookDeliveringTo(hooks, url) {
+    return hooks.find((item) => item && item.config && item.config.url === url);
+}
+
+/**
  * Ask GitHub whether the webhook is really there, matching on the delivery URL.
  * This is GitHub's word rather than gh's — and it is also what tells a webhook
  * that failed to appear from one that was already there before gift asked,
@@ -127,7 +138,7 @@ function verifyGitHubWebhook(repo, url, run = spawnSync) {
         return { ok: false, message: `the repository's webhooks could not be read: ${listed.message}` };
     }
 
-    const match = listed.hooks.find((item) => item && item.config && item.config.url === url);
+    const match = webhookDeliveringTo(listed.hooks, url);
     if (!match) return { ok: false, message: `GitHub lists no webhook delivering to ${url}` };
     return {
         ok: true,
@@ -137,11 +148,48 @@ function verifyGitHubWebhook(repo, url, run = spawnSync) {
     };
 }
 
+/** Delete one repository webhook, by the id GitHub gave it. */
+function deleteGitHubWebhook(repo, id, run = spawnSync) {
+    const result = run(
+        'gh',
+        [
+            'api',
+            '--method', 'DELETE',
+            `repos/${repo}/hooks/${id}`,
+            '--header', 'Accept: application/vnd.github+json',
+            '--silent',
+        ],
+        { encoding: 'utf8', maxBuffer: 1024 * 1024 },
+    );
+
+    if (!result.error && result.status === 0) return { ok: true };
+    return { ok: false, message: ghProblem(result, `gh api exited ${result.status}`) };
+}
+
+/**
+ * Ask GitHub whether the webhook is really gone. The counterpart of
+ * verifyGitHubWebhook: a DELETE that reported failure may still have landed,
+ * and one that reported success is still gh's word rather than GitHub's.
+ */
+function verifyGitHubWebhookGone(repo, id, run = spawnSync) {
+    const listed = readGitHubWebhooks(repo, run);
+    if (!listed.ok) {
+        return { ok: false, message: `the repository's webhooks could not be read: ${listed.message}` };
+    }
+
+    const still = listed.hooks.find((item) => item && String(item.id) === String(id));
+    if (still) return { ok: false, message: `GitHub still lists webhook ${id}` };
+    return { ok: true };
+}
+
 module.exports = {
     parseRepo,
     webhookUrlProblem,
     ghAuthProblem,
     createGitHubWebhook,
     readGitHubWebhooks,
+    webhookDeliveringTo,
     verifyGitHubWebhook,
+    deleteGitHubWebhook,
+    verifyGitHubWebhookGone,
 };

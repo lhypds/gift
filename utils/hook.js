@@ -126,6 +126,12 @@ function typeOf(hook) {
     return DEFAULT_TYPE;
 }
 
+/** The trigger as it is written, a legacy hook's lifted into the same shape. */
+function triggerOf(hook) {
+    if (hook && hook.trigger) return hook.trigger;
+    return isLegacy(hook) ? legacyTrigger(hook) : { type: typeOf(hook) };
+}
+
 /**
  * The rows shown for one hook by `gift list`, `gift create`'s confirmation and
  * `gift status`. The trigger contributes its own — a repository and its
@@ -135,7 +141,7 @@ function typeOf(hook) {
 function describe(hook, { resolve = (p) => p, notes = () => [] } = {}) {
     const type = typeOf(hook);
     const module_ = triggers.get(type);
-    const written = hook.trigger || (isLegacy(hook) ? legacyTrigger(hook) : { type });
+    const written = triggerOf(hook);
 
     const rows = [['trigger', module_ ? `${type} — ${module_.title}` : `${type} (unknown type)`]];
     if (module_) {
@@ -177,9 +183,8 @@ function describe(hook, { resolve = (p) => p, notes = () => [] } = {}) {
 function line(hook) {
     const module_ = triggers.get(typeOf(hook));
     if (!module_) return typeOf(hook);
-    const written = hook.trigger || (isLegacy(hook) ? legacyTrigger(hook) : { type: typeOf(hook) });
     try {
-        return module_.line(module_.normalize(written));
+        return module_.line(module_.normalize(triggerOf(hook)));
     } catch {
         return '(not configured)';
     }
@@ -189,6 +194,7 @@ module.exports = {
     DEFAULT_TYPE,
     normalize,
     typeOf,
+    triggerOf,
     describe,
     line,
     isLegacy,

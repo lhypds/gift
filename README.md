@@ -64,7 +64,9 @@ Hooks
 `gift list` shows the configured hooks.  
 `gift create` adds one.  
 `gift delete` removes one, along with its folder under `logs/hooks` — the errors
-it recorded, the requests it made and the last response it saved go with it.  
+it recorded, the requests it made and the last response it saved go with it.
+For a GitHub hook it also offers to delete the repository's webhook with `gh`,
+unless another hook still receives its deliveries.  
 `gift triggers` lists the trigger types.  
 Hook names are labels and may be reused; delete same-named hooks by their list
 position, and a folder two of them share is kept until the last one is deleted.

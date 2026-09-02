@@ -3,8 +3,8 @@
 // A webhook delivery arrives, its signature is checked against the shared
 // secret, and the hooks whose repository, event and branch all match run their
 // command. server_webhooks.js next door is the endpoint itself; this is the
-// trigger contract around it — what `gift create` asks, what `gift list` shows,
-// and what the server mounts at startup.
+// trigger contract around it — what `gift create` asks, what `gift delete`
+// asks, what `gift list` shows, and what the server mounts at startup.
 'use strict';
 
 const { forTrigger } = require('../../utils/log.js');
@@ -232,6 +232,162 @@ function afterNotes() {
     ];
 }
 
+// ------------------------------------------------------------------ delete ---
+
+/** The `owner/repo` a trigger names, or null for `*` and anything unparseable. */
+function repoOf(trigger) {
+    const value = trigger && trigger.repo ? String(trigger.repo) : '*';
+    if (value === '*') return null;
+    const parsed = gh.parseRepo(value);
+    return parsed.owner && parsed.name ? `${parsed.owner}/${parsed.name}` : null;
+}
+
+/**
+ * Whether a hook that stays behind would still be fed by the repository's
+ * webhook: one on the same repository, or one on any. The server compares
+ * repository names case-insensitively, so this does too.
+ */
+function stillFedBy(trigger, repo) {
+    const value = trigger && trigger.repo ? String(trigger.repo) : '*';
+    if (value === '*') return true;
+    const other = repoOf(trigger);
+    return Boolean(other) && other.toLowerCase() === repo.toLowerCase();
+}
+
+/**
+ * Which of the repository's webhooks is this hook's, asked when webhook_url is
+ * not set to say so — or names a URL GitHub does not list. The list is GitHub's,
+ * numbered, and the choice is the user's: a repository's webhooks are not all
+ * gift's, and the one for CI must not go because a hook here was tidied away.
+ *
+ * Resolves the chosen webhook, false to leave them all, null if the user gave up.
+ */
+async function pickWebhook(repo, hooks, url, askText) {
+    console.log(url
+        ? `GitHub lists no webhook on ${repo} delivering to ${url}. It lists these:`
+        : `${WEBHOOK_URL_ENV} is not set, so gift cannot tell which webhook is this hook's. GitHub lists these on ${repo}:`);
+    const numberWidth = String(hooks.length).length;
+    hooks.forEach((item, index) => {
+        const events = Array.isArray(item.events) && item.events.length ? item.events.join(', ') : 'no events';
+        const state = item.active === false ? ', inactive' : '';
+        const delivers = (item.config && item.config.url) || '(no URL)';
+        console.log(`  ${String(index + 1).padStart(numberWidth)}  ${delivers}  ${events}${state}`);
+    });
+    console.log('');
+
+    const answer = await askText(`Delete which webhook [1-${hooks.length}], or q to leave them`, {
+        validate: (value) => {
+            if (['', 'q', 'quit'].includes(value)) return null;
+            if (/^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= hooks.length) return null;
+            return `There is no ${value} in the list — pick 1 to ${hooks.length}, or q.`;
+        },
+    });
+    if (answer === null) return null;
+    if (['', 'q', 'quit'].includes(answer)) return false;
+    return hooks[Number(answer) - 1];
+}
+
+/**
+ * The questions `gift delete` asks before a GitHub hook goes: whether the
+ * repository's webhook goes with it.
+ *
+ * It is offered rather than done because gift did not necessarily create it.
+ * The webhook is found the way `gift create` confirmed it — by the delivery URL
+ * in webhook_url — and where that does not settle it, the repository's webhooks
+ * are listed for the user to choose from. `--yes` takes the one webhook_url
+ * names without asking and leaves everything else alone: a script deleting a
+ * hook is not the place to guess which of a repository's webhooks was gift's.
+ *
+ * Nothing is deleted here. `after` does that once the local hook is gone, and
+ * then asks GitHub to confirm it, since gh exiting 0 is gh's word for it.
+ */
+async function askDelete({ trigger, others, yes, askText, askYesNo }) {
+    // A `*` hook has no single repository to hang a webhook on, so none was
+    // ever offered — and there is none to take away now.
+    const repo = repoOf(trigger);
+    if (!repo) return {};
+
+    const manual = `Remove it under ${repo}'s Settings > Webhooks if it is now unused.`;
+    const leave = (...lines) => ({ after: () => ({ ok: true, lines, warnings: [] }) });
+
+    // One webhook feeds every hook on its repository: it goes with the last of
+    // them, not the first.
+    const keeper = others.find((other) => stillFedBy(other.trigger, repo));
+    if (keeper) return leave(`The webhook on ${repo} is kept — '${keeper.name}' still receives its deliveries.`);
+
+    // ghAuthProblem covers both: a missing gh reports itself as not installed.
+    const problem = gh.ghAuthProblem();
+    if (problem) return leave(`The webhook on ${repo} is left in place — ${problem}.`, manual);
+
+    console.log(`Reading the webhooks on ${repo} with gh...`);
+    const listed = gh.readGitHubWebhooks(repo);
+    if (!listed.ok) {
+        return leave(`The webhook on ${repo} is left in place — its webhooks could not be read: ${listed.message}.`, manual);
+    }
+    if (listed.hooks.length === 0) return leave(`GitHub lists no webhooks on ${repo}, so there is none to delete.`);
+
+    let url = String(process.env[WEBHOOK_URL_ENV] || '').trim();
+    if (url && gh.webhookUrlProblem(url)) {
+        console.log(`  note: ${WEBHOOK_URL_ENV} is ignored — ${gh.webhookUrlProblem(url)}`);
+        url = '';
+    }
+
+    let target = url ? gh.webhookDeliveringTo(listed.hooks, url) : null;
+    if (!target) {
+        if (yes) {
+            return leave(
+                url
+                    ? `GitHub lists no webhook on ${repo} delivering to ${url}, so none was deleted.`
+                    : `The webhook on ${repo} is left in place — ${WEBHOOK_URL_ENV} is not set, so gift cannot tell which one is this hook's.`,
+                manual,
+            );
+        }
+        target = await pickWebhook(repo, listed.hooks, url, askText);
+        if (target === null) return null;
+        if (!target) return leave(`The webhooks on ${repo} are untouched.`);
+    } else if (!yes) {
+        const remove = await askYesNo(`Also delete GitHub webhook ${target.id} on ${repo} — ${url} — with gh?`, true);
+        if (remove === null) return null;
+        if (!remove) return leave(`The webhook on ${repo} is untouched.`, manual);
+    }
+
+    const delivers = (target.config && target.config.url) || '(no URL)';
+    return {
+        after() {
+            console.log(`Deleting GitHub webhook ${target.id} on ${repo} with gh...`);
+            const deleted = gh.deleteGitHubWebhook(repo, target.id);
+            // Asked either way: a DELETE that reported failure may still have
+            // landed, and one that reported success is still only gh's word.
+            console.log('Confirming it with gh...');
+            const gone = gh.verifyGitHubWebhookGone(repo, target.id);
+
+            if (gone.ok) {
+                const lines = [`GitHub no longer lists webhook ${target.id} on ${repo} — ${delivers}.`];
+                if (!deleted.ok) lines.push(`  note: gh said '${deleted.message}', but the webhook is gone.`);
+                return { ok: true, lines, warnings: [] };
+            }
+            if (deleted.ok) {
+                return {
+                    ok: false,
+                    lines: [],
+                    warnings: [
+                        `gh deleted GitHub webhook ${target.id}, but GitHub does not confirm it: ${gone.message}`,
+                        `Check ${repo}'s Settings > Webhooks before relying on it being gone.`,
+                    ],
+                };
+            }
+            return {
+                ok: false,
+                lines: [],
+                warnings: [
+                    `the local hook is gone, but GitHub webhook ${target.id} on ${repo} is not: ${deleted.message}`,
+                    'Check the gh account has Webhooks write access, then remove it in the repository settings.',
+                ],
+            };
+        },
+    };
+}
+
 // -------------------------------------------------------------------- serve ---
 
 /**
@@ -284,6 +440,7 @@ module.exports = {
     line,
     ask,
     afterNotes,
+    askDelete,
     mount,
     start,
     // Re-exported so `gift status` and the tests can reach them without
@@ -292,4 +449,6 @@ module.exports = {
     receiver,
     parseBranches,
     branchesProblem,
+    repoOf,
+    stillFedBy,
 };
