@@ -298,6 +298,16 @@ nobody's work — an archive, a scratch folder — out of the table altogether. 
 folder is asked for on the first run and remembered as
 `repo_root`. See [functions/repo-master/README.txt](functions/repo-master/README.txt).
 
+clean-old-branches — `gift clean-old-branches [--remote=NAME] [-y] [-n]`  
+Deletes every local branch in the repository you are in that the remote does not
+have: the ones deleted on GitHub once their pull request was merged, and the ones
+never pushed. The remote is asked directly, so nothing needs fetching first. A
+branch tracking one of another name that is still there is kept, and so is one
+checked out here or in another worktree. It lists them and asks before deleting
+anything; `-y` deletes without asking, `-n` only lists, and `--remote` names a
+remote other than `origin`. Each deleted branch is printed with its last commit,
+so `git branch <name> <commit>` brings one back. See [functions/clean-old-branches/README.txt](functions/clean-old-branches/README.txt).
+
 clone-repos — `gift clone-repos [--out=DIR] [organization]`  
 Clones every repository an organization has into one folder: the public ones,
 the private ones the token can see, the forks and the archived ones, each in a

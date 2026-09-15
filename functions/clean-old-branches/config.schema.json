@@ -1,0 +1,12 @@
+{
+    "description": "Delete the local branches in the current git repository that are not on the remote.",
+    "options": [
+        {
+            "key": "remote",
+            "env": "GIFT_CLEAN_BRANCHES_REMOTE",
+            "type": "string",
+            "advanced": true,
+            "description": "The remote whose branches count, when --remote is not given. Without it `origin`, or the only remote a repository has."
+        }
+    ]
+}
