@@ -30,6 +30,15 @@ From a checkout instead
 ./install.sh
 ```
 
+On Windows, from cmd or PowerShell in the checkout  
+```
+setup.bat
+install.bat
+```
+That installs `%USERPROFILE%\.local\bin\gift.cmd`; install.bat says how to put
+that folder on PATH if it is not there yet. The `.sh` functions need `bash`,
+which Git for Windows provides. `uninstall.bat` removes the command again.
+
 Update  
 Run the same one-liner again. `config.json`, `hooks.json` and the logs are
 carried across, so the webhook secret and the hooks survive the upgrade. Hooks
