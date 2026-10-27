@@ -109,4 +109,50 @@ function list() {
     return found.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
 }
 
-module.exports = { ROOT, list };
+/** The folder in a project that holds its own scripts for `gift run`. */
+const LOCAL_DIR = '.gift';
+
+/**
+ * Script extensions `gift run` picks up from a project's .gift folder, the
+ * platform's own shell first: with both build.bat and build.sh there, Windows
+ * runs the one and everywhere else the other.
+ */
+const LOCAL_EXTENSIONS = process.platform === 'win32' ? ['.bat', '.cmd', '.js'] : ['.sh', '.js'];
+
+/** The scripts in `<cwd>/.gift`, one per name, by name. */
+function local(cwd = process.cwd()) {
+    const dir = path.join(cwd, LOCAL_DIR);
+    let entries;
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+        return []; // no .gift folder here
+    }
+
+    const byName = new Map();
+    for (const entry of entries) {
+        if (!entry.isFile() || entry.name.startsWith('.')) continue;
+
+        const ext = path.extname(entry.name);
+        const rank = LOCAL_EXTENSIONS.indexOf(ext);
+        if (rank === -1) continue;
+
+        const name = path.basename(entry.name, ext);
+        const held = byName.get(name);
+        if (held && held.rank <= rank) continue;
+        byName.set(name, { rank, fn: { name, dir, entry: path.join(dir, entry.name), description: '' } });
+    }
+    return [...byName.values()].map((held) => held.fn).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * What `gift run` offers: the current folder's .gift scripts first, then the
+ * function folders. A project script shadows a function of the same name.
+ */
+function runnable(cwd = process.cwd()) {
+    const mine = local(cwd);
+    const taken = new Set(mine.map((fn) => fn.name));
+    return [...mine, ...list().filter((fn) => !taken.has(fn.name))];
+}
+
+module.exports = { ROOT, list, local, runnable };

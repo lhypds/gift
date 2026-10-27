@@ -1,55 +1,26 @@
 // The menu behind `gift run`: show the function list and take a choice.
 //
 // With a terminal at both ends the list is live — `>` marks the row the keys are
-// pointing at, up/down or j/k move it, enter runs it, and a number key runs its
-// row straight away for anyone whose fingers already know the list. Everywhere
-// else, down a pipe or on a terminal too short to hold the list, there is no
-// cursor to move and the same question is asked in words instead.
+// pointing at, up/down or j/k move it, and enter runs it. Everywhere else, down
+// a pipe or on a terminal too short to hold the list, there is no cursor to move
+// and the same question is asked in words instead.
 'use strict';
 
 const readline = require('node:readline');
 
 const functions = require('../functions.js');
 
-/** How wide the menu is allowed to get, whatever the terminal reports. */
-function menuWidth() {
-    return Math.max(60, Math.min(process.stdout.columns || 100, 120));
-}
-
-function pad(text, width) {
-    return text + ' '.repeat(Math.max(0, width - text.length));
-}
-
 /**
- * One line per function: the cursor, a number, the name, and as much description
- * as fits. `cursor` is the row the keys are on, or -1 when nothing is pointing
- * at anything — the list is then printed as it always was.
+ * One line per function: the cursor and the name. `cursor` is the row the keys
+ * are on, or -1 when nothing is pointing at anything.
  */
 function menuLines(available, cursor = -1) {
-    const numberWidth = String(available.length).length;
-    const nameWidth = Math.max(...available.map((f) => f.name.length));
-    // What is left for the description after '> 1  name  ', one column short of
-    // the full width so no line ends exactly at the edge and wraps.
-    const room = menuWidth() - numberWidth - nameWidth - 7;
-
-    return available.map((fn, index) => {
-        const mark = index === cursor ? '>' : ' ';
-        let line = `${mark} ${pad(String(index + 1), numberWidth)}  ${pad(fn.name, nameWidth)}`;
-        if (fn.description) {
-            const description =
-                room > 12 && fn.description.length > room
-                    ? `${fn.description.slice(0, room - 1)}…`
-                    : fn.description;
-            line += `  ${description}`;
-        }
-        return line.trimEnd();
-    });
+    return available.map((fn, index) => `${index === cursor ? '>' : ' '} ${fn.name}`);
 }
 
 /**
- * Turn what the user typed into a choice. A number picks by position; anything
- * else is a name, or enough of one — the same rule as `gift <function>`. An
- * empty answer, `q` or `quit` backs out.
+ * Turn what the user typed into a choice: a name, or enough of one — the same
+ * rule as `gift <function>`. An empty answer, `q` or `quit` backs out.
  *
  * @returns {{status: 'ok', fn: object} | {status: 'cancelled'}
  *          | {status: 'invalid', message: string}}
@@ -57,17 +28,6 @@ function menuLines(available, cursor = -1) {
 function choose(answer, available) {
     const token = String(answer).trim();
     if (token === '' || token === 'q' || token === 'quit') return { status: 'cancelled' };
-
-    if (/^\d+$/.test(token)) {
-        const index = Number(token) - 1;
-        if (index >= 0 && index < available.length) {
-            return { status: 'ok', fn: available[index] };
-        }
-        return {
-            status: 'invalid',
-            message: `There is no ${token} in the list — pick 1 to ${available.length}.`,
-        };
-    }
 
     const byName = available.find((f) => f.name === token);
     if (byName) return { status: 'ok', fn: byName };
@@ -148,7 +108,6 @@ function decode(chunk) {
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
 const CLEAR_LINE = '\x1b[K';
-const CLEAR_BELOW = '\x1b[0J';
 
 /**
  * The live list. Paints the rows and repaints them in place as the keys move the
@@ -161,11 +120,6 @@ function select(available) {
         const input = process.stdin;
         const output = process.stdout;
 
-        const digits = Math.min(available.length, 9);
-        const hint = ['up/down or j/k move', digits > 1 ? `1-${digits} pick` : null, 'enter run', 'q quit']
-            .filter(Boolean)
-            .join(' · ');
-
         let cursor = 0;
         let painted = 0;
 
@@ -176,15 +130,13 @@ function select(available) {
             return line.length > room ? `${line.slice(0, room - 1)}…` : line;
         };
 
-        const draw = (withHint = true) => {
+        const draw = () => {
             const lines = menuLines(available, cursor);
-            if (withHint) lines.push('', hint);
 
             // Back up over the last paint and write the block again. Each line
-            // clears what was longer before it; CLEAR_BELOW takes the hint away
-            // on the last paint, when the block has grown shorter.
+            // clears what was longer before it.
             const body = lines.map((line) => `${clip(line)}${CLEAR_LINE}`).join('\n');
-            output.write(`${painted > 0 ? `\x1b[${painted}A` : ''}${body}\n${CLEAR_BELOW}`);
+            output.write(`${painted > 0 ? `\x1b[${painted}A` : ''}${body}\n`);
             painted = lines.length;
         };
 
@@ -192,7 +144,6 @@ function select(available) {
         const finish = (choice) => {
             if (done) return;
             done = true;
-            draw(false); // the hint has had its say; the chosen row stays
             input.off('data', onData);
             if (input.isTTY) input.setRawMode(false);
             input.pause();
@@ -223,11 +174,6 @@ function select(available) {
                     case 'ctrl-d':
                         finish({ status: 'cancelled' });
                         break;
-                    default:
-                        if (/^[1-9]$/.test(key) && Number(key) <= available.length) {
-                            cursor = Number(key) - 1;
-                            finish({ status: 'ok', fn: available[cursor] });
-                        }
                 }
             }
         }
@@ -243,12 +189,11 @@ function select(available) {
 
 /** Ask in words: the list, then a question, until an answer names a function. */
 async function prompt(available) {
-    console.log('functions:');
     for (const line of menuLines(available)) console.log(line);
     console.log('');
 
     for (;;) {
-        const answer = await ask(`Choose a function [1-${available.length}], or q to quit: `);
+        const answer = await ask('Choose a function by name, or q to quit: ');
         if (answer === null) return { status: 'cancelled' };
 
         const choice = choose(answer, available);
@@ -270,17 +215,16 @@ async function pick() {
     // Without a terminal there is nobody to ask; the caller says so and exits.
     if (!process.stdin.isTTY) return { status: 'no-tty' };
 
-    const available = functions.list();
+    const available = functions.runnable();
     if (available.length === 0) return { status: 'empty' };
 
     // The live list repaints itself by moving the cursor back up over its own
     // rows, which only lands where it was aimed while every row is still on
     // screen. Too many functions for the window, or a stdout that is not a
     // terminal at all, and the question gets asked in words.
-    const tall = available.length + 3 > (process.stdout.rows || 24) - 1;
+    const tall = available.length > (process.stdout.rows || 24) - 1;
     if (!process.stdout.isTTY || tall) return prompt(available);
 
-    console.log('functions:');
     return select(available);
 }
 

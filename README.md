@@ -272,12 +272,24 @@ Functions
 
 List functions with `gift help`.  
 Run `gift run` and choose a function — `>` marks the one the keys are on,
-up/down or j/k move it, enter runs it, and a number key runs its row straight
-away — or invoke one directly with `gift <function-name>`.
+up/down or j/k move it, and enter runs it — or invoke one directly with
+`gift <function-name>`.
 
-`gift run 3` and `gift run repo` skip the menu: the first word after `run` is the
-answer to it, a number or a name or enough of one. Anything after that word, and
-any flag, is passed on to the function itself — `gift run 3 --once`.  
+`gift run repo` skips the menu: the first word after `run` is the answer to it,
+a name or enough of one. Anything after that word, and any flag, is passed on to
+the function itself — `gift run repo --once`.  
+
+`gift run` also picks up the scripts in a `.gift/` folder in the current
+directory and lists them first, named after the file: `.gift/build.sh` (or
+`.gift/build.bat` on Windows, or `.gift/build.js` anywhere) is `gift run build`.
+A project script shadows a function of the same name.
+
+```
+> build
+  repo-master
+  ...
+```
+
 
 A function is a folder under `functions/` holding an entry script, so the ones
 below are what is there rather than a fixed list — drop a folder in and it is on

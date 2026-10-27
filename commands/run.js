@@ -17,6 +17,9 @@ function interpreterFor(entry) {
         case '.command':
         case '.bash':
             return ['bash', [entry]];
+        case '.bat':
+        case '.cmd':
+            return [process.env.ComSpec || 'cmd.exe', ['/d', '/c', entry]];
         default:
             try {
                 fs.accessSync(entry, fs.constants.X_OK);

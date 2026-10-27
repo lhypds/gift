@@ -6,8 +6,9 @@
 // as `serve`, `create`, `delete` and `log` — or any unique prefix.
 // `gift pull` runs pull-repos, `gift se` runs serve. Everything
 // after the name is forwarded to its entry script untouched. `gift run` asks
-// instead: it prints the function list and runs whichever one is picked — or
-// takes the answer from the command line, as `gift run 3` does.
+// instead: it prints the function list, with the scripts in the current
+// folder's .gift/ on top, and runs whichever one is picked — or takes the answer
+// from the command line, as `gift run build` does.
 'use strict';
 
 const fs = require('node:fs');
@@ -84,7 +85,7 @@ function printHelp() {
     console.log('usage: gift <function> [args...]');
     console.log('       gift list             List configured hooks.');
     console.log('       gift create           Add a hook — GitHub, clipboard, website or file.');
-    console.log('       gift run [name|no.]   Pick a helper function from a menu, or say which.');
+    console.log('       gift run [name]       Pick a helper function or .gift/ script, or say which.');
     console.log('       gift -h | --help      Show this help.');
     console.log('       gift -v | --version   Show the installed version.');
     console.log('');
@@ -236,12 +237,12 @@ function reportResolveFailure(token, result) {
 
 /**
  * Read a choice out of `gift run`'s own arguments. The first word after `run` is
- * the menu's answer rather than an argument for the function — a number, a name,
- * or enough of one — so `gift run 3` and `gift run repo` run the third function
- * and repo-master without asking. A flag, and everything after the name, belongs
+ * the menu's answer rather than an argument for the function — a name, or enough
+ * of one — so `gift run build` and `gift run repo` run .gift/build.sh and
+ * repo-master without asking. A flag, and everything after the name, belongs
  * to the function. A word that names nothing here is still an answer, and a
  * wrong one: it is reported and dropped rather than handed on, because a
- * function given a stray `3` to make sense of reads it as a directory.
+ * function given a stray word to make sense of reads it as a directory.
  *
  * @returns {{fn: object|null, rest: string[], message?: string}}
  */
@@ -259,9 +260,9 @@ function fromArguments(args, available) {
  * the name or number is forwarded to whichever function runs.
  */
 async function runPicked(args) {
-    const available = functions.list();
+    const available = functions.runnable();
     if (available.length === 0) {
-        console.error('gift: no functions found in functions/');
+        console.error('gift: no functions found in functions/ or .gift/');
         return 1;
     }
 
