@@ -2,13 +2,15 @@
 //
 // Usage: gift <function> [args...]
 //
-// <function> is the name of a folder in functions/ — or a built-in command such
-// as `serve`, `create`, `delete` and `log` — or any unique prefix.
-// `gift pull` runs pull-repos, `gift se` runs serve. Everything
-// after the name is forwarded to its entry script untouched. `gift run` asks
-// instead: it prints the function list, with the scripts in the current
-// folder's .gift/ on top, and runs whichever one is picked — or takes the answer
-// from the command line, as `gift run build` does.
+// <function> is a script in the current folder's .gift/, the name of a folder
+// in functions/ — or a built-in command such as `serve`, `create`, `delete` and
+// `log` — or a prefix of any of them. `gift pull` runs pull-repos, `gift se`
+// runs serve, `gift build` runs .gift/build.sh. A prefix that matches more than
+// one name brings up a menu of just those. Everything after the name is
+// forwarded to its entry script untouched. `gift run` asks instead: it prints
+// the function list, with the scripts in .gift/ on top, and runs whichever one
+// is picked — or takes the answer from the command line, as `gift run build`
+// does.
 'use strict';
 
 const fs = require('node:fs');
@@ -82,7 +84,7 @@ function printHelp() {
     const names = [...available.map((f) => f.name), ...Object.keys(BUILTINS)];
     const width = Math.max(...names.map((n) => n.length), 0);
 
-    console.log('usage: gift <function> [args...]');
+    console.log('usage: gift <function> [args...]   (a .gift/ script, a function, or a prefix)');
     console.log('       gift list             List configured hooks.');
     console.log('       gift create           Add a hook — GitHub, clipboard, website or file.');
     console.log('       gift run [name]       Pick a helper function or .gift/ script, or say which.');
@@ -135,35 +137,43 @@ function triggerFor(token) {
     return triggers.get(token);
 }
 
+/** The resolved form of one entry in the shared namespace. */
+function resolved(entry) {
+    return entry.builtin ? { status: 'ok', builtin: entry.name } : { status: 'ok', fn: entry };
+}
+
 /**
- * Resolve a token typed by the user. Built-ins and function folders share one
- * namespace: an exact name wins, otherwise any unique prefix of either does.
+ * Resolve a token typed by the user. Built-ins, the current folder's .gift/
+ * scripts and the function folders share one namespace: an exact name wins —
+ * a built-in first, so `gift run` and `gift help` always mean themselves, then
+ * a .gift/ script, which shadows a function of the same name — otherwise any
+ * unique prefix of any of them does.
  *
  * @returns {{status: 'ok', fn: object} | {status: 'ok', builtin: string}
- *          | {status: 'unknown'} | {status: 'ambiguous', matches: string[]}}
+ *          | {status: 'unknown'} | {status: 'ambiguous', matches: object[]}}
  */
 function resolveToken(token) {
     if (SERVICE[token]) return { status: 'ok', fn: SERVICE[token] };
     if (BUILTINS[token]) return { status: 'ok', builtin: token };
 
-    const available = functions.list();
+    const available = functions.runnable();
     const exact = available.find((f) => f.name === token);
     if (exact) return { status: 'ok', fn: exact };
 
-    // No exact name, so gather the prefix matches from both namespaces before
-    // deciding. Both have to be counted together: `r` starts the function
-    // repo-master *and* the built-in run, and is unique in neither.
-    const folderMatches = available.filter((f) => f.name.startsWith(token)).map((f) => f.name);
-    const builtinMatches = Object.keys(BUILTINS).filter((name) => name.startsWith(token));
-    const all = [...folderMatches, ...builtinMatches];
+    // No exact name, so gather the prefix matches from every namespace before
+    // deciding. They have to be counted together: `r` starts the function
+    // repo-master *and* the built-in run, and is unique in neither. The order
+    // is the menu's: .gift/ scripts, then functions, then built-ins.
+    const all = [
+        ...available.filter((f) => f.name.startsWith(token)),
+        ...Object.keys(BUILTINS)
+            .filter((name) => name.startsWith(token))
+            .map((name) => SERVICE[name] || { name, builtin: true }),
+    ];
 
     if (all.length === 0) return { status: 'unknown' };
-    if (all.length > 1) return { status: 'ambiguous', matches: all.sort() };
-
-    const only = all[0];
-    if (SERVICE[only]) return { status: 'ok', fn: SERVICE[only] };
-    if (BUILTINS[only]) return { status: 'ok', builtin: only };
-    return { status: 'ok', fn: available.find((f) => f.name === only) };
+    if (all.length > 1) return { status: 'ambiguous', matches: all };
+    return resolved(all[0]);
 }
 
 function printFunctionHelp(token) {
@@ -226,7 +236,7 @@ function printTriggerHelp(trigger) {
 function reportResolveFailure(token, result) {
     if (result.status === 'ambiguous') {
         console.error(`gift: '${token}' matches more than one function:`);
-        for (const match of result.matches) console.error(`  ${match}`);
+        for (const match of result.matches) console.error(`  ${match.name}`);
         console.error('Type more of the name to pick one.');
         return 2;
     }
@@ -244,7 +254,9 @@ function reportResolveFailure(token, result) {
  * wrong one: it is reported and dropped rather than handed on, because a
  * function given a stray word to make sense of reads it as a directory.
  *
- * @returns {{fn: object|null, rest: string[], message?: string}}
+ * A word that matches several names narrows the menu to those names.
+ *
+ * @returns {{fn: object|null, rest: string[], matches?: object[], message?: string}}
  */
 function fromArguments(args, available) {
     const [token, ...rest] = args;
@@ -252,6 +264,7 @@ function fromArguments(args, available) {
 
     const choice = choose(token, available);
     if (choice.status === 'ok') return { fn: choice.fn, rest };
+    if (choice.status === 'ambiguous') return { fn: null, rest, matches: choice.matches, message: choice.message };
     return { fn: null, rest, message: choice.message };
 }
 
@@ -274,9 +287,14 @@ async function runPicked(args) {
         settings.loadFor(asked.fn.dir);
         return runFunction(asked.fn, asked.rest);
     }
-    if (asked.message) console.log(asked.message);
+    // Several names fit: offer just those, with nothing said around them.
+    if (asked.matches && !process.stdin.isTTY) {
+        console.error(`gift: ${asked.message}`);
+        return 2;
+    }
+    if (asked.message && !asked.matches) console.log(asked.message);
 
-    const choice = await pick();
+    const choice = await pick(asked.matches);
 
     if (choice.status === 'no-tty') {
         console.error('gift: `gift run` needs a terminal to ask in.');
@@ -345,7 +363,15 @@ async function main(argv) {
         return 0;
     }
 
-    const result = resolveToken(token);
+    let result = resolveToken(token);
+    if (result.status === 'ambiguous' && process.stdin.isTTY) {
+        // Several names fit the prefix: offer just those, with nothing said
+        // around them, and carry on with whichever is picked.
+        const choice = await pick(result.matches);
+        if (choice.status !== 'ok') return 130;
+        console.log('');
+        result = resolved(choice.fn);
+    }
     if (result.status !== 'ok') return reportResolveFailure(token, result);
 
     // Settings are loaded once the target is known, so a function brings its

@@ -23,6 +23,7 @@ function menuLines(available, cursor = -1) {
  * rule as `gift <function>`. An empty answer, `q` or `quit` backs out.
  *
  * @returns {{status: 'ok', fn: object} | {status: 'cancelled'}
+ *          | {status: 'ambiguous', matches: object[], message: string}
  *          | {status: 'invalid', message: string}}
  */
 function choose(answer, available) {
@@ -36,7 +37,7 @@ function choose(answer, available) {
     if (matches.length === 1) return { status: 'ok', fn: matches[0] };
     if (matches.length > 1) {
         const names = matches.map((m) => m.name).join(', ');
-        return { status: 'invalid', message: `'${token}' matches ${names} — type more of the name.` };
+        return { status: 'ambiguous', matches, message: `'${token}' matches ${names} — type more of the name.` };
     }
     return { status: 'invalid', message: `No function called '${token}'.` };
 }
@@ -189,14 +190,22 @@ function select(available) {
 
 /** Ask in words: the list, then a question, until an answer names a function. */
 async function prompt(available) {
-    for (const line of menuLines(available)) console.log(line);
+    let offered = available;
+    for (const line of menuLines(offered)) console.log(line);
     console.log('');
 
     for (;;) {
         const answer = await ask('Choose a function by name, or q to quit: ');
         if (answer === null) return { status: 'cancelled' };
 
-        const choice = choose(answer, available);
+        const choice = choose(answer, offered);
+        if (choice.status === 'ambiguous') {
+            // Narrow the list to what the answer still matches, and ask again.
+            offered = choice.matches;
+            for (const line of menuLines(offered)) console.log(line);
+            console.log('');
+            continue;
+        }
         if (choice.status === 'invalid') {
             console.log(choice.message);
             continue;
@@ -206,16 +215,16 @@ async function prompt(available) {
 }
 
 /**
- * Show the function list and let the user pick one.
+ * Show the function list — or just the entries given, such as the names a
+ * prefix left undecided — and let the user pick one.
  *
  * @returns {Promise<{status: 'ok', fn: object} | {status: 'cancelled'}
  *          | {status: 'empty'} | {status: 'no-tty'}>}
  */
-async function pick() {
+async function pick(available = functions.runnable()) {
     // Without a terminal there is nobody to ask; the caller says so and exits.
     if (!process.stdin.isTTY) return { status: 'no-tty' };
 
-    const available = functions.runnable();
     if (available.length === 0) return { status: 'empty' };
 
     // The live list repaints itself by moving the cursor back up over its own

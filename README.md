@@ -290,8 +290,14 @@ the function itself — `gift run repo --once`.
 
 `gift run` also picks up the scripts in a `.gift/` folder in the current
 directory and lists them first, named after the file: `.gift/build.sh` (or
-`.gift/build.bat` on Windows, or `.gift/build.js` anywhere) is `gift run build`.
-A project script shadows a function of the same name.
+`.gift/build.bat` on Windows, or `.gift/build.js` anywhere) is `gift run build`,
+or just `gift build`. A project script shadows a function of the same name; a
+built-in such as `list` or `run` still wins over a script of that name with
+plain `gift`, so reach that script with `gift run list`.
+
+When the name or prefix you type matches more than one entry — `gift b` with
+both `.gift/build.sh` and `.gift/bump.sh` — a menu of just those comes up to
+choose from.
 
 ```
 > build
