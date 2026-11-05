@@ -2,13 +2,13 @@
 //
 // Usage: gift <function> [args...]
 //
-// <function> is a script in the current folder's .gift/, the name of a folder
+// <function> is a script in the current folder's .gift/ or in ~/.gift, the name of a folder
 // in functions/ — or a built-in command such as `serve`, `create`, `delete` and
 // `log` — or a prefix of any of them. `gift pull` runs pull-repos, `gift se`
 // runs serve, `gift build` runs .gift/build.sh. A prefix that matches more than
 // one name brings up a menu of just those. Everything after the name is
 // forwarded to its entry script untouched. `gift run` asks instead: it prints
-// the function list, with the scripts in .gift/ on top, and runs whichever one
+// the function list, with the scripts in .gift/ and ~/.gift on top, and runs whichever one
 // is picked — or takes the answer from the command line, as `gift run build`
 // does.
 'use strict';
@@ -84,10 +84,10 @@ function printHelp() {
     const names = [...available.map((f) => f.name), ...Object.keys(BUILTINS)];
     const width = Math.max(...names.map((n) => n.length), 0);
 
-    console.log('usage: gift <function> [args...]   (a .gift/ script, a function, or a prefix)');
+    console.log('usage: gift <function> [args...]   (a .gift/ or ~/.gift script, a function, or a prefix)');
     console.log('       gift list             List configured hooks.');
     console.log('       gift create           Add a hook — GitHub, clipboard, website or file.');
-    console.log('       gift run [name]       Pick a helper function or .gift/ script, or say which.');
+    console.log('       gift run [name]       Pick a function or .gift/ script, or say which.');
     console.log('       gift -h | --help      Show this help.');
     console.log('       gift -v | --version   Show the installed version.');
     console.log('');
@@ -144,9 +144,10 @@ function resolved(entry) {
 
 /**
  * Resolve a token typed by the user. Built-ins, the current folder's .gift/
- * scripts and the function folders share one namespace: an exact name wins —
- * a built-in first, so `gift run` and `gift help` always mean themselves, then
- * a .gift/ script, which shadows a function of the same name — otherwise any
+ * scripts, those in ~/.gift and the function folders share one namespace: an
+ * exact name wins — a built-in first, so `gift run` and `gift help` always mean
+ * themselves, then a .gift/ script, then a ~/.gift one, then a function —
+ * otherwise any
  * unique prefix of any of them does.
  *
  * @returns {{status: 'ok', fn: object} | {status: 'ok', builtin: string}
@@ -163,7 +164,7 @@ function resolveToken(token) {
     // No exact name, so gather the prefix matches from every namespace before
     // deciding. They have to be counted together: `r` starts the function
     // repo-master *and* the built-in run, and is unique in neither. The order
-    // is the menu's: .gift/ scripts, then functions, then built-ins.
+    // is the menu's: .gift/ scripts, ~/.gift scripts, functions, built-ins.
     const all = [
         ...available.filter((f) => f.name.startsWith(token)),
         ...Object.keys(BUILTINS)
@@ -275,7 +276,7 @@ function fromArguments(args, available) {
 async function runPicked(args) {
     const available = functions.runnable();
     if (available.length === 0) {
-        console.error('gift: no functions found in functions/ or .gift/');
+        console.error('gift: no functions found in functions/, .gift/ or ~/.gift');
         return 1;
     }
 

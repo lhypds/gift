@@ -3,6 +3,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = __dirname;
@@ -119,9 +120,9 @@ const LOCAL_DIR = '.gift';
  */
 const LOCAL_EXTENSIONS = process.platform === 'win32' ? ['.bat', '.cmd', '.js'] : ['.sh', '.js'];
 
-/** The scripts in `<cwd>/.gift`, one per name, by name. */
-function local(cwd = process.cwd()) {
-    const dir = path.join(cwd, LOCAL_DIR);
+/** The scripts in `<base>/.gift`, one per name, by name. */
+function local(base = process.cwd()) {
+    const dir = path.join(base, LOCAL_DIR);
     let entries;
     try {
         entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -145,14 +146,42 @@ function local(cwd = process.cwd()) {
     return [...byName.values()].map((held) => held.fn).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/**
- * What `gift run` offers: the current folder's .gift scripts first, then the
- * function folders. A project script shadows a function of the same name.
- */
-function runnable(cwd = process.cwd()) {
-    const mine = local(cwd);
-    const taken = new Set(mine.map((fn) => fn.name));
-    return [...mine, ...list().filter((fn) => !taken.has(fn.name))];
+/** Two paths that name the same folder, symlinks resolved. */
+function sameDir(a, b) {
+    try {
+        return fs.realpathSync(a) === fs.realpathSync(b);
+    } catch {
+        return path.resolve(a) === path.resolve(b);
+    }
 }
 
-module.exports = { ROOT, list, local, runnable };
+/**
+ * The scripts in `~/.gift`, available from every folder. Nothing when the
+ * current folder is home itself (they are already the local ones), and nothing
+ * when ~/.gift is where gift is installed: that folder holds gift's own
+ * setup.sh, start.sh and the like, not scripts of the user's.
+ */
+function home(cwd = process.cwd()) {
+    const base = os.homedir();
+    if (sameDir(base, cwd)) return [];
+    if (sameDir(path.join(base, LOCAL_DIR), ROOT)) return [];
+    return local(base);
+}
+
+/**
+ * What `gift run` offers: the current folder's .gift scripts first, then those
+ * in ~/.gift, then the function folders. An earlier one shadows a later one of
+ * the same name.
+ */
+function runnable(cwd = process.cwd()) {
+    const found = [];
+    const taken = new Set();
+    for (const fn of [...local(cwd), ...home(cwd), ...list()]) {
+        if (taken.has(fn.name)) continue;
+        taken.add(fn.name);
+        found.push(fn);
+    }
+    return found;
+}
+
+module.exports = { ROOT, list, local, home, runnable };
