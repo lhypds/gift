@@ -74,7 +74,7 @@ Keys:
   n                new branch            m       merge a branch in
   r                rebase onto a branch  D       delete the folder
   t then a         add a worktree        R       refresh now
-  esc              clear                 q       quit
+  esc              clear                 :q      quit
 
 Every one of those keys runs a command the enter menu also holds a row for, on
 the repositories picked with space — or the row under the cursor when none are.
@@ -310,6 +310,8 @@ async function main(argv) {
         // of them the table draws and the cursor may reach.
         filter: '',
         search: null,
+        // The line a `:` opened, while it is being typed. Quitting lives there.
+        command: null,
         actions: usageLib.sort(actionsLib.actions(process.env)),
         notes: { ignored: ignoredNote(scanned.ignored), watch: '' },
         message: '',
@@ -1340,6 +1342,47 @@ async function main(argv) {
     };
 
     /**
+     * Quitting is `:q` and enter, as it is in vim, and not a bare q. One letter
+     * was too little to ask for the one key that takes the whole table away: q
+     * closes every box, so the q pressed once too often on the way out of one
+     * landed on the table and ended it. The line is typed along the bottom, the
+     * way a search is.
+     */
+    const openCommand = () => {
+        state.mode = 'command';
+        state.command = { value: '', column: 0 };
+        say('');
+        draw();
+    };
+
+    const onCommandKey = (key) => {
+        const field = state.command;
+        const close = () => {
+            state.mode = 'table';
+            state.command = null;
+        };
+        // Backspace on an empty line takes the colon back too, as vim's does.
+        const emptied = field && field.value === '' && (key === '\x7f' || key === '\b');
+        if (!field || key === 'escape' || emptied) {
+            close();
+            draw();
+            return;
+        }
+        if (key === 'enter') {
+            const value = field.value.trim();
+            close();
+            if (['q', 'q!', 'quit'].includes(value)) {
+                finish(0);
+                return;
+            }
+            if (value) say(`not a command: :${value} — :q quits`);
+            draw();
+            return;
+        }
+        if (typed(field, key)) draw();
+    };
+
+    /**
      * `t` is not a command but the way to the ones about worktrees: press it and
      * a box says which letter does what. There is one of them today, and the box
      * is where the next will go.
@@ -1504,10 +1547,20 @@ async function main(argv) {
             onWorktreeKey(key);
             return;
         }
+        if (state.mode === 'command') {
+            onCommandKey(key);
+            return;
+        }
 
         switch (key) {
+            case ':':
+                openCommand();
+                return;
+            // A bare q no longer quits — it was too easy to press by accident —
+            // but it is still what a hand reaches for, so it says what does.
             case 'q':
-                finish(0);
+                say(':q to quit');
+                draw();
                 return;
             case 'up':
             case 'k':

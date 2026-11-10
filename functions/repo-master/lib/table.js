@@ -691,6 +691,13 @@ function frame(state, palette, size) {
         // character the caret stands on wears reversed video, as it does in a box.
         const caret = palette.enabled ? palette.caret(rest[0] || ' ') : rest[0] || '_';
         tail.push(fit(`${before}${caret}${rest.slice(1)}${palette.dim('   enter keep · esc clear')}`));
+    } else if (state.mode === 'command' && state.command) {
+        // The same line, for the same reason, when a `:` opened it.
+        const field = state.command;
+        const before = `:${field.value.slice(0, field.column)}`;
+        const rest = field.value.slice(field.column);
+        const caret = palette.enabled ? palette.caret(rest[0] || ' ') : rest[0] || '_';
+        tail.push(fit(`${before}${caret}${rest.slice(1)}${palette.dim('   :q quit · esc back')}`));
     } else if (state.interactive) {
         tail.push(
             palette.dim(
@@ -702,7 +709,7 @@ function frame(state, palette, size) {
                         '/ search',
                         state.filter ? 'esc clear search' : 'esc clear',
                         'R refresh',
-                        'q quit',
+                        ':q quit',
                     ],
                     tableWidth,
                 ),

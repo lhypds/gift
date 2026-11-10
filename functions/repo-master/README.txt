@@ -36,7 +36,7 @@ watching ~/projects · 12 repos · 3 changed · 1 unpushed · 2 open PRs
     +- gcc3/content-hub  ./gcc3/public/notes  main  has changes  just now      +3
 ---------------------------------------------------------------------------------------------------------
 
-up/down move · space select · enter menu · / search · esc clear · R refresh · q quit
+up/down move · space select · enter menu · / search · esc clear · R refresh · :q quit
 ```
 
 The foot is the table's own keys and nothing else. Every command's key is printed
@@ -145,7 +145,7 @@ Keys
 | /                | Search: narrow the table to the repositories matching what you type                                           |
 | esc              | Clear the search, then the selection — or close whichever box is open                                         |
 | R                | Rescan and refresh everything now                                                                             |
-| q, Ctrl-C        | Quit                                                                                                          |
+| :q enter, Ctrl-C | Quit — a bare q only says so, being too easy to press by accident                                             |
 | mouse wheel      | Move the cursor through the table and the menu, and scroll the diff and the reports                           |
 | click            | Enter — except in the delete and discard boxes, which the keyboard alone answers                              |
 
